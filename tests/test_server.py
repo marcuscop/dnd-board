@@ -360,6 +360,24 @@ def test_dm_can_update_and_save_fog_state(tmp_path, monkeypatch) -> None:
     assert state["fog"]["revealedAreas"] == [{"x": 222, "y": 333, "radius": 90}]
 
 
+def test_reveal_fog_skips_redundant_nearby_points() -> None:
+    room = server.get_or_create_room("fog-dedupe-test")
+    dm_socket = FakeSocket()
+    dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
+    room.players[dm.id] = dm
+    room.fog.hideMode = True
+
+    asyncio.run(server.reveal_fog(room, dm, {"x": 100, "y": 100, "radius": 80}))
+    asyncio.run(server.reveal_fog(room, dm, {"x": 104, "y": 104, "radius": 80}))
+    asyncio.run(server.reveal_fog(room, dm, {"x": 140, "y": 100, "radius": 80}))
+
+    assert room.fog.revealedAreas == [
+        server.RevealedArea(x=100, y=100, radius=80),
+        server.RevealedArea(x=140, y=100, radius=80),
+    ]
+    assert [message["type"] for message in dm_socket.messages] == ["fog_updated", "fog_updated"]
+
+
 def test_only_dm_can_switch_boards() -> None:
     client = TestClient(server.app)
 

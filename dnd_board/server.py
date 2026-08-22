@@ -33,6 +33,8 @@ MAX_AVATAR_PIXELS = 16_000_000
 MIN_TOKEN_RADIUS = 8
 MAX_TOKEN_RADIUS = 480
 DEFAULT_TOKEN_RADIUS = 70
+MIN_REVEAL_POINT_DISTANCE = 8
+REVEAL_POINT_DISTANCE_RATIO = 0.22
 
 register_heif_opener()
 Image.MAX_IMAGE_PIXELS = MAX_AVATAR_PIXELS
@@ -434,8 +436,23 @@ async def reveal_fog(room: Room, player: Player, message: dict[str, Any]) -> Non
         y=clamp(to_float(message.get("y")), 0, board.height),
         radius=clamp(to_float(message.get("radius", room.fog.brushSize)), 20, 360),
     )
+    if is_redundant_reveal_area(room.fog.revealedAreas, area):
+        return
+
     room.fog.revealedAreas.append(area)
     await broadcast(room, {"type": "fog_updated", "fog": fog_to_dict(room.fog)})
+
+
+def is_redundant_reveal_area(revealed_areas: list[RevealedArea], area: RevealedArea) -> bool:
+    if not revealed_areas:
+        return False
+
+    previous = revealed_areas[-1]
+    if abs(previous.radius - area.radius) > 0.001:
+        return False
+
+    min_distance = max(MIN_REVEAL_POINT_DISTANCE, area.radius * REVEAL_POINT_DISTANCE_RATIO)
+    return ((previous.x - area.x) ** 2 + (previous.y - area.y) ** 2) ** 0.5 < min_distance
 
 
 async def set_board(room: Room, player: Player, board_id: str) -> None:

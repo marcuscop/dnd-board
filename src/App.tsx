@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MutableRefObject } from "react";
 import type { Asset, Board, FogState, PlayerSummary, ServerMessage, Token } from "./types";
 
 const DEFAULT_BOARD_WIDTH = 1200;
 const DEFAULT_BOARD_HEIGHT = 720;
 const MOVE_FPS = 12;
+const FOG_PAINT_FPS = 16;
+const FOG_MIN_POINT_DISTANCE = 8;
 const MIN_TOKEN_RADIUS = 8;
 const MAX_TOKEN_RADIUS = 480;
 const WS_URL = import.meta.env.VITE_WS_URL ?? getDefaultWebSocketUrl();
@@ -33,14 +35,21 @@ type DragGhost = {
   clientX: number;
   clientY: number;
 };
+type FogMaskCache = {
+  canvas: HTMLCanvasElement;
+  renderedCount: number;
+  signature: string;
+};
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const imagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const boardImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const fogMaskRef = useRef<FogMaskCache | null>(null);
   const canvasHoverRef = useRef<BrushPreview | null>(null);
   const dragRef = useRef<{ tokenId: string; lastSentAt: number } | null>(null);
+  const fogPaintRef = useRef<{ lastSentAt: number; lastX: number; lastY: number; radius: number } | null>(null);
   const pendingTokenRadiiRef = useRef<Map<string, number>>(new Map());
   const pendingResizeRequestsRef = useRef<Set<Promise<void>>>(new Set());
   const [players, setPlayers] = useState<PlayerSummary[]>([]);
@@ -187,6 +196,7 @@ export function App() {
       revealToolEnabled ? brushPreview : null,
       board,
       boardImagesRef.current,
+      fogMaskRef,
       boardSize
     );
   }, [tokens, dragPreview, fog, brushPreview, revealToolEnabled, board, boardSize]);
@@ -207,6 +217,7 @@ export function App() {
           revealToolEnabled ? brushPreview : null,
           board,
           boardImagesRef.current,
+          fogMaskRef,
           boardSize
         );
       image.src = token.avatarUrl;
@@ -229,6 +240,7 @@ export function App() {
         revealToolEnabled ? brushPreview : null,
         board,
         boardImagesRef.current,
+        fogMaskRef,
         boardSize
       );
     image.src = board.url;
@@ -242,6 +254,22 @@ export function App() {
     }
   }, []);
 
+  const sendRevealPoint = useCallback(
+    (point: BrushPreview, force = false) => {
+      const now = performance.now();
+      const last = fogPaintRef.current;
+      const minDistance = Math.max(FOG_MIN_POINT_DISTANCE, fog.brushSize * 0.22);
+      const farEnough = !last || Math.hypot(point.x - last.lastX, point.y - last.lastY) >= minDistance || last.radius !== fog.brushSize;
+      const lateEnough = !last || now - last.lastSentAt >= 1000 / FOG_PAINT_FPS;
+
+      if (!force && (!farEnough || !lateEnough)) return;
+
+      fogPaintRef.current = { lastSentAt: now, lastX: point.x, lastY: point.y, radius: fog.brushSize };
+      send({ type: "reveal_fog", x: point.x, y: point.y, radius: fog.brushSize });
+    },
+    [fog.brushSize, send]
+  );
+
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
       const point = canvasPoint(event, boardSize);
@@ -249,7 +277,8 @@ export function App() {
         event.currentTarget.setPointerCapture(event.pointerId);
         setBrushPreview(point);
         setIsPaintingFog(true);
-        send({ type: "reveal_fog", x: point.x, y: point.y, radius: fog.brushSize });
+        fogPaintRef.current = null;
+        sendRevealPoint(point, true);
         return;
       }
 
@@ -261,7 +290,7 @@ export function App() {
       setDragPreview({ tokenId: token.id, x: point.x, y: point.y, overBoard: true });
       send(requestTokenLockMessage(token.id, tokens, pendingTokenRadiiRef.current));
     },
-    [boardSize, fog.brushSize, fog.hideMode, revealToolEnabled, send, tokens]
+    [boardSize, fog.hideMode, revealToolEnabled, send, sendRevealPoint, tokens]
   );
 
   const handlePointerMove = useCallback(
@@ -276,7 +305,7 @@ export function App() {
 
       if (IS_DM && isPaintingFog) {
         if (overBoard) {
-          send({ type: "reveal_fog", x: point.x, y: point.y, radius: fog.brushSize });
+          sendRevealPoint(point);
         }
         return;
       }
@@ -291,13 +320,17 @@ export function App() {
       if (!overBoard) return;
       send(moveTokenMessage(drag.tokenId, point.x, point.y, tokens, pendingTokenRadiiRef.current));
     },
-    [boardSize, fog.brushSize, fog.hideMode, isPaintingFog, revealToolEnabled, send, tokens]
+    [boardSize, fog.hideMode, isPaintingFog, revealToolEnabled, send, sendRevealPoint, tokens]
   );
 
   const finishDrag = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
       const drag = dragRef.current;
       if (IS_DM && isPaintingFog) {
+        if (isPointInsideCanvas(event)) {
+          sendRevealPoint(canvasPoint(event, boardSize), true);
+        }
+        fogPaintRef.current = null;
         setIsPaintingFog(false);
         return;
       }
@@ -316,7 +349,7 @@ export function App() {
       setDragPreview(null);
       setDragGhost(null);
     },
-    [boardSize, isPaintingFog, send, tokens]
+    [boardSize, isPaintingFog, send, sendRevealPoint, tokens]
   );
 
   const handleSidebarPointerDown = useCallback(
@@ -778,6 +811,7 @@ function drawBoard(
   brushPreview: BrushPreview | null,
   board: Board,
   boardImages: Map<string, HTMLImageElement>,
+  fogMaskRef: MutableRefObject<FogMaskCache | null>,
   boardSize: BoardSize
 ) {
   if (!canvas) return;
@@ -831,7 +865,7 @@ function drawBoard(
     }
   }
 
-  drawFog(ctx, fog, boardSize);
+  drawFog(ctx, fog, boardSize, fogMaskRef);
   drawBrushPreview(ctx, fog, brushPreview);
 }
 
@@ -847,31 +881,63 @@ function drawBoardBackground(ctx: CanvasRenderingContext2D, board: Board, boardI
   ctx.drawImage(image, 0, 0, boardSize.width, boardSize.height);
 }
 
-function drawFog(ctx: CanvasRenderingContext2D, fog: FogState, boardSize: BoardSize) {
-  if (!fog.hideMode) return;
-
-  const mask = document.createElement("canvas");
-  mask.width = boardSize.width;
-  mask.height = boardSize.height;
-  const maskCtx = mask.getContext("2d");
-  if (!maskCtx) return;
-
-  maskCtx.fillStyle = IS_DM ? "rgba(5, 5, 5, 0.68)" : "#050505";
-  maskCtx.fillRect(0, 0, boardSize.width, boardSize.height);
-  maskCtx.globalCompositeOperation = "destination-out";
-
-  for (const area of fog.revealedAreas) {
-    const gradient = maskCtx.createRadialGradient(area.x, area.y, 0, area.x, area.y, area.radius);
-    gradient.addColorStop(0, "rgba(0, 0, 0, 1)");
-    gradient.addColorStop(0.72, "rgba(0, 0, 0, 1)");
-    gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
-    maskCtx.fillStyle = gradient;
-    maskCtx.beginPath();
-    maskCtx.arc(area.x, area.y, area.radius, 0, Math.PI * 2);
-    maskCtx.fill();
+function drawFog(ctx: CanvasRenderingContext2D, fog: FogState, boardSize: BoardSize, fogMaskRef: MutableRefObject<FogMaskCache | null>) {
+  if (!fog.hideMode) {
+    fogMaskRef.current = null;
+    return;
   }
 
-  ctx.drawImage(mask, 0, 0);
+  const signature = fogMaskSignature(fog, boardSize);
+  const needsFullRebuild =
+    !fogMaskRef.current ||
+    fogMaskRef.current.canvas.width !== boardSize.width ||
+    fogMaskRef.current.canvas.height !== boardSize.height ||
+    fogMaskRef.current.renderedCount > fog.revealedAreas.length ||
+    (fogMaskRef.current.renderedCount === fog.revealedAreas.length && fogMaskRef.current.signature !== signature);
+
+  if (needsFullRebuild) {
+    const mask = document.createElement("canvas");
+    mask.width = boardSize.width;
+    mask.height = boardSize.height;
+    const maskCtx = mask.getContext("2d");
+    if (!maskCtx) return;
+
+    maskCtx.fillStyle = IS_DM ? "rgba(5, 5, 5, 0.68)" : "#050505";
+    maskCtx.fillRect(0, 0, boardSize.width, boardSize.height);
+    fogMaskRef.current = { canvas: mask, renderedCount: 0, signature };
+  }
+
+  const cache = fogMaskRef.current;
+  if (!cache) return;
+
+  const maskCtx = cache.canvas.getContext("2d");
+  if (!maskCtx) return;
+
+  maskCtx.globalCompositeOperation = "destination-out";
+  for (const area of fog.revealedAreas.slice(cache.renderedCount)) {
+    drawFogRevealArea(maskCtx, area);
+  }
+  maskCtx.globalCompositeOperation = "source-over";
+  cache.renderedCount = fog.revealedAreas.length;
+  cache.signature = signature;
+
+  ctx.drawImage(cache.canvas, 0, 0);
+}
+
+function drawFogRevealArea(ctx: CanvasRenderingContext2D, area: { x: number; y: number; radius: number }) {
+  const gradient = ctx.createRadialGradient(area.x, area.y, 0, area.x, area.y, area.radius);
+  gradient.addColorStop(0, "rgba(0, 0, 0, 1)");
+  gradient.addColorStop(0.72, "rgba(0, 0, 0, 1)");
+  gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(area.x, area.y, area.radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function fogMaskSignature(fog: FogState, boardSize: BoardSize) {
+  const last = fog.revealedAreas.at(-1);
+  return [boardSize.width, boardSize.height, IS_DM ? "dm" : "player", fog.revealedAreas.length, last?.x, last?.y, last?.radius].join(":");
 }
 
 function drawBrushPreview(ctx: CanvasRenderingContext2D, fog: FogState, brushPreview: BrushPreview | null) {
