@@ -1,0 +1,30 @@
+[project]
+name = "dnd-board"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Marc Reardon"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi (>=0.141.1,<0.142.0)",
+    "uvicorn[standard] (>=0.52.4,<0.53.0)",
+    "python-multipart (>=0.0.32,<0.0.33)",
+    "pillow (>=12.3.0,<13.0.0)",
+    "pillow-heif (>=1.5.0,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)",
+    "httpx2 (>=2.12.0,<3.0.0)"
+]
