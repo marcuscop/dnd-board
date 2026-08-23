@@ -49,19 +49,19 @@ Open the Vite URL, usually `http://localhost:5173`.
 
 Player identity is selected through the URL for now:
 
-- `?player=1`
-- `?player=2`
-- `?player=3`
-- `?player=4`
+- `?player=Marina`
+- `?player=Edward`
+- `?player=Hal`
+- `?player=Valarie`
 
-The room still defaults to `table`, or you can provide one with `?room=test-party`.
+The campaign defaults to `test-campaign`, or you can provide one with `?campaign=test-campaign`.
 DM mode is selected with `?dm=1` or `?player=dm`.
 
 To test local multiplayer with two windows:
 
 1. Open `http://localhost:5173` in two browser windows.
-2. Change one URL to `http://localhost:5173/?room=test-party&player=1`.
-3. Change the other URL to `http://localhost:5173/?room=test-party&player=2`.
+2. Change one URL to `http://localhost:5173/?campaign=test-campaign&player=Marina`.
+3. Change the other URL to `http://localhost:5173/?campaign=test-campaign&player=Edward`.
 4. Drag Player 1 from the Party list onto the board in the player 1 window.
 5. Confirm the player 2 window sees Player 1 move but cannot drag Player 1.
 6. Drag Player 2 onto the board from the player 2 window.
@@ -74,10 +74,10 @@ To test with four windows:
 3. Open these four URLs:
 
 ```text
-http://localhost:5173/?room=test-party&player=1
-http://localhost:5173/?room=test-party&player=2
-http://localhost:5173/?room=test-party&player=3
-http://localhost:5173/?room=test-party&player=4
+http://localhost:5173/?campaign=test-campaign&player=Marina
+http://localhost:5173/?campaign=test-campaign&player=Edward
+http://localhost:5173/?campaign=test-campaign&player=Hal
+http://localhost:5173/?campaign=test-campaign&player=Valarie
 ```
 
 4. Drag each player’s own character from the Party list onto the board.
@@ -85,13 +85,31 @@ http://localhost:5173/?room=test-party&player=4
 6. Try to grab another player’s character; it should not move.
 7. Drag a character off the board from its owner window to remove it from the scene.
 
-## Character Avatars
+## Static Party
 
-Each player can upload an image avatar for their own character from the Party list. The backend accepts common raster image formats, including PNG, JPEG, WebP, GIF, BMP, TIFF, and HEIC/HEIF when supported by the installed decoder, then normalizes the stored avatar to PNG. The uploaded avatar appears in the sidebar and on the board for everyone in the room.
+Party characters are loaded from static campaign files at startup. For the test campaign, put party images in:
 
-For local development, uploads are saved under `data/uploads/` and served by FastAPI at `/uploads/...`. That directory is ignored by git.
+```text
+campaigns/test-campaign/party/
+```
 
-This local upload storage is good enough for development, but it is not the final deployment storage plan. Before hosting real games, move uploaded avatars to persistent object storage such as Supabase Storage or Cloudflare R2 and keep the same `avatarUrl` behavior in the app.
+The party manifest is:
+
+```text
+campaigns/test-campaign/party/party.json
+```
+
+Each manifest entry maps a fixed player slot to a display name, image file, and token color:
+
+```json
+{
+  "members": [
+    { "id": "player-1", "name": "Player 1", "image": "ex1.png", "color": "#2563eb" }
+  ]
+}
+```
+
+This keeps party assets deployment-friendly: update files in git, redeploy, and the sidebar uses the new static party. Saved room state preserves character scene placement and token size, but character name/color/avatar come from the current party manifest.
 
 For a cleaner four-player test, use separate browser profiles or one normal window plus private/incognito windows.
 
@@ -103,31 +121,30 @@ Legacy files in the top-level `boards/` folder are still used as a fallback if t
 
 To test board switching:
 
-1. Open `http://localhost:5173/?room=test-party&dm=1`.
+1. Open `http://localhost:5173/?campaign=test-campaign&dm=1`.
 2. Change **Board** from `Green Field` to `Phandalin`.
 3. Open a player window for the same room.
 4. Confirm the player sees the same board background.
 
-## NPCs, Monsters, And Beasts
+## NPCs And Monsters
 
-The DM view has an **Asset** selector and **Add** button. Campaign assets are loaded from:
+The DM view has an **Asset** selector and **Add** button. Actor assets are shared across all campaigns and loaded from:
 
 ```text
-campaigns/test-campaign/npcs/
-campaigns/test-campaign/monsters/
-campaigns/test-campaign/beasts/
+shared/npcs/
+shared/monsters/
 ```
 
-Legacy files in the top-level `npcs/`, `monsters/`, and `beasts/` folders are still used as fallbacks if those folders exist, but new assets should go under the campaign folder. Once the asset files you need have been copied into the campaign folders, the top-level NPC/monster/beast folders are optional.
+Legacy files in the top-level `npcs/` and `monsters/` folders are still used as fallbacks if those folders exist, but new actor assets should go under `shared/`. Beasts are treated as monsters for now, so put beast images in `shared/monsters/`.
 
-To test loading an NPC, monster, or beast:
+To test loading an NPC or monster:
 
-1. Open `http://localhost:5173/?room=test-party&dm=1`.
-2. Pick an NPC, monster, or beast from **Asset**.
+1. Open `http://localhost:5173/?campaign=test-campaign&dm=1`.
+2. Search for and pick an NPC or monster from **Asset**.
 3. Click **Add**.
 4. The token should appear in the scene and sync to player windows.
-5. Loaded NPCs, monsters, and beasts appear in their own sidebar sections.
-6. The DM can delete loaded NPC/monster/beast tokens with the `X` button. Party characters cannot be deleted.
+5. Loaded NPCs and monsters appear in their own sidebar sections.
+6. The DM can delete loaded NPC/monster tokens with the `X` button. Party characters cannot be deleted.
 7. The DM can use each token's **Size** slider to resize it independently.
 
 ## Scene Controls
@@ -139,15 +156,19 @@ The DM view has a **Clear Scene** button. It removes every token from the board 
 The active campaign is currently hardcoded to `test-campaign`. Its folder layout is:
 
 ```text
+shared/
+  npcs/
+  monsters/
 campaigns/
   test-campaign/
     campaign.json
     boards/
-    npcs/
-    monsters/
-    beasts/
+    party/
+      party.json
     saves/
 ```
+
+`shared/npcs/` and `shared/monsters/` are global actor libraries. Actors in these folders are available to every campaign. Campaign folders own campaign-specific boards, party members, and runtime save state.
 
 Runtime save files are written to `campaigns/test-campaign/saves/`, and that path is ignored by git. Keep reusable campaign assets in the asset folders; keep generated/current game state out of git.
 
@@ -158,10 +179,10 @@ The top-level `backgrounds/` folder is separate from campaign board assets. It c
 Open the DM view at:
 
 ```text
-http://localhost:5173/?room=test-party&dm=1
+http://localhost:5173/?campaign=test-campaign&dm=1
 ```
 
-The DM view has **Save** and **Load** buttons. **Save** writes the current room state to `campaigns/test-campaign/saves/test-party.json`, including selected board, character positions, token sizes, scene membership, colors, owners, and avatar URLs. **Load** restores that saved state immediately and broadcasts it to everyone in the room. Local save files are ignored by git.
+The DM view has **Save** and **Load** buttons. **Save** writes the current room state to `campaigns/test-campaign/saves/test-campaign.json`, including selected board, character positions, token sizes, scene membership, loaded NPC/monster tokens, and fog state. Static party metadata is loaded from `party.json`. **Load** restores the saved state immediately and broadcasts it to everyone in the room. Local save files are ignored by git.
 It also saves fog-of-war state: whether hide mode is enabled, the brush size, and all revealed areas.
 
 Saved state also auto-loads when a room is created, such as after restarting the backend or after everyone leaves and rejoins the room. Older local saves under `data/saves/` are still loaded as a fallback if no campaign save exists.
@@ -188,6 +209,48 @@ Run Python backend tests:
 
 ```sh
 poetry run pytest
+```
+
+Generate one test monster image with Black Forest Labs:
+
+```sh
+poetry run python utils/generate_flux_monster_test.py
+```
+
+This reads `BFL_API_KEY` from your environment, or from a local `flux-api` file that is ignored by git. Generated images are saved under `shared/monsters/generated/`.
+
+Generate one local FLUX.2 Klein 4B test image with Diffusers:
+
+```sh
+poetry run python utils/generate_flux2_klein_local.py --prompt "A cat holding a sign that says hello world" --output flux-klein.png
+```
+
+The first run downloads `black-forest-labs/FLUX.2-klein-4B` from Hugging Face. The script auto-selects CUDA, Apple MPS, or CPU; use `--device` to override it. Local generation defaults to `512x512` and enables VAE tiling/slicing to reduce memory pressure. To debug Apple MPS memory use:
+
+```sh
+poetry run python utils/generate_flux2_klein_local.py --device mps --debug-memory --width 512 --height 512
+```
+
+Generate FLUX monster images from the first 50 names in the D&D Beyond name list:
+
+```sh
+poetry run python utils/generate_flux_monsters_batch.py
+```
+
+By default this reads `shared/dndbeyond_monster_names.json`, skips monster PNGs that already exist, and writes generated images into `shared/monsters/`. Use `--start` and `--limit` to process another slice.
+
+Build a D&D Beyond monster name list from the public monster listing pages:
+
+```sh
+poetry run python utils/build_dndbeyond_monster_names.py
+```
+
+By default this reads pages `1` through `179` from `https://www.dndbeyond.com/monsters?page=N` and writes only the monster names to `shared/dndbeyond_monster_names.json`.
+
+You can test against one local HTML fixture instead of hitting the network:
+
+```sh
+poetry run python utils/build_dndbeyond_monster_names.py --source-file path/to/dndbeyond-monsters.html
 ```
 
 Build the frontend:

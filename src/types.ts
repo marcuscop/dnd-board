@@ -1,4 +1,4 @@
-export type TokenKind = "character" | "npc" | "monster" | "beast";
+export type TokenKind = "character" | "npc" | "monster";
 
 export type Token = {
   id: string;
@@ -41,7 +41,7 @@ export type Board = {
 
 export type Asset = {
   id: string;
-  kind: "npc" | "monster" | "beast";
+  kind: "npc" | "monster";
   name: string;
   avatarUrl: string;
 };

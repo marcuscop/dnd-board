@@ -10,8 +10,7 @@ const FOG_MIN_POINT_DISTANCE = 8;
 const MIN_TOKEN_RADIUS = 8;
 const MAX_TOKEN_RADIUS = 480;
 const WS_URL = import.meta.env.VITE_WS_URL ?? getDefaultWebSocketUrl();
-const PLAYER_KEY = getInitialPlayerKey();
-const IS_DM = PLAYER_KEY === "dm";
+const REQUESTED_PLAYER_KEY = getInitialPlayerKey();
 const DEFAULT_FOG: FogState = { hideMode: false, brushSize: 120, revealedAreas: [] };
 const DEFAULT_BOARD: Board = { id: "green", name: "Green Field", width: DEFAULT_BOARD_WIDTH, height: DEFAULT_BOARD_HEIGHT };
 
@@ -63,14 +62,17 @@ export function App() {
   const [boards, setBoards] = useState<Board[]>([DEFAULT_BOARD]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [selectedAssetKey, setSelectedAssetKey] = useState("");
+  const [assetSearch, setAssetSearch] = useState("");
   const [isPaintingFog, setIsPaintingFog] = useState(false);
   const [revealToolEnabled, setRevealToolEnabled] = useState(false);
   const [brushPreview, setBrushPreview] = useState<BrushPreview | null>(null);
   const [dragGhost, setDragGhost] = useState<DragGhost | null>(null);
+  const [playerKey, setPlayerKey] = useState(REQUESTED_PLAYER_KEY);
+  const isDm = playerKey === "dm";
 
   const ownLockedTokenId = useMemo(
-    () => tokens.find((token) => token.lockedBy === PLAYER_KEY)?.id,
-    [tokens]
+    () => tokens.find((token) => token.lockedBy === playerKey)?.id,
+    [playerKey, tokens]
   );
   const boardSize = useMemo(() => getBoardSize(board), [board]);
   const maxTokenRadius = useMemo(() => getMaxTokenRadius(boardSize), [boardSize]);
@@ -85,10 +87,13 @@ export function App() {
   const partyTokens = useMemo(() => tokens.filter((token) => token.kind === "character"), [tokens]);
   const npcTokens = useMemo(() => tokens.filter((token) => token.kind === "npc"), [tokens]);
   const monsterTokens = useMemo(() => tokens.filter((token) => token.kind === "monster"), [tokens]);
-  const beastTokens = useMemo(() => tokens.filter((token) => token.kind === "beast"), [tokens]);
+  const filteredAssets = useMemo(() => filterAssets(assets, assetSearch), [assets, assetSearch]);
+  const visibleSelectedAssetKey = filteredAssets.some((asset) => assetKey(asset) === selectedAssetKey) ? selectedAssetKey : assetKey(filteredAssets[0]);
 
   const applyRoomState = useCallback((message: Extract<ServerMessage, { type: "room_state" }>) => {
-    window.history.replaceState(null, "", `?room=${message.roomId}&player=${PLAYER_KEY}`);
+    const resolvedPlayerKey = resolvePlayerKey(REQUESTED_PLAYER_KEY, message.tokens);
+    setPlayerKey(resolvedPlayerKey);
+    window.history.replaceState(null, "", `?campaign=${message.roomId}&player=${playerUrlValue(resolvedPlayerKey, message.tokens)}`);
     setPlayers(message.players);
     setTokens(message.tokens.map((token) => reconcilePendingTokenRadius(token, pendingTokenRadiiRef.current)));
     setFog(message.fog);
@@ -109,8 +114,8 @@ export function App() {
         JSON.stringify({
           type: "join_room",
           roomId: getInitialRoomId(),
-          playerName: formatPlayerName(PLAYER_KEY),
-          playerKey: PLAYER_KEY
+          playerName: formatPlayerName(REQUESTED_PLAYER_KEY),
+          playerKey: REQUESTED_PLAYER_KEY
         })
       );
     });
@@ -189,7 +194,8 @@ export function App() {
     drawBoard(
       canvasRef.current,
       tokens,
-      PLAYER_KEY,
+      playerKey,
+      isDm,
       dragPreview,
       imagesRef.current,
       fog,
@@ -199,7 +205,7 @@ export function App() {
       fogMaskRef,
       boardSize
     );
-  }, [tokens, dragPreview, fog, brushPreview, revealToolEnabled, board, boardSize]);
+  }, [tokens, playerKey, isDm, dragPreview, fog, brushPreview, revealToolEnabled, board, boardSize]);
 
   useEffect(() => {
     for (const token of tokens) {
@@ -210,7 +216,8 @@ export function App() {
         drawBoard(
           canvasRef.current,
           tokens,
-          PLAYER_KEY,
+          playerKey,
+          isDm,
           dragPreview,
           imagesRef.current,
           fog,
@@ -223,7 +230,7 @@ export function App() {
       image.src = token.avatarUrl;
       imagesRef.current.set(token.avatarUrl, image);
     }
-  }, [board, boardSize, brushPreview, dragPreview, fog, revealToolEnabled, tokens]);
+  }, [board, boardSize, brushPreview, dragPreview, fog, isDm, playerKey, revealToolEnabled, tokens]);
 
   useEffect(() => {
     if (!board.url || boardImagesRef.current.has(board.url)) return;
@@ -233,7 +240,8 @@ export function App() {
       drawBoard(
         canvasRef.current,
         tokens,
-        PLAYER_KEY,
+        playerKey,
+        isDm,
         dragPreview,
         imagesRef.current,
         fog,
@@ -245,7 +253,7 @@ export function App() {
       );
     image.src = board.url;
     boardImagesRef.current.set(board.url, image);
-  }, [board, boardSize, brushPreview, dragPreview, fog, revealToolEnabled, tokens]);
+  }, [board, boardSize, brushPreview, dragPreview, fog, isDm, playerKey, revealToolEnabled, tokens]);
 
   const send = useCallback((message: unknown) => {
     const socket = socketRef.current;
@@ -273,7 +281,7 @@ export function App() {
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
       const point = canvasPoint(event, boardSize);
-      if (IS_DM && fog.hideMode && revealToolEnabled) {
+      if (isDm && fog.hideMode && revealToolEnabled) {
         event.currentTarget.setPointerCapture(event.pointerId);
         setBrushPreview(point);
         setIsPaintingFog(true);
@@ -283,14 +291,14 @@ export function App() {
       }
 
       const token = [...tokens].reverse().find((candidate) => candidate.inScene && hitToken(candidate, point.x, point.y));
-      if (!token || !canControlToken(token) || (token.lockedBy && token.lockedBy !== PLAYER_KEY)) return;
+      if (!token || !canControlToken(token, playerKey, isDm) || (token.lockedBy && token.lockedBy !== playerKey)) return;
 
       event.currentTarget.setPointerCapture(event.pointerId);
       dragRef.current = { tokenId: token.id, lastSentAt: 0 };
       setDragPreview({ tokenId: token.id, x: point.x, y: point.y, overBoard: true });
-      send(requestTokenLockMessage(token.id, tokens, pendingTokenRadiiRef.current));
+      send(requestTokenLockMessage(token.id, tokens, pendingTokenRadiiRef.current, isDm));
     },
-    [boardSize, fog.hideMode, revealToolEnabled, send, sendRevealPoint, tokens]
+    [boardSize, fog.hideMode, isDm, playerKey, revealToolEnabled, send, sendRevealPoint, tokens]
   );
 
   const handlePointerMove = useCallback(
@@ -299,11 +307,11 @@ export function App() {
       const point = canvasPoint(event, boardSize);
       const overBoard = isPointInsideCanvas(event);
       canvasHoverRef.current = overBoard ? point : null;
-      if (IS_DM && fog.hideMode && revealToolEnabled && overBoard) {
+      if (isDm && fog.hideMode && revealToolEnabled && overBoard) {
         setBrushPreview(point);
       }
 
-      if (IS_DM && isPaintingFog) {
+      if (isDm && isPaintingFog) {
         if (overBoard) {
           sendRevealPoint(point);
         }
@@ -318,15 +326,15 @@ export function App() {
       drag.lastSentAt = now;
       setDragPreview({ tokenId: drag.tokenId, x: point.x, y: point.y, overBoard });
       if (!overBoard) return;
-      send(moveTokenMessage(drag.tokenId, point.x, point.y, tokens, pendingTokenRadiiRef.current));
+      send(moveTokenMessage(drag.tokenId, point.x, point.y, tokens, pendingTokenRadiiRef.current, isDm));
     },
-    [boardSize, fog.hideMode, isPaintingFog, revealToolEnabled, send, sendRevealPoint, tokens]
+    [boardSize, fog.hideMode, isDm, isPaintingFog, revealToolEnabled, send, sendRevealPoint, tokens]
   );
 
   const finishDrag = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
       const drag = dragRef.current;
-      if (IS_DM && isPaintingFog) {
+      if (isDm && isPaintingFog) {
         if (isPointInsideCanvas(event)) {
           sendRevealPoint(canvasPoint(event, boardSize), true);
         }
@@ -339,8 +347,8 @@ export function App() {
 
       if (isPointInsideCanvas(event)) {
         const point = canvasPoint(event, boardSize);
-        send(moveTokenMessage(drag.tokenId, point.x, point.y, tokens, pendingTokenRadiiRef.current));
-        send(setTokenSceneMessage(drag.tokenId, true, point.x, point.y, tokens, pendingTokenRadiiRef.current));
+        send(moveTokenMessage(drag.tokenId, point.x, point.y, tokens, pendingTokenRadiiRef.current, isDm));
+        send(setTokenSceneMessage(drag.tokenId, true, point.x, point.y, tokens, pendingTokenRadiiRef.current, isDm));
       } else {
         send({ type: "set_token_scene", tokenId: drag.tokenId, inScene: false });
       }
@@ -349,22 +357,22 @@ export function App() {
       setDragPreview(null);
       setDragGhost(null);
     },
-    [boardSize, isPaintingFog, send, sendRevealPoint, tokens]
+    [boardSize, isDm, isPaintingFog, send, sendRevealPoint, tokens]
   );
 
   const handleSidebarPointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>, token: Token) => {
       event.preventDefault();
       clearTextSelection();
-      if (!canControlToken(token) || (token.lockedBy && token.lockedBy !== PLAYER_KEY)) return;
+      if (!canControlToken(token, playerKey, isDm) || (token.lockedBy && token.lockedBy !== playerKey)) return;
 
       event.currentTarget.setPointerCapture(event.pointerId);
       dragRef.current = { tokenId: token.id, lastSentAt: 0 };
       setDragGhost({ tokenId: token.id, clientX: event.clientX, clientY: event.clientY });
       setDragPreview({ tokenId: token.id, x: token.x, y: token.y, overBoard: false });
-      send(requestTokenLockMessage(token.id, tokens, pendingTokenRadiiRef.current));
+      send(requestTokenLockMessage(token.id, tokens, pendingTokenRadiiRef.current, isDm));
     },
-    [send, tokens]
+    [isDm, playerKey, send, tokens]
   );
 
   const handleSidebarPointerMove = useCallback(
@@ -386,9 +394,9 @@ export function App() {
       }
       const point = clientPointToCanvas(canvas, event.clientX, event.clientY, boardSize);
       setDragPreview({ tokenId: drag.tokenId, x: point.x, y: point.y, overBoard: true });
-      send(moveTokenMessage(drag.tokenId, point.x, point.y, tokens, pendingTokenRadiiRef.current));
+      send(moveTokenMessage(drag.tokenId, point.x, point.y, tokens, pendingTokenRadiiRef.current, isDm));
     },
-    [boardSize, send, tokens]
+    [boardSize, isDm, send, tokens]
   );
 
   const handleSidebarPointerUp = useCallback(
@@ -401,37 +409,15 @@ export function App() {
 
       if (isClientPointInsideCanvas(canvas, event.clientX, event.clientY)) {
         const point = clientPointToCanvas(canvas, event.clientX, event.clientY, boardSize);
-        send(setTokenSceneMessage(drag.tokenId, true, point.x, point.y, tokens, pendingTokenRadiiRef.current));
+        send(setTokenSceneMessage(drag.tokenId, true, point.x, point.y, tokens, pendingTokenRadiiRef.current, isDm));
       }
       send({ type: "release_token", tokenId: drag.tokenId });
       dragRef.current = null;
       setDragPreview(null);
       setDragGhost(null);
     },
-    [boardSize, send, tokens]
+    [boardSize, isDm, send, tokens]
   );
-
-  const uploadAvatar = useCallback(async (token: Token, file: File | undefined) => {
-    if (!file || !canControlToken(token)) return;
-
-    const roomId = getInitialRoomId();
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await fetch(
-      `/api/rooms/${encodeURIComponent(roomId)}/tokens/${encodeURIComponent(token.id)}/avatar?playerKey=${encodeURIComponent(
-        PLAYER_KEY
-      )}`,
-      {
-        method: "POST",
-        body: formData
-      }
-    );
-
-    if (!response.ok) {
-      console.error(await response.text());
-    }
-  }, []);
 
   const waitForPendingResizes = useCallback(async () => {
     while (pendingResizeRequestsRef.current.size > 0) {
@@ -443,24 +429,24 @@ export function App() {
     setSaveStatus("saving");
     await waitForPendingResizes();
     const roomId = getInitialRoomId();
-    const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/save?playerKey=${encodeURIComponent(PLAYER_KEY)}`, {
+    const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/save?playerKey=${encodeURIComponent(playerKey)}`, {
       method: "POST"
     });
 
     setSaveStatus(response.ok ? "saved" : "error");
     window.setTimeout(() => setSaveStatus("idle"), 1800);
-  }, [waitForPendingResizes]);
+  }, [playerKey, waitForPendingResizes]);
 
   const loadRoom = useCallback(async () => {
     setLoadStatus("loading");
     const roomId = getInitialRoomId();
-    const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/load?playerKey=${encodeURIComponent(PLAYER_KEY)}`, {
+    const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/load?playerKey=${encodeURIComponent(playerKey)}`, {
       method: "POST"
     });
 
     setLoadStatus(response.ok ? "loaded" : "error");
     window.setTimeout(() => setLoadStatus("idle"), 1800);
-  }, []);
+  }, [playerKey]);
 
   const setHideMode = useCallback(
     (hideMode: boolean) => {
@@ -488,35 +474,41 @@ export function App() {
   );
 
   const loadSelectedAsset = useCallback(() => {
-    const asset = assets.find((candidate) => assetKey(candidate) === selectedAssetKey);
+    const asset = assets.find((candidate) => assetKey(candidate) === visibleSelectedAssetKey);
     if (!asset) return;
     send({ type: "load_asset", assetKind: asset.kind, assetId: asset.id });
-  }, [assets, selectedAssetKey, send]);
+  }, [assets, visibleSelectedAssetKey, send]);
+
+  useEffect(() => {
+    if (visibleSelectedAssetKey && visibleSelectedAssetKey !== selectedAssetKey) {
+      setSelectedAssetKey(visibleSelectedAssetKey);
+    }
+  }, [selectedAssetKey, visibleSelectedAssetKey]);
 
   const deleteToken = useCallback(
     (token: Token) => {
-      if (!IS_DM || token.kind === "character") return;
+      if (!isDm || token.kind === "character") return;
       send({ type: "delete_token", tokenId: token.id });
     },
-    [send]
+    [isDm, send]
   );
 
   const clearScene = useCallback(() => {
-    if (!IS_DM) return;
+    if (!isDm) return;
     dragRef.current = null;
     setDragPreview(null);
     setDragGhost(null);
     setTokens((current) => current.map((token) => ({ ...token, inScene: false, lockedBy: undefined })));
     send({ type: "clear_scene" });
-  }, [send]);
+  }, [isDm, send]);
 
   const setTokenRadius = useCallback(
     (token: Token, radius: number) => {
-      if (!IS_DM) return;
+      if (!isDm) return;
       const nextRadius = clamp(radius, MIN_TOKEN_RADIUS, maxTokenRadius);
       pendingTokenRadiiRef.current.set(token.id, nextRadius);
       setTokens((current) => current.map((candidate) => (candidate.id === token.id ? { ...candidate, radius: nextRadius } : candidate)));
-      const request = updateTokenRadius(token.id, nextRadius)
+      const request = updateTokenRadius(token.id, nextRadius, playerKey)
         .catch((error: unknown) => {
           console.error(error);
         })
@@ -525,7 +517,7 @@ export function App() {
         });
       pendingResizeRequestsRef.current.add(request);
     },
-    [maxTokenRadius]
+    [isDm, maxTokenRadius, playerKey]
   );
 
   return (
@@ -536,10 +528,10 @@ export function App() {
           <p className="status">
             {connection} · {players.length}/8 connected
           </p>
-          <p className="status">You are {formatPlayerName(PLAYER_KEY)}</p>
+          <p className="status">You are {formatPlayerName(playerKey, tokens)}</p>
         </div>
 
-        {IS_DM && (
+        {isDm && (
           <section className="dm-tools">
             <div className="save-load-actions">
               <button className="save-button" onClick={saveRoom} disabled={saveStatus === "saving"}>
@@ -565,17 +557,23 @@ export function App() {
 
             {assets.length > 0 && (
               <div className="asset-loader">
+                <label className="asset-search">
+                  Search
+                  <input type="search" value={assetSearch} onChange={(event) => setAssetSearch(event.currentTarget.value)} />
+                </label>
                 <label>
                   Asset
-                  <select value={selectedAssetKey} onChange={(event) => setSelectedAssetKey(event.currentTarget.value)}>
-                    {assets.map((asset) => (
+                  <select value={visibleSelectedAssetKey} onChange={(event) => setSelectedAssetKey(event.currentTarget.value)}>
+                    {filteredAssets.map((asset) => (
                       <option key={assetKey(asset)} value={assetKey(asset)}>
                         {asset.kind.toUpperCase()} · {asset.name}
                       </option>
                     ))}
                   </select>
                 </label>
-                <button onClick={loadSelectedAsset}>Add</button>
+                <button onClick={loadSelectedAsset} disabled={!visibleSelectedAssetKey}>
+                  Add
+                </button>
               </div>
             )}
 
@@ -627,7 +625,8 @@ export function App() {
           onPointerUp={handleSidebarPointerUp}
           maxTokenRadius={maxTokenRadius}
           onResizeToken={setTokenRadius}
-          onUploadAvatar={uploadAvatar}
+          isDm={isDm}
+          playerKey={playerKey}
           title="Party"
           tokens={partyTokens}
         />
@@ -641,7 +640,8 @@ export function App() {
             onPointerUp={handleSidebarPointerUp}
             maxTokenRadius={maxTokenRadius}
             onResizeToken={setTokenRadius}
-            onUploadAvatar={uploadAvatar}
+            isDm={isDm}
+            playerKey={playerKey}
             title="NPCs"
             tokens={npcTokens}
           />
@@ -656,24 +656,10 @@ export function App() {
             onPointerUp={handleSidebarPointerUp}
             maxTokenRadius={maxTokenRadius}
             onResizeToken={setTokenRadius}
-            onUploadAvatar={uploadAvatar}
+            isDm={isDm}
+            playerKey={playerKey}
             title="Monsters"
             tokens={monsterTokens}
-          />
-        )}
-
-        {beastTokens.length > 0 && (
-          <TokenSection
-            onDelete={deleteToken}
-            onPointerCancel={handleSidebarPointerUp}
-            onPointerDown={handleSidebarPointerDown}
-            onPointerMove={handleSidebarPointerMove}
-            onPointerUp={handleSidebarPointerUp}
-            maxTokenRadius={maxTokenRadius}
-            onResizeToken={setTokenRadius}
-            onUploadAvatar={uploadAvatar}
-            title="Beasts"
-            tokens={beastTokens}
           />
         )}
 
@@ -694,7 +680,7 @@ export function App() {
           onPointerEnter={(event) => {
             const point = canvasPoint(event, boardSize);
             canvasHoverRef.current = point;
-            if (IS_DM && fog.hideMode && revealToolEnabled) {
+            if (isDm && fog.hideMode && revealToolEnabled) {
               setBrushPreview(point);
             }
           }}
@@ -722,6 +708,7 @@ function DragGhostToken({ token, x, y }: { token: Token | undefined; x: number; 
 type TokenSectionProps = {
   title: string;
   tokens: Token[];
+  isDm: boolean;
   maxTokenRadius: number;
   onDelete: (token: Token) => void;
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
@@ -729,12 +716,13 @@ type TokenSectionProps = {
   onPointerMove: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerUp: (event: React.PointerEvent<HTMLElement>) => void;
   onResizeToken: (token: Token, radius: number) => void;
-  onUploadAvatar: (token: Token, file: File | undefined) => void;
+  playerKey: string;
 };
 
 function TokenSection({
   title,
   tokens,
+  isDm,
   maxTokenRadius,
   onDelete,
   onPointerCancel,
@@ -742,16 +730,16 @@ function TokenSection({
   onPointerMove,
   onPointerUp,
   onResizeToken,
-  onUploadAvatar
+  playerKey
 }: TokenSectionProps) {
   return (
     <section>
       <h2>{title}</h2>
-      <ul className="token-list">
+      <ul className={`token-list ${isDm ? "dm-token-list" : "player-token-list"}`}>
         {tokens.map((token) => (
           <li
             className={[
-              !canControlToken(token) || (token.lockedBy && token.lockedBy !== PLAYER_KEY) ? "locked" : "",
+              !canControlToken(token, playerKey, isDm) || (token.lockedBy && token.lockedBy !== playerKey) ? "locked" : "",
               token.inScene ? "in-scene" : ""
             ]
               .filter(Boolean)
@@ -770,8 +758,10 @@ function TokenSection({
             >
               {token.avatarUrl && <img src={token.avatarUrl} alt="" draggable={false} />}
             </span>
-            <span>{token.name}</span>
-            {IS_DM && (
+            <span className="token-name" title={token.name}>
+              {token.name}
+            </span>
+            {isDm && (
               <label className="token-size-control">
                 <input
                   aria-label={`${token.name} size`}
@@ -783,13 +773,7 @@ function TokenSection({
                 />
               </label>
             )}
-            {token.kind === "character" && canControlToken(token) && (
-              <label className="avatar-upload" onPointerDown={(event) => event.stopPropagation()}>
-                IMG
-                <input accept="image/*" type="file" onChange={(event) => onUploadAvatar(token, event.currentTarget.files?.[0])} />
-              </label>
-            )}
-            {IS_DM && token.kind !== "character" && (
+            {isDm && token.kind !== "character" && (
               <button className="icon-button danger" onClick={() => onDelete(token)} onPointerDown={(event) => event.stopPropagation()}>
                 X
               </button>
@@ -805,6 +789,7 @@ function drawBoard(
   canvas: HTMLCanvasElement | null,
   tokens: Token[],
   playerKey: string,
+  isDm: boolean,
   dragPreview: DragPreview | null,
   images: Map<string, HTMLImageElement>,
   fog: FogState,
@@ -845,7 +830,7 @@ function drawBoard(
     ctx.fill();
     drawTokenAvatar(ctx, token, images);
     ctx.lineWidth = token.lockedBy ? 5 : 3;
-    ctx.strokeStyle = token.lockedBy === playerKey ? "#22c55e" : token.lockedBy ? "#111827" : "#f8fafc";
+    ctx.strokeStyle = "#f8fafc";
     ctx.stroke();
 
     ctx.globalAlpha = 1;
@@ -865,7 +850,7 @@ function drawBoard(
     }
   }
 
-  drawFog(ctx, fog, boardSize, fogMaskRef);
+  drawFog(ctx, fog, boardSize, fogMaskRef, isDm);
   drawBrushPreview(ctx, fog, brushPreview);
 }
 
@@ -881,13 +866,13 @@ function drawBoardBackground(ctx: CanvasRenderingContext2D, board: Board, boardI
   ctx.drawImage(image, 0, 0, boardSize.width, boardSize.height);
 }
 
-function drawFog(ctx: CanvasRenderingContext2D, fog: FogState, boardSize: BoardSize, fogMaskRef: MutableRefObject<FogMaskCache | null>) {
+function drawFog(ctx: CanvasRenderingContext2D, fog: FogState, boardSize: BoardSize, fogMaskRef: MutableRefObject<FogMaskCache | null>, isDm: boolean) {
   if (!fog.hideMode) {
     fogMaskRef.current = null;
     return;
   }
 
-  const signature = fogMaskSignature(fog, boardSize);
+  const signature = fogMaskSignature(fog, boardSize, isDm);
   const needsFullRebuild =
     !fogMaskRef.current ||
     fogMaskRef.current.canvas.width !== boardSize.width ||
@@ -902,7 +887,7 @@ function drawFog(ctx: CanvasRenderingContext2D, fog: FogState, boardSize: BoardS
     const maskCtx = mask.getContext("2d");
     if (!maskCtx) return;
 
-    maskCtx.fillStyle = IS_DM ? "rgba(5, 5, 5, 0.68)" : "#050505";
+    maskCtx.fillStyle = isDm ? "rgba(5, 5, 5, 0.68)" : "#050505";
     maskCtx.fillRect(0, 0, boardSize.width, boardSize.height);
     fogMaskRef.current = { canvas: mask, renderedCount: 0, signature };
   }
@@ -935,9 +920,9 @@ function drawFogRevealArea(ctx: CanvasRenderingContext2D, area: { x: number; y: 
   ctx.fill();
 }
 
-function fogMaskSignature(fog: FogState, boardSize: BoardSize) {
+function fogMaskSignature(fog: FogState, boardSize: BoardSize, isDm: boolean) {
   const last = fog.revealedAreas.at(-1);
-  return [boardSize.width, boardSize.height, IS_DM ? "dm" : "player", fog.revealedAreas.length, last?.x, last?.y, last?.radius].join(":");
+  return [boardSize.width, boardSize.height, isDm ? "dm" : "player", fog.revealedAreas.length, last?.x, last?.y, last?.radius].join(":");
 }
 
 function drawBrushPreview(ctx: CanvasRenderingContext2D, fog: FogState, brushPreview: BrushPreview | null) {
@@ -1053,22 +1038,22 @@ function reconcilePendingTokenRadius(token: Token, pendingRadii: Map<string, num
   return { ...token, radius: pendingRadius };
 }
 
-function requestTokenLockMessage(tokenId: string, tokens: Token[], pendingRadii: Map<string, number>) {
-  return withDmTokenRadius({ type: "request_token_lock", tokenId }, tokenId, tokens, pendingRadii);
+function requestTokenLockMessage(tokenId: string, tokens: Token[], pendingRadii: Map<string, number>, isDm: boolean) {
+  return withDmTokenRadius({ type: "request_token_lock", tokenId }, tokenId, tokens, pendingRadii, isDm);
 }
 
-function moveTokenMessage(tokenId: string, x: number, y: number, tokens: Token[], pendingRadii: Map<string, number>) {
-  return withDmTokenRadius({ type: "move_token", tokenId, x, y }, tokenId, tokens, pendingRadii);
+function moveTokenMessage(tokenId: string, x: number, y: number, tokens: Token[], pendingRadii: Map<string, number>, isDm: boolean) {
+  return withDmTokenRadius({ type: "move_token", tokenId, x, y }, tokenId, tokens, pendingRadii, isDm);
 }
 
-function setTokenSceneMessage(tokenId: string, inScene: boolean, x: number, y: number, tokens: Token[], pendingRadii: Map<string, number>) {
-  return withDmTokenRadius({ type: "set_token_scene", tokenId, inScene, x, y }, tokenId, tokens, pendingRadii);
+function setTokenSceneMessage(tokenId: string, inScene: boolean, x: number, y: number, tokens: Token[], pendingRadii: Map<string, number>, isDm: boolean) {
+  return withDmTokenRadius({ type: "set_token_scene", tokenId, inScene, x, y }, tokenId, tokens, pendingRadii, isDm);
 }
 
-async function updateTokenRadius(tokenId: string, radius: number) {
+async function updateTokenRadius(tokenId: string, radius: number, playerKey: string) {
   const roomId = getInitialRoomId();
   const params = new URLSearchParams({
-    playerKey: PLAYER_KEY,
+    playerKey,
     radius: String(radius)
   });
   const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/tokens/${encodeURIComponent(tokenId)}/radius?${params}`, {
@@ -1080,8 +1065,8 @@ async function updateTokenRadius(tokenId: string, radius: number) {
   }
 }
 
-function withDmTokenRadius<T extends { tokenId: string }>(message: T, tokenId: string, tokens: Token[], pendingRadii: Map<string, number>) {
-  if (!IS_DM) return message;
+function withDmTokenRadius<T extends { tokenId: string }>(message: T, tokenId: string, tokens: Token[], pendingRadii: Map<string, number>, isDm: boolean) {
+  if (!isDm) return message;
 
   const pendingRadius = pendingRadii.get(tokenId);
   if (pendingRadius !== undefined) return { ...message, radius: pendingRadius };
@@ -1113,7 +1098,7 @@ function upsertToken(tokens: Token[], token: Token) {
 
 function getInitialRoomId() {
   const params = new URLSearchParams(window.location.search);
-  return params.get("room") || localStorage.getItem("dnd-board-room") || "table";
+  return params.get("campaign") || params.get("room") || "test-campaign";
 }
 
 function getInitialPlayerName() {
@@ -1129,19 +1114,44 @@ function getInitialPlayerKey() {
   if (player === "dm") return "dm";
   if (player && /^player-[1-4]$/.test(player)) return player;
   if (player && /^[1-4]$/.test(player)) return `player-${player}`;
-  return "player-1";
+  return player || "player-1";
 }
 
-function formatPlayerName(playerKey: string) {
-  return playerKey.replace("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+function resolvePlayerKey(requestedPlayerKey: string, tokens: Token[]) {
+  if (requestedPlayerKey === "dm") return "dm";
+  if (tokens.some((token) => token.owner === requestedPlayerKey)) return requestedPlayerKey;
+
+  const normalized = normalizeIdentity(requestedPlayerKey);
+  const matchingToken = tokens.find((token) => token.kind === "character" && normalizeIdentity(token.name) === normalized);
+  return matchingToken?.owner ?? "player-1";
 }
 
-function canControlToken(token: Token) {
-  return IS_DM || token.owner === PLAYER_KEY;
+function playerUrlValue(playerKey: string, tokens: Token[]) {
+  if (playerKey === "dm") return "dm";
+  return tokens.find((token) => token.kind === "character" && token.owner === playerKey)?.name ?? playerKey;
+}
+
+function formatPlayerName(playerKey: string, tokens: Token[] = []) {
+  if (playerKey === "dm") return "DM";
+  return tokens.find((token) => token.kind === "character" && token.owner === playerKey)?.name ?? playerKey.replace("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function normalizeIdentity(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function canControlToken(token: Token, playerKey: string, isDm: boolean) {
+  return isDm || token.owner === playerKey;
 }
 
 function assetKey(asset: Asset | undefined) {
   return asset ? `${asset.kind}:${asset.id}` : "";
+}
+
+function filterAssets(assets: Asset[], search: string) {
+  const normalizedSearch = search.trim().toLowerCase();
+  if (!normalizedSearch) return assets;
+  return assets.filter((asset) => `${asset.kind} ${asset.name} ${asset.id}`.toLowerCase().includes(normalizedSearch));
 }
 
 function clearTextSelection() {

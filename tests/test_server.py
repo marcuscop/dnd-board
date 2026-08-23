@@ -26,6 +26,12 @@ def test_room_starts_with_four_owned_player_characters() -> None:
     assert [token["id"] for token in state["tokens"]] == ["player-1", "player-2", "player-3", "player-4"]
     assert [token["owner"] for token in state["tokens"]] == ["player-1", "player-2", "player-3", "player-4"]
     assert all(token["kind"] == "character" for token in state["tokens"])
+    assert [token["avatarUrl"] for token in state["tokens"]] == [
+        "/campaigns/test-campaign/party/ex1.png",
+        "/campaigns/test-campaign/party/ex2.png",
+        "/campaigns/test-campaign/party/ex3.png",
+        "/campaigns/test-campaign/party/ex4.png",
+    ]
     assert all(token["inScene"] is False for token in state["tokens"])
     assert state["fog"] == {"hideMode": False, "brushSize": 120, "revealedAreas": []}
     assert state["board"]["id"] == "green"
@@ -33,8 +39,8 @@ def test_room_starts_with_four_owned_player_characters() -> None:
     assert state["board"]["height"] == 720
     assert any(board["id"] == "phandalin" and board["width"] == 4000 and board["height"] == 2788 for board in state["boards"])
     assert any(asset["kind"] == "npc" and asset["id"] == "npc1" for asset in state["assets"])
-    assert any(asset["kind"] == "monster" and asset["id"] == "goblin" for asset in state["assets"])
-    assert any(asset["kind"] == "beast" and asset["id"] == "wolf" for asset in state["assets"])
+    assert any(asset["kind"] == "monster" and asset["id"] == "aboleth" for asset in state["assets"])
+    assert any(asset["kind"] == "monster" and asset["id"] == "wolf" for asset in state["assets"])
 
 
 def test_player_can_lock_and_move_only_their_own_character() -> None:
@@ -69,6 +75,22 @@ def test_player_can_lock_and_move_only_their_own_character() -> None:
         assert moved["type"] == "token_updated"
         assert moved["token"]["x"] == 450
         assert moved["token"]["y"] == 480
+
+
+def test_player_can_join_with_configured_character_name() -> None:
+    client = TestClient(server.app)
+
+    with client.websocket_connect("/ws") as marina:
+        marina.receive_json()
+        marina.send_json({"type": "join_room", "roomId": "name-identity-test", "playerKey": "Marina"})
+        marina.receive_json()
+
+        marina.send_json({"type": "request_token_lock", "tokenId": "player-1"})
+        locked = marina.receive_json()
+
+    assert locked["type"] == "token_updated"
+    assert locked["token"]["id"] == "player-1"
+    assert locked["token"]["lockedBy"] == "player-1"
 
 
 def test_other_players_see_owned_character_lock_but_cannot_take_it() -> None:
@@ -249,6 +271,43 @@ def test_saved_room_state_loads_when_room_is_recreated(tmp_path, monkeypatch) ->
     assert player_one_token["x"] == 333
     assert player_one_token["y"] == 444
     assert player_one_token["radius"] == 88
+    assert player_one_token["avatarUrl"] == "/campaigns/test-campaign/party/ex1.png"
+
+
+def test_saved_character_metadata_is_replaced_by_static_party_manifest(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "SAVE_DIR", tmp_path)
+    saved_data = {
+        "roomId": "static-party-test",
+        "boardId": "green",
+        "fog": {"hideMode": False, "brushSize": 120, "revealedAreas": []},
+        "tokens": [
+            {
+                "id": "player-1",
+                "kind": "character",
+                "name": "Old Saved Name",
+                "owner": "player-1",
+                "color": "#000000",
+                "x": 333,
+                "y": 444,
+                "radius": 88,
+                "inScene": True,
+                "avatarUrl": "/uploads/static-party-test/player-1/avatar.png",
+            }
+        ],
+    }
+    (tmp_path / "static-party-test.json").write_text(json.dumps(saved_data), encoding="utf-8")
+
+    room = server.get_or_create_room("static-party-test")
+
+    token = room.tokens["player-1"]
+    manifest_member = server.load_party_members()[0]
+    assert token.name == manifest_member.name
+    assert token.avatarUrl == manifest_member.avatarUrl
+    assert token.color == manifest_member.color
+    assert token.x == 333
+    assert token.y == 444
+    assert token.radius == 88
+    assert token.inScene is True
 
 
 def test_dm_can_load_saved_room_state_without_restart(tmp_path, monkeypatch) -> None:
@@ -443,35 +502,42 @@ def test_only_dm_can_load_registry_asset() -> None:
     player = server.Player(id="connection-1", name="Player 1", player_key="player-1", websocket=player_socket, room_id=room.id)
     room.players[player.id] = player
 
-    asyncio.run(server.load_asset_token(room, player, "monster", "goblin"))
+    asyncio.run(server.load_asset_token(room, player, "monster", "aboleth"))
 
     assert all(token.kind != "monster" for token in room.tokens.values())
     assert player_socket.messages == []
 
 
-def test_dm_can_load_npc_monster_and_beast_tokens() -> None:
+def test_dm_can_load_npc_and_monster_tokens() -> None:
     room = server.get_or_create_room("asset-load-test")
     dm_socket = FakeSocket()
     dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
     room.players[dm.id] = dm
 
     asyncio.run(server.load_asset_token(room, dm, "npc", "npc1"))
-    asyncio.run(server.load_asset_token(room, dm, "monster", "goblin"))
-    asyncio.run(server.load_asset_token(room, dm, "beast", "wolf"))
+    asyncio.run(server.load_asset_token(room, dm, "monster", "aboleth"))
+    asyncio.run(server.load_asset_token(room, dm, "monster", "wolf"))
 
     npc = room.tokens["npc-1"]
     monster = room.tokens["monster-2"]
-    beast = room.tokens["beast-3"]
+    wolf = room.tokens["monster-3"]
     assert npc.kind == "npc"
     assert npc.owner == "dm"
-    assert npc.avatarUrl == "/campaigns/test-campaign/npcs/npc1.png"
+    assert npc.avatarUrl == "/shared/npcs/npc1.png"
     assert monster.kind == "monster"
     assert monster.owner == "dm"
-    assert monster.avatarUrl == "/campaigns/test-campaign/monsters/goblin.jpg"
-    assert beast.kind == "beast"
-    assert beast.owner == "dm"
-    assert beast.avatarUrl == "/campaigns/test-campaign/beasts/wolf.jpeg"
+    assert monster.avatarUrl.startswith("/shared/monsters/aboleth.")
+    assert wolf.kind == "monster"
+    assert wolf.owner == "dm"
+    assert wolf.avatarUrl == "/shared/monsters/wolf.png"
     assert [message["type"] for message in dm_socket.messages[-3:]] == ["token_updated", "token_updated", "token_updated"]
+
+
+def test_shared_monsters_are_available_as_global_assets() -> None:
+    assets = server.list_assets()
+
+    aboleth = next(asset for asset in assets if asset.kind == "monster" and asset.id == "aboleth")
+    assert aboleth.avatarUrl == "/shared/monsters/aboleth.png"
 
 
 def test_dm_loaded_asset_uses_active_board_center() -> None:
@@ -481,7 +547,7 @@ def test_dm_loaded_asset_uses_active_board_center() -> None:
     dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
     room.players[dm.id] = dm
 
-    asyncio.run(server.load_asset_token(room, dm, "monster", "goblin"))
+    asyncio.run(server.load_asset_token(room, dm, "monster", "aboleth"))
 
     monster = room.tokens["monster-1"]
     assert monster.x == 2000
@@ -750,7 +816,7 @@ def test_dm_can_delete_loaded_npc_or_monster() -> None:
     room.players[dm.id] = dm
     room.players[player.id] = player
 
-    asyncio.run(server.load_asset_token(room, dm, "monster", "goblin"))
+    asyncio.run(server.load_asset_token(room, dm, "monster", "aboleth"))
     asyncio.run(server.delete_token(room, dm, "monster-1"))
 
     assert "monster-1" not in room.tokens

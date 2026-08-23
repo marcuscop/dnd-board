@@ -1,0 +1,28 @@
+{
+  "members": [
+    {
+      "id": "player-1",
+      "name": "Marina",
+      "image": "ex1.png",
+      "color": "#2563eb"
+    },
+    {
+      "id": "player-2",
+      "name": "Edward",
+      "image": "ex2.png",
+      "color": "#f8fafc"
+    },
+    {
+      "id": "player-3",
+      "name": "Hal",
+      "image": "ex3.png",
+      "color": "#f59e0b"
+    },
+    {
+      "id": "player-4",
+      "name": "Valarie",
+      "image": "ex4.png",
+      "color": "#dc2626"
+    }
+  ]
+}

@@ -13,18 +13,21 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
-AssetKind = Literal["npc", "monster", "beast"]
-TokenKind = Literal["character", "npc", "monster", "beast"]
+AssetKind = Literal["npc", "monster"]
+TokenKind = Literal["character", "npc", "monster"]
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
 MAX_PLAYERS = 8
 DEFAULT_CAMPAIGN_ID = "test-campaign"
 CAMPAIGN_DIR = Path("campaigns")
+SHARED_DIR = Path("shared")
 BOARD_DIR = Path("boards")
 NPC_DIR = Path("npcs")
 MONSTER_DIR = Path("monsters")
-BEAST_DIR = Path("beasts")
+PARTY_DIR = Path("party")
+SHARED_NPC_DIR = SHARED_DIR / "npcs"
+SHARED_MONSTER_DIR = SHARED_DIR / "monsters"
 UPLOAD_DIR = Path("data/uploads")
 LEGACY_SAVE_DIR = Path("data/saves")
 SAVE_DIR = LEGACY_SAVE_DIR
@@ -93,6 +96,15 @@ class Asset:
     kind: AssetKind
     name: str
     avatarUrl: str
+
+
+@dataclass
+class PartyMember:
+    id: str
+    name: str
+    owner: str
+    color: str
+    avatarUrl: str | None
 
 
 @dataclass
@@ -184,7 +196,7 @@ async def get_room_state(room_id: str) -> dict[str, Any]:
 @app.get("/campaigns/{campaign_id}/{asset_kind}/{filename}")
 async def serve_campaign_asset(campaign_id: str, asset_kind: str, filename: str) -> FileResponse:
     campaign = get_campaign(sanitize_asset_id(campaign_id))
-    if campaign is None or asset_kind not in {"boards", "npcs", "monsters", "beasts"}:
+    if campaign is None or asset_kind not in {"boards", "party", "npcs", "monsters", "beasts"}:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     target = campaign.path / asset_kind / Path(filename).name
@@ -522,7 +534,7 @@ def get_or_create_room(room_id: str) -> Room:
 
     saved_board_id = load_saved_board_id(room_id)
     saved_tokens = load_saved_tokens(room_id, get_board(saved_board_id) or default_board())
-    tokens = saved_tokens if saved_tokens is not None else seed_tokens()
+    tokens = merge_saved_tokens_with_party(saved_tokens) if saved_tokens is not None else seed_tokens()
     room = Room(
         id=room_id,
         tokens={token.id: token for token in tokens},
@@ -536,52 +548,39 @@ def get_or_create_room(room_id: str) -> Room:
 
 
 def seed_tokens() -> list[Token]:
-    return [
-        Token(
-            id="player-1",
-            kind="character",
-            name="Player 1",
-            owner="player-1",
-            color="#2563eb",
-            x=240,
-            y=260,
-            radius=DEFAULT_TOKEN_RADIUS,
-            inScene=False,
-        ),
-        Token(
-            id="player-2",
-            kind="character",
-            name="Player 2",
-            owner="player-2",
-            color="#f8fafc",
-            x=320,
-            y=340,
-            radius=DEFAULT_TOKEN_RADIUS,
-            inScene=False,
-        ),
-        Token(
-            id="player-3",
-            kind="character",
-            name="Player 3",
-            owner="player-3",
-            color="#f59e0b",
-            x=400,
-            y=300,
-            radius=DEFAULT_TOKEN_RADIUS,
-            inScene=False,
-        ),
-        Token(
-            id="player-4",
-            kind="character",
-            name="Player 4",
-            owner="player-4",
-            color="#dc2626",
-            x=480,
-            y=380,
-            radius=DEFAULT_TOKEN_RADIUS,
-            inScene=False,
-        ),
-    ]
+    return [party_member_to_token(member, index) for index, member in enumerate(load_party_members())]
+
+
+def party_member_to_token(member: PartyMember, index: int) -> Token:
+    return Token(
+        id=member.id,
+        kind="character",
+        name=member.name,
+        owner=member.owner,
+        color=member.color,
+        x=240 + index * 80,
+        y=260 + (index % 2) * 80,
+        radius=DEFAULT_TOKEN_RADIUS,
+        inScene=False,
+        avatarUrl=member.avatarUrl,
+    )
+
+
+def merge_saved_tokens_with_party(saved_tokens: list[Token]) -> list[Token]:
+    saved_by_id = {token.id: token for token in saved_tokens}
+    tokens: list[Token] = []
+    for index, member in enumerate(load_party_members()):
+        token = party_member_to_token(member, index)
+        saved = saved_by_id.get(token.id)
+        if saved is not None and saved.kind == "character":
+            token.x = saved.x
+            token.y = saved.y
+            token.radius = saved.radius
+            token.inScene = saved.inScene
+        tokens.append(token)
+
+    tokens.extend(token for token in saved_tokens if token.kind != "character")
+    return tokens
 
 
 def get_player_room(player: Player) -> Room | None:
@@ -661,8 +660,13 @@ def sanitize_room_id(room_id: str) -> str:
 
 def normalize_player_key(player_key: str) -> str:
     normalized = player_key.strip().lower()
-    if normalized in {"player-1", "player-2", "player-3", "player-4", "dm"}:
+    party_members = load_party_members()
+    valid_player_keys = {member.owner for member in party_members}
+    if normalized in valid_player_keys or normalized == "dm":
         return normalized
+    for member in party_members:
+        if sanitize_asset_id(member.name) == sanitize_asset_id(normalized):
+            return member.owner
     return "player-1"
 
 
@@ -687,10 +691,11 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     if saved_tokens is None:
         return False
 
-    room.tokens = {token.id: token for token in saved_tokens}
+    tokens = merge_saved_tokens_with_party(saved_tokens)
+    room.tokens = {token.id: token for token in tokens}
     room.fog = load_saved_fog(room.id)
     room.board_id = saved_board_id
-    room.next_token_number = next_dynamic_token_number(saved_tokens)
+    room.next_token_number = next_dynamic_token_number(tokens)
     await broadcast_room_state(room)
     return True
 
@@ -735,7 +740,9 @@ def load_saved_board_id(room_id: str) -> str:
 
 def token_from_dict(data: dict[str, Any], board: Board | None = None) -> Token:
     kind = str(data.get("kind", "character"))
-    if kind not in {"character", "npc", "monster", "beast"}:
+    if kind == "beast":
+        kind = "monster"
+    if kind not in {"character", "npc", "monster"}:
         kind = "character"
     active_board = board or default_board()
 
@@ -776,6 +783,94 @@ def list_boards() -> list[Board]:
     return boards
 
 
+def load_party_members() -> list[PartyMember]:
+    configured = load_party_members_from_manifest(campaign_asset_dir("party") / "party.json")
+    if configured:
+        return configured[:MAX_PLAYERS]
+
+    members: list[PartyMember] = []
+    for index, path in enumerate(list_image_files(campaign_asset_dir("party"))[:MAX_PLAYERS], start=1):
+        player_id = f"player-{index}"
+        members.append(
+            PartyMember(
+                id=player_id,
+                name=humanize_asset_name(path.stem),
+                owner=player_id,
+                color=default_party_color(index - 1),
+                avatarUrl=asset_file_url("party", path),
+            )
+        )
+    return members or default_party_members()
+
+
+def load_party_members_from_manifest(path: Path) -> list[PartyMember]:
+    if not path.is_file():
+        return []
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    raw_members = data.get("members") if isinstance(data, dict) else None
+    if not isinstance(raw_members, list):
+        return []
+
+    members: list[PartyMember] = []
+    seen: set[str] = set()
+    for index, raw_member in enumerate(raw_members, start=1):
+        if not isinstance(raw_member, dict):
+            continue
+
+        fallback_id = f"player-{index}"
+        player_id = normalize_party_member_id(str(raw_member.get("id", fallback_id)), fallback_id)
+        if player_id in seen:
+            continue
+        seen.add(player_id)
+
+        image_path = party_image_path(str(raw_member.get("image", "")))
+        members.append(
+            PartyMember(
+                id=player_id,
+                name=str(raw_member.get("name", humanize_asset_name(player_id))).strip()[:40] or humanize_asset_name(player_id),
+                owner=player_id,
+                color=str(raw_member.get("color", default_party_color(index - 1))),
+                avatarUrl=asset_file_url("party", image_path) if image_path is not None else None,
+            )
+        )
+    return members
+
+
+def normalize_party_member_id(value: str, fallback: str) -> str:
+    normalized = sanitize_asset_id(value)
+    if normalized.startswith("player-"):
+        try:
+            number = int(normalized.rsplit("-", 1)[1])
+        except (IndexError, ValueError):
+            return fallback
+        if 1 <= number <= MAX_PLAYERS:
+            return f"player-{number}"
+    return fallback
+
+
+def party_image_path(filename: str) -> Path | None:
+    if not filename:
+        return None
+    path = campaign_asset_dir("party") / Path(filename).name
+    return path if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".gif"} else None
+
+
+def default_party_members() -> list[PartyMember]:
+    return [
+        PartyMember(id=f"player-{index + 1}", name=f"Player {index + 1}", owner=f"player-{index + 1}", color=default_party_color(index), avatarUrl=None)
+        for index in range(4)
+    ]
+
+
+def default_party_color(index: int) -> str:
+    return ["#2563eb", "#f8fafc", "#f59e0b", "#dc2626", "#14b8a6", "#a855f7", "#84cc16", "#fb7185"][index % 8]
+
+
 def get_board(board_id: str) -> Board | None:
     normalized = sanitize_asset_id(board_id)
     for board in list_boards():
@@ -809,16 +904,15 @@ def humanize_asset_name(asset_name: str) -> str:
 
 def list_assets() -> list[Asset]:
     return (
-        list_assets_from_dir("npc", campaign_asset_dir("npcs"), NPC_DIR)
-        + list_assets_from_dir("monster", campaign_asset_dir("monsters"), MONSTER_DIR)
-        + list_assets_from_dir("beast", campaign_asset_dir("beasts"), BEAST_DIR)
+        list_assets_from_dir("npc", SHARED_NPC_DIR, NPC_DIR)
+        + list_assets_from_dir("monster", SHARED_MONSTER_DIR, MONSTER_DIR)
     )
 
 
-def list_assets_from_dir(kind: AssetKind, campaign_directory: Path, legacy_directory: Path) -> list[Asset]:
+def list_assets_from_dir(kind: AssetKind, shared_directory: Path, legacy_directory: Path, directory_name: str | None = None) -> list[Asset]:
     assets: list[Asset] = []
-    directory_name = asset_directory_name(kind)
-    for path in list_image_files(campaign_directory, legacy_directory):
+    directory_name = directory_name or asset_directory_name(kind)
+    for path in list_image_files(shared_directory, legacy_directory):
         asset_id = sanitize_asset_id(path.stem)
         if not asset_id:
             continue
@@ -891,10 +985,10 @@ def existing_save_path(room_id: str) -> Path:
     return LEGACY_SAVE_DIR / f"{room_id}.json"
 
 
-def list_image_files(campaign_directory: Path, legacy_directory: Path) -> list[Path]:
+def list_image_files(*directories: Path) -> list[Path]:
     seen: set[str] = set()
     paths: list[Path] = []
-    for directory in (campaign_directory, legacy_directory):
+    for directory in directories:
         if not directory.exists():
             continue
         for path in sorted(directory.iterdir()):
@@ -912,15 +1006,17 @@ def asset_file_url(directory_name: str, path: Path) -> str:
     campaign_directory = campaign_asset_dir(directory_name)
     if path.parent == campaign_directory:
         return f"/campaigns/{active_campaign().id}/{directory_name}/{path.name}"
+    if path.parent == SHARED_DIR / directory_name:
+        return f"/shared/{directory_name}/{path.name}"
     return f"/{directory_name}/{path.name}"
 
 
 def asset_directory_name(kind: AssetKind) -> str:
-    return {"npc": "npcs", "monster": "monsters", "beast": "beasts"}[kind]
+    return {"npc": "npcs", "monster": "monsters"}[kind]
 
 
 def asset_token_color(kind: AssetKind) -> str:
-    return {"npc": "#7c3aed", "monster": "#b91c1c", "beast": "#15803d"}[kind]
+    return {"npc": "#7c3aed", "monster": "#b91c1c"}[kind]
 
 
 def fog_to_dict(fog: FogState) -> dict[str, Any]:
@@ -974,11 +1070,10 @@ def clamp(value: float, minimum: float, maximum: float) -> float:
 
 dist_dir = Path(__file__).resolve().parent.parent / "dist"
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR, check_dir=False), name="uploads")
+app.mount("/shared", StaticFiles(directory=SHARED_DIR, check_dir=False), name="shared")
 app.mount("/boards", StaticFiles(directory=BOARD_DIR, check_dir=False), name="boards")
 app.mount("/npcs", StaticFiles(directory=NPC_DIR, check_dir=False), name="npcs")
 app.mount("/monsters", StaticFiles(directory=MONSTER_DIR, check_dir=False), name="monsters")
-app.mount("/beasts", StaticFiles(directory=BEAST_DIR, check_dir=False), name="beasts")
-
 if dist_dir.exists():
     app.mount("/assets", StaticFiles(directory=dist_dir / "assets", check_dir=False), name="assets")
 
