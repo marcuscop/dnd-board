@@ -1,0 +1,30 @@
+[
+  {
+    "base_url": "https://api.bfl.ai/v1",
+    "height": 1024,
+    "model": "flux-2-pro",
+    "name": "Cave Fisher",
+    "polling_url": "https://api.us2.bfl.ai/v1/get_result?id=63c1f5a9-5277-49c2-b101-933d8e5be8db",
+    "status": {
+      "id": "63c1f5a9-5277-49c2-b101-933d8e5be8db",
+      "progress": null,
+      "status": "Content Moderated"
+    },
+    "task_id": "63c1f5a9-5277-49c2-b101-933d8e5be8db",
+    "width": 1024
+  },
+  {
+    "base_url": "https://api.bfl.ai/v1",
+    "height": 1024,
+    "model": "flux-2-pro",
+    "name": "Chain Devil",
+    "polling_url": "https://api.eu2.bfl.ai/v1/get_result?id=b8fb5a47-d982-4289-be9a-574a9bd27185",
+    "status": {
+      "id": "b8fb5a47-d982-4289-be9a-574a9bd27185",
+      "progress": null,
+      "status": "Request Moderated"
+    },
+    "task_id": "b8fb5a47-d982-4289-be9a-574a9bd27185",
+    "width": 1024
+  }
+]

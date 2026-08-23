@@ -40,7 +40,7 @@ def test_room_starts_with_four_owned_player_characters() -> None:
     assert any(board["id"] == "phandalin" and board["width"] == 4000 and board["height"] == 2788 for board in state["boards"])
     assert any(asset["kind"] == "npc" and asset["id"] == "npc1" for asset in state["assets"])
     assert any(asset["kind"] == "monster" and asset["id"] == "aboleth" for asset in state["assets"])
-    assert any(asset["kind"] == "monster" and asset["id"] == "wolf" for asset in state["assets"])
+    assert any(asset["kind"] == "monster" and asset["id"] == "black-greatwyrm" for asset in state["assets"])
 
 
 def test_player_can_lock_and_move_only_their_own_character() -> None:
@@ -516,20 +516,20 @@ def test_dm_can_load_npc_and_monster_tokens() -> None:
 
     asyncio.run(server.load_asset_token(room, dm, "npc", "npc1"))
     asyncio.run(server.load_asset_token(room, dm, "monster", "aboleth"))
-    asyncio.run(server.load_asset_token(room, dm, "monster", "wolf"))
+    asyncio.run(server.load_asset_token(room, dm, "monster", "black-greatwyrm"))
 
     npc = room.tokens["npc-1"]
     monster = room.tokens["monster-2"]
-    wolf = room.tokens["monster-3"]
+    second_monster = room.tokens["monster-3"]
     assert npc.kind == "npc"
     assert npc.owner == "dm"
     assert npc.avatarUrl == "/shared/npcs/npc1.png"
     assert monster.kind == "monster"
     assert monster.owner == "dm"
     assert monster.avatarUrl.startswith("/shared/monsters/aboleth.")
-    assert wolf.kind == "monster"
-    assert wolf.owner == "dm"
-    assert wolf.avatarUrl == "/shared/monsters/wolf.png"
+    assert second_monster.kind == "monster"
+    assert second_monster.owner == "dm"
+    assert second_monster.avatarUrl == "/shared/monsters/black-greatwyrm.png"
     assert [message["type"] for message in dm_socket.messages[-3:]] == ["token_updated", "token_updated", "token_updated"]
 
 

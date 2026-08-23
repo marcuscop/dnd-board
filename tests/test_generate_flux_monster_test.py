@@ -50,3 +50,50 @@ def test_poll_result_falls_back_to_task_id(monkeypatch) -> None:
     )
 
     assert calls == [("https://api.bfl.ai/v1/get_result?id=task-1", "test-key", "GET", None)]
+
+
+def test_summarize_status_redacts_large_result_payload() -> None:
+    status = {
+        "id": "task-1",
+        "status": "Ready",
+        "result": {"sample": "https://example.test/image.png", "other": "value"},
+        "unexpected": "ignored",
+    }
+
+    assert generate_flux_monster_test.summarize_status(status) == {
+        "id": "task-1",
+        "status": "Ready",
+        "result_keys": ["other", "sample"],
+        "has_sample": True,
+    }
+
+
+def test_flux_timeout_error_includes_task_debug_info() -> None:
+    error = generate_flux_monster_test.FluxTimeoutError(
+        task_id="task-1",
+        polling_url="https://api.example.test/poll/task-1",
+        elapsed_seconds=25,
+        timeout_seconds=25,
+        last_status={"status": "Pending"},
+    )
+
+    assert error.task_id == "task-1"
+    assert error.polling_url == "https://api.example.test/poll/task-1"
+    assert "last_status" in str(error)
+
+
+def test_is_moderated_status_detects_request_moderated() -> None:
+    assert generate_flux_monster_test.is_moderated_status("Request Moderated") is True
+    assert generate_flux_monster_test.is_moderated_status("Pending") is False
+
+
+def test_flux_moderated_error_includes_task_debug_info() -> None:
+    error = generate_flux_monster_test.FluxModeratedError(
+        task_id="task-1",
+        polling_url="https://api.example.test/poll/task-1",
+        status_data={"status": "Request Moderated"},
+    )
+
+    assert error.task_id == "task-1"
+    assert error.polling_url == "https://api.example.test/poll/task-1"
+    assert "Request Moderated" in str(error)

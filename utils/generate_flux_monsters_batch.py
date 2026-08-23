@@ -14,6 +14,8 @@ from utils import generate_flux_monster_test as flux
 DEFAULT_NAMES_PATH = Path("shared/dndbeyond_monster_names.json")
 DEFAULT_OUTPUT_DIR = Path("shared/monsters")
 DEFAULT_FAILURES_PATH = Path("shared/monsters/generated/flux_failures.json")
+DEFAULT_PENDING_PATH = Path("shared/monsters/generated/flux_pending.jsonl")
+DEFAULT_MODERATED_PATH = Path("shared/monsters/request-moderated.json")
 DEFAULT_LIMIT = 50
 DEFAULT_START = 0
 
@@ -31,6 +33,10 @@ def main() -> None:
     parser.add_argument("--height", type=int, default=1024)
     parser.add_argument("--timeout", type=float, default=flux.TIMEOUT_SECONDS)
     parser.add_argument("--key-file", type=Path, default=flux.DEFAULT_KEY_FILE)
+    parser.add_argument("--pending", type=Path, default=DEFAULT_PENDING_PATH)
+    parser.add_argument("--moderated", type=Path, default=DEFAULT_MODERATED_PATH)
+    parser.add_argument("--debug-polls", action="store_true", help="Print periodic BFL poll status payloads.")
+    parser.add_argument("--debug-every", type=float, default=flux.DEBUG_POLL_SECONDS, help="Seconds between poll debug lines.")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
@@ -47,6 +53,10 @@ def main() -> None:
         height=args.height,
         timeout_seconds=args.timeout,
         overwrite=args.overwrite,
+        pending_path=args.pending,
+        moderated_path=args.moderated,
+        debug_polls=args.debug_polls,
+        debug_every_seconds=args.debug_every,
     )
     write_failures(args.failures, failures)
     available_count = count_existing_names(selected_names, args.output_dir)
@@ -86,6 +96,10 @@ def generate_batch(
     height: int,
     timeout_seconds: float,
     overwrite: bool,
+    pending_path: Path | None = None,
+    moderated_path: Path | None = None,
+    debug_polls: bool = False,
+    debug_every_seconds: float = flux.DEBUG_POLL_SECONDS,
 ) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
 
@@ -106,17 +120,80 @@ def generate_batch(
                 width=width,
                 height=height,
                 timeout_seconds=timeout_seconds,
+                debug_polls=debug_polls,
+                debug_every_seconds=debug_every_seconds,
             )
             saved_path = flux.download_image(image_url, output_dir, monster_name)
             print(f"[{index}/{len(names)}] Saved: {saved_path}")
         except Exception as error:  # Keep the batch moving and record the failure.
             failures.append({"name": monster_name, "error": str(error)})
             print(f"[{index}/{len(names)}] Failed: {monster_name}: {error}")
+            if pending_path is not None and isinstance(error, flux.FluxTimeoutError):
+                append_pending_task(
+                    pending_path,
+                    {
+                        "name": monster_name,
+                        "model": model,
+                        "base_url": base_url,
+                        "width": width,
+                        "height": height,
+                        "timeout_seconds": timeout_seconds,
+                        "task_id": error.task_id,
+                        "polling_url": error.polling_url,
+                        "elapsed_seconds": round(error.elapsed_seconds, 3),
+                        "last_status": flux.summarize_status(error.last_status),
+                    },
+                )
+            if moderated_path is not None and isinstance(error, flux.FluxModeratedError):
+                append_moderated_request(
+                    moderated_path,
+                    {
+                        "name": monster_name,
+                        "model": model,
+                        "base_url": base_url,
+                        "width": width,
+                        "height": height,
+                        "task_id": error.task_id,
+                        "polling_url": error.polling_url,
+                        "status": flux.summarize_status(error.status_data),
+                    },
+                )
             if is_terminal_billing_error(error):
                 print("Stopping batch because BFL reported a billing or credit error.")
                 break
 
     return failures
+
+
+def append_pending_task(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as pending_file:
+        pending_file.write(json.dumps(data, sort_keys=True) + "\n")
+
+
+def append_moderated_request(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = load_json_list(path)
+    name_key = normalized_name_key(data.get("name"))
+    if name_key and not any(normalized_name_key(entry.get("name")) == name_key for entry in existing if isinstance(entry, dict)):
+        existing.append(data)
+    path.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def normalized_name_key(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def load_json_list(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [entry for entry in data if isinstance(entry, dict)]
 
 
 def write_failures(path: Path, failures: list[dict[str, Any]]) -> None:

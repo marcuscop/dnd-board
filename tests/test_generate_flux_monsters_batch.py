@@ -80,6 +80,90 @@ def test_generate_batch_records_failure_and_continues(tmp_path, monkeypatch):
     assert (tmp_path / "goblin.png").exists()
 
 
+def test_generate_batch_logs_pending_timeout_tasks(tmp_path, monkeypatch):
+    pending_path = tmp_path / "pending.jsonl"
+
+    def fake_generate_image(**kwargs):
+        raise batch.flux.FluxTimeoutError(
+            task_id="task-1",
+            polling_url="https://api.example.test/poll/task-1",
+            elapsed_seconds=25.125,
+            timeout_seconds=25,
+            last_status={"status": "Pending"},
+        )
+
+    monkeypatch.setattr(batch.flux, "generate_image", fake_generate_image)
+
+    failures = batch.generate_batch(
+        names=["Aboleth"],
+        api_key="key",
+        output_dir=tmp_path,
+        model="flux-test",
+        base_url="https://api.example.test",
+        width=1024,
+        height=1024,
+        timeout_seconds=25,
+        overwrite=False,
+        pending_path=pending_path,
+    )
+
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert failures[0]["name"] == "Aboleth"
+    assert pending["name"] == "Aboleth"
+    assert pending["task_id"] == "task-1"
+    assert pending["last_status"] == {"status": "Pending"}
+
+
+def test_generate_batch_logs_moderated_requests(tmp_path, monkeypatch):
+    moderated_path = tmp_path / "request-moderated.json"
+
+    def fake_generate_image(**kwargs):
+        raise batch.flux.FluxModeratedError(
+            task_id="task-1",
+            polling_url="https://api.example.test/poll/task-1",
+            status_data={"status": "Request Moderated", "progress": None},
+        )
+
+    monkeypatch.setattr(batch.flux, "generate_image", fake_generate_image)
+
+    failures = batch.generate_batch(
+        names=["Aerisi Kalinoth"],
+        api_key="key",
+        output_dir=tmp_path,
+        model="flux-test",
+        base_url="https://api.example.test",
+        width=1024,
+        height=1024,
+        timeout_seconds=25,
+        overwrite=False,
+        moderated_path=moderated_path,
+    )
+
+    moderated = json.loads(moderated_path.read_text(encoding="utf-8"))
+    assert failures[0]["name"] == "Aerisi Kalinoth"
+    assert moderated == [
+        {
+            "base_url": "https://api.example.test",
+            "height": 1024,
+            "model": "flux-test",
+            "name": "Aerisi Kalinoth",
+            "polling_url": "https://api.example.test/poll/task-1",
+            "status": {"progress": None, "status": "Request Moderated"},
+            "task_id": "task-1",
+            "width": 1024,
+        }
+    ]
+
+
+def test_moderated_requests_are_deduped_by_monster_name(tmp_path):
+    moderated_path = tmp_path / "request-moderated.json"
+    batch.append_moderated_request(moderated_path, {"name": "Aerisi Kalinoth", "task_id": "task-1"})
+    batch.append_moderated_request(moderated_path, {"name": " aerisi   kalinoth ", "task_id": "task-2"})
+
+    moderated = json.loads(moderated_path.read_text(encoding="utf-8"))
+    assert moderated == [{"name": "Aerisi Kalinoth", "task_id": "task-1"}]
+
+
 def test_generate_batch_stops_on_billing_error(tmp_path, monkeypatch):
     calls = []
 
