@@ -12,10 +12,10 @@ from utils import generate_flux_monster_test as flux
 
 
 DEFAULT_NAMES_PATH = Path("shared/dndbeyond_monster_names.json")
-DEFAULT_OUTPUT_DIR = Path("shared/monsters")
-DEFAULT_FAILURES_PATH = Path("shared/monsters/generated/flux_failures.json")
-DEFAULT_PENDING_PATH = Path("shared/monsters/generated/flux_pending.jsonl")
-DEFAULT_MODERATED_PATH = Path("shared/monsters/request-moderated.json")
+DEFAULT_OUTPUT_DIR = Path("shared/assets")
+DEFAULT_FAILURES_PATH = Path("shared/assets/generated/flux_failures.json")
+DEFAULT_PENDING_PATH = Path("shared/assets/generated/flux_pending.jsonl")
+DEFAULT_MODERATED_PATH = Path("shared/assets/request-moderated.json")
 DEFAULT_LIMIT = 50
 DEFAULT_START = 0
 

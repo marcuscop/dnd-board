@@ -247,8 +247,9 @@ input[type="range"] {
   place-items: center;
   width: 30px;
   height: 30px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
+  border: 2px solid #ffffff;
   border-radius: 50%;
+  background: #111827;
   overflow: hidden;
 }
 

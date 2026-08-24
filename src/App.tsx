@@ -85,8 +85,7 @@ export function App() {
     [boardSize]
   );
   const partyTokens = useMemo(() => tokens.filter((token) => token.kind === "character"), [tokens]);
-  const npcTokens = useMemo(() => tokens.filter((token) => token.kind === "npc"), [tokens]);
-  const monsterTokens = useMemo(() => tokens.filter((token) => token.kind === "monster"), [tokens]);
+  const otherTokens = useMemo(() => tokens.filter((token) => token.kind !== "character"), [tokens]);
   const filteredAssets = useMemo(() => filterAssets(assets, assetSearch), [assets, assetSearch]);
   const visibleSelectedAssetKey = filteredAssets.some((asset) => assetKey(asset) === selectedAssetKey) ? selectedAssetKey : assetKey(filteredAssets[0]);
 
@@ -568,7 +567,7 @@ export function App() {
                   <select value={visibleSelectedAssetKey} onChange={(event) => setSelectedAssetKey(event.currentTarget.value)}>
                     {filteredAssets.map((asset) => (
                       <option key={assetKey(asset)} value={assetKey(asset)}>
-                        {asset.kind.toUpperCase()} · {asset.name}
+                        {asset.name}
                       </option>
                     ))}
                   </select>
@@ -633,7 +632,7 @@ export function App() {
           tokens={partyTokens}
         />
 
-        {npcTokens.length > 0 && (
+        {otherTokens.length > 0 && (
           <TokenSection
             onDelete={deleteToken}
             onPointerCancel={handleSidebarPointerUp}
@@ -644,24 +643,8 @@ export function App() {
             onResizeToken={setTokenRadius}
             isDm={isDm}
             playerKey={playerKey}
-            title="NPCs"
-            tokens={npcTokens}
-          />
-        )}
-
-        {monsterTokens.length > 0 && (
-          <TokenSection
-            onDelete={deleteToken}
-            onPointerCancel={handleSidebarPointerUp}
-            onPointerDown={handleSidebarPointerDown}
-            onPointerMove={handleSidebarPointerMove}
-            onPointerUp={handleSidebarPointerUp}
-            maxTokenRadius={maxTokenRadius}
-            onResizeToken={setTokenRadius}
-            isDm={isDm}
-            playerKey={playerKey}
-            title="Monsters"
-            tokens={monsterTokens}
+            title="Other"
+            tokens={otherTokens}
           />
         )}
 
@@ -701,7 +684,7 @@ function DragGhostToken({ token, x, y }: { token: Token | undefined; x: number; 
   if (!token) return null;
 
   return (
-    <div className="drag-ghost" style={{ background: token.color, left: x, top: y }}>
+    <div className="drag-ghost" style={{ left: x, top: y }}>
       {token.avatarUrl ? <img src={token.avatarUrl} alt="" draggable={false} /> : token.name.slice(0, 3).toUpperCase()}
     </div>
   );
@@ -756,7 +739,6 @@ function TokenSection({
               onPointerUp={onPointerUp}
               onPointerCancel={onPointerCancel}
               onDragStart={(event) => event.preventDefault()}
-              style={{ background: token.color }}
             >
               {token.avatarUrl && <img src={token.avatarUrl} alt="" draggable={false} />}
             </span>
@@ -828,7 +810,7 @@ function drawBoard(
     ctx.globalAlpha = isLockedByOther ? 0.72 : 1;
     ctx.beginPath();
     ctx.arc(token.x, token.y, token.radius, 0, Math.PI * 2);
-    ctx.fillStyle = token.color;
+    ctx.fillStyle = "#111827";
     ctx.fill();
     drawTokenAvatar(ctx, token, images);
     ctx.lineWidth = token.lockedBy ? 5 : 3;
@@ -837,7 +819,7 @@ function drawBoard(
 
     ctx.globalAlpha = 1;
     if (!token.avatarUrl) {
-      ctx.fillStyle = token.color === "#f8fafc" ? "#111827" : "#ffffff";
+      ctx.fillStyle = "#ffffff";
       ctx.font = "700 12px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1150,7 +1132,7 @@ function assetKey(asset: Asset | undefined) {
 function filterAssets(assets: Asset[], search: string) {
   const normalizedSearch = search.trim().toLowerCase();
   if (!normalizedSearch) return assets;
-  return assets.filter((asset) => `${asset.kind} ${asset.name} ${asset.id}`.toLowerCase().includes(normalizedSearch));
+  return assets.filter((asset) => `${asset.name} ${asset.id}`.toLowerCase().includes(normalizedSearch));
 }
 
 function clearTextSelection() {

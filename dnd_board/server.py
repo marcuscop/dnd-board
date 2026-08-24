@@ -13,8 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
-AssetKind = Literal["npc", "monster"]
-TokenKind = Literal["character", "npc", "monster"]
+AssetKind = Literal["asset"]
+TokenKind = Literal["character", "asset"]
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -23,11 +23,8 @@ DEFAULT_CAMPAIGN_ID = "test-campaign"
 CAMPAIGN_DIR = Path("campaigns")
 SHARED_DIR = Path("shared")
 BOARD_DIR = Path("boards")
-NPC_DIR = Path("npcs")
-MONSTER_DIR = Path("monsters")
 PARTY_DIR = Path("party")
-SHARED_NPC_DIR = SHARED_DIR / "npcs"
-SHARED_MONSTER_DIR = SHARED_DIR / "monsters"
+SHARED_ASSET_DIR = SHARED_DIR / "assets"
 UPLOAD_DIR = Path("data/uploads")
 LEGACY_SAVE_DIR = Path("data/saves")
 SAVE_DIR = LEGACY_SAVE_DIR
@@ -36,6 +33,7 @@ MAX_AVATAR_PIXELS = 16_000_000
 MIN_TOKEN_RADIUS = 8
 MAX_TOKEN_RADIUS = 480
 DEFAULT_TOKEN_RADIUS = 70
+DEFAULT_TOKEN_COLOR = "#111827"
 MIN_REVEAL_POINT_DISTANCE = 8
 REVEAL_POINT_DISTANCE_RATIO = 0.22
 
@@ -103,7 +101,6 @@ class PartyMember:
     id: str
     name: str
     owner: str
-    color: str
     avatarUrl: str | None
 
 
@@ -196,7 +193,7 @@ async def get_room_state(room_id: str) -> dict[str, Any]:
 @app.get("/campaigns/{campaign_id}/{asset_kind}/{filename}")
 async def serve_campaign_asset(campaign_id: str, asset_kind: str, filename: str) -> FileResponse:
     campaign = get_campaign(sanitize_asset_id(campaign_id))
-    if campaign is None or asset_kind not in {"boards", "party", "npcs", "monsters", "beasts"}:
+    if campaign is None or asset_kind not in {"boards", "party"}:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     target = campaign.path / asset_kind / Path(filename).name
@@ -497,7 +494,7 @@ async def load_asset_token(room: Room, player: Player, asset_kind: str, asset_id
         kind=asset.kind,
         name=asset.name,
         owner="dm",
-        color=asset_token_color(asset.kind),
+        color=DEFAULT_TOKEN_COLOR,
         x=board.width / 2,
         y=board.height / 2,
         radius=default_token_radius(board),
@@ -561,7 +558,7 @@ def party_member_to_token(member: PartyMember, index: int) -> Token:
         kind="character",
         name=member.name,
         owner=member.owner,
-        color=member.color,
+        color=DEFAULT_TOKEN_COLOR,
         x=240 + index * 80,
         y=260 + (index % 2) * 80,
         radius=DEFAULT_TOKEN_RADIUS,
@@ -744,9 +741,7 @@ def load_saved_board_id(room_id: str) -> str:
 
 def token_from_dict(data: dict[str, Any], board: Board | None = None) -> Token:
     kind = str(data.get("kind", "character"))
-    if kind == "beast":
-        kind = "monster"
-    if kind not in {"character", "npc", "monster"}:
+    if kind not in {"character", "asset"}:
         kind = "character"
     active_board = board or fallback_board()
 
@@ -755,7 +750,7 @@ def token_from_dict(data: dict[str, Any], board: Board | None = None) -> Token:
         kind=kind,
         name=str(data["name"]),
         owner=normalize_owner(str(data["owner"])),
-        color=str(data["color"]),
+        color=DEFAULT_TOKEN_COLOR,
         x=clamp(to_float(data["x"]), 0, active_board.width),
         y=clamp(to_float(data["y"]), 0, active_board.height),
         radius=clamp(to_float(data["radius"]), MIN_TOKEN_RADIUS, MAX_TOKEN_RADIUS),
@@ -792,7 +787,7 @@ def list_boards() -> list[Board]:
         if dimensions is None:
             continue
         width, height = dimensions
-        boards.append(Board(id=board_id, name=humanize_asset_name(path.stem), url=asset_file_url("boards", path), width=width, height=height))
+        boards.append(Board(id=board_id, name=humanize_asset_name(path.stem), url=campaign_file_url("boards", path), width=width, height=height))
     return boards
 
 
@@ -809,8 +804,7 @@ def load_party_members() -> list[PartyMember]:
                 id=player_id,
                 name=humanize_asset_name(path.stem),
                 owner=player_id,
-                color=default_party_color(index - 1),
-                avatarUrl=asset_file_url("party", path),
+                avatarUrl=campaign_file_url("party", path),
             )
         )
     return members or default_party_members()
@@ -847,8 +841,7 @@ def load_party_members_from_manifest(path: Path) -> list[PartyMember]:
                 id=player_id,
                 name=str(raw_member.get("name", humanize_asset_name(player_id))).strip()[:40] or humanize_asset_name(player_id),
                 owner=player_id,
-                color=str(raw_member.get("color", default_party_color(index - 1))),
-                avatarUrl=asset_file_url("party", image_path) if image_path is not None else None,
+                avatarUrl=campaign_file_url("party", image_path) if image_path is not None else None,
             )
         )
     return members
@@ -875,13 +868,9 @@ def party_image_path(filename: str) -> Path | None:
 
 def default_party_members() -> list[PartyMember]:
     return [
-        PartyMember(id=f"player-{index + 1}", name=f"Player {index + 1}", owner=f"player-{index + 1}", color=default_party_color(index), avatarUrl=None)
+        PartyMember(id=f"player-{index + 1}", name=f"Player {index + 1}", owner=f"player-{index + 1}", avatarUrl=None)
         for index in range(4)
     ]
-
-
-def default_party_color(index: int) -> str:
-    return ["#2563eb", "#f8fafc", "#f59e0b", "#dc2626", "#14b8a6", "#a855f7", "#84cc16", "#fb7185"][index % 8]
 
 
 def get_board(board_id: str) -> Board | None:
@@ -916,20 +905,16 @@ def humanize_asset_name(asset_name: str) -> str:
 
 
 def list_assets() -> list[Asset]:
-    return (
-        list_assets_from_dir("npc", SHARED_NPC_DIR, NPC_DIR)
-        + list_assets_from_dir("monster", SHARED_MONSTER_DIR, MONSTER_DIR)
-    )
+    return list_assets_from_dir("asset", SHARED_ASSET_DIR)
 
 
-def list_assets_from_dir(kind: AssetKind, shared_directory: Path, legacy_directory: Path, directory_name: str | None = None) -> list[Asset]:
+def list_assets_from_dir(kind: AssetKind, directory: Path) -> list[Asset]:
     assets: list[Asset] = []
-    directory_name = directory_name or asset_directory_name(kind)
-    for path in list_image_files(shared_directory, legacy_directory):
+    for path in list_image_files(directory):
         asset_id = sanitize_asset_id(path.stem)
         if not asset_id:
             continue
-        assets.append(Asset(id=asset_id, kind=kind, name=humanize_asset_name(path.stem), avatarUrl=asset_file_url(directory_name, path)))
+        assets.append(Asset(id=asset_id, kind=kind, name=humanize_asset_name(path.stem), avatarUrl=asset_file_url(path)))
     return assets
 
 
@@ -1015,21 +1000,19 @@ def list_image_files(*directories: Path) -> list[Path]:
     return paths
 
 
-def asset_file_url(directory_name: str, path: Path) -> str:
+def asset_file_url(path: Path) -> str:
+    if path.parent == SHARED_ASSET_DIR:
+        return f"/shared/assets/{path.name}"
+    return f"/shared/assets/{path.name}"
+
+
+def campaign_file_url(directory_name: str, path: Path) -> str:
     campaign_directory = campaign_asset_dir(directory_name)
     if path.parent == campaign_directory:
         return f"/campaigns/{active_campaign().id}/{directory_name}/{path.name}"
-    if path.parent == SHARED_DIR / directory_name:
-        return f"/shared/{directory_name}/{path.name}"
-    return f"/{directory_name}/{path.name}"
-
-
-def asset_directory_name(kind: AssetKind) -> str:
-    return {"npc": "npcs", "monster": "monsters"}[kind]
-
-
-def asset_token_color(kind: AssetKind) -> str:
-    return {"npc": "#7c3aed", "monster": "#b91c1c"}[kind]
+    if path.parent == BOARD_DIR:
+        return f"/boards/{path.name}"
+    return f"/campaigns/{active_campaign().id}/{directory_name}/{path.name}"
 
 
 def fog_to_dict(fog: FogState) -> dict[str, Any]:
@@ -1085,8 +1068,6 @@ dist_dir = Path(__file__).resolve().parent.parent / "dist"
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR, check_dir=False), name="uploads")
 app.mount("/shared", StaticFiles(directory=SHARED_DIR, check_dir=False), name="shared")
 app.mount("/boards", StaticFiles(directory=BOARD_DIR, check_dir=False), name="boards")
-app.mount("/npcs", StaticFiles(directory=NPC_DIR, check_dir=False), name="npcs")
-app.mount("/monsters", StaticFiles(directory=MONSTER_DIR, check_dir=False), name="monsters")
 if dist_dir.exists():
     app.mount("/assets", StaticFiles(directory=dist_dir / "assets", check_dir=False), name="assets")
 

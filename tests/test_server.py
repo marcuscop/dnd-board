@@ -40,9 +40,9 @@ def test_room_starts_with_four_owned_player_characters() -> None:
     assert state["boards"][0]["id"] == "-"
     assert any(board["id"] == "store-basement" and board["width"] == 1000 and board["height"] == 700 for board in state["boards"])
     assert all(board["id"] != "green" for board in state["boards"])
-    assert any(asset["kind"] == "npc" and asset["id"] == "npc1" for asset in state["assets"])
-    assert any(asset["kind"] == "monster" and asset["id"] == "aboleth" for asset in state["assets"])
-    assert any(asset["kind"] == "monster" and asset["id"] == "black-greatwyrm" for asset in state["assets"])
+    assert any(asset["kind"] == "asset" and asset["id"] == "npc1" for asset in state["assets"])
+    assert any(asset["kind"] == "asset" and asset["id"] == "aboleth" for asset in state["assets"])
+    assert any(asset["kind"] == "asset" and asset["id"] == "black-greatwyrm" for asset in state["assets"])
 
 
 def test_player_can_lock_and_move_only_their_own_character() -> None:
@@ -305,7 +305,7 @@ def test_saved_character_metadata_is_replaced_by_static_party_manifest(tmp_path,
     manifest_member = server.load_party_members()[0]
     assert token.name == manifest_member.name
     assert token.avatarUrl == manifest_member.avatarUrl
-    assert token.color == manifest_member.color
+    assert token.color == server.DEFAULT_TOKEN_COLOR
     assert token.x == 333
     assert token.y == 444
     assert token.radius == 88
@@ -565,42 +565,42 @@ def test_only_dm_can_load_registry_asset() -> None:
     player = server.Player(id="connection-1", name="Player 1", player_key="player-1", websocket=player_socket, room_id=room.id)
     room.players[player.id] = player
 
-    asyncio.run(server.load_asset_token(room, player, "monster", "aboleth"))
+    asyncio.run(server.load_asset_token(room, player, "asset", "aboleth"))
 
-    assert all(token.kind != "monster" for token in room.tokens.values())
+    assert all(token.kind != "asset" for token in room.tokens.values())
     assert player_socket.messages == []
 
 
-def test_dm_can_load_npc_and_monster_tokens() -> None:
+def test_dm_can_load_shared_asset_tokens() -> None:
     room = server.get_or_create_room("asset-load-test")
     dm_socket = FakeSocket()
     dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
     room.players[dm.id] = dm
 
-    asyncio.run(server.load_asset_token(room, dm, "npc", "npc1"))
-    asyncio.run(server.load_asset_token(room, dm, "monster", "aboleth"))
-    asyncio.run(server.load_asset_token(room, dm, "monster", "black-greatwyrm"))
+    asyncio.run(server.load_asset_token(room, dm, "asset", "npc1"))
+    asyncio.run(server.load_asset_token(room, dm, "asset", "aboleth"))
+    asyncio.run(server.load_asset_token(room, dm, "asset", "black-greatwyrm"))
 
-    npc = room.tokens["npc-1"]
-    monster = room.tokens["monster-2"]
-    second_monster = room.tokens["monster-3"]
-    assert npc.kind == "npc"
+    npc = room.tokens["asset-1"]
+    monster = room.tokens["asset-2"]
+    second_monster = room.tokens["asset-3"]
+    assert npc.kind == "asset"
     assert npc.owner == "dm"
-    assert npc.avatarUrl == "/shared/npcs/npc1.png"
-    assert monster.kind == "monster"
+    assert npc.avatarUrl == "/shared/assets/npc1.png"
+    assert monster.kind == "asset"
     assert monster.owner == "dm"
-    assert monster.avatarUrl.startswith("/shared/monsters/aboleth.")
-    assert second_monster.kind == "monster"
+    assert monster.avatarUrl.startswith("/shared/assets/aboleth.")
+    assert second_monster.kind == "asset"
     assert second_monster.owner == "dm"
-    assert second_monster.avatarUrl == "/shared/monsters/black-greatwyrm.png"
+    assert second_monster.avatarUrl == "/shared/assets/black-greatwyrm.png"
     assert [message["type"] for message in dm_socket.messages[-3:]] == ["token_updated", "token_updated", "token_updated"]
 
 
-def test_shared_monsters_are_available_as_global_assets() -> None:
+def test_shared_files_are_available_as_global_assets() -> None:
     assets = server.list_assets()
 
-    aboleth = next(asset for asset in assets if asset.kind == "monster" and asset.id == "aboleth")
-    assert aboleth.avatarUrl == "/shared/monsters/aboleth.png"
+    aboleth = next(asset for asset in assets if asset.kind == "asset" and asset.id == "aboleth")
+    assert aboleth.avatarUrl == "/shared/assets/aboleth.png"
 
 
 def test_dm_loaded_asset_uses_active_board_center() -> None:
@@ -610,9 +610,9 @@ def test_dm_loaded_asset_uses_active_board_center() -> None:
     dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
     room.players[dm.id] = dm
 
-    asyncio.run(server.load_asset_token(room, dm, "monster", "aboleth"))
+    asyncio.run(server.load_asset_token(room, dm, "asset", "aboleth"))
 
-    monster = room.tokens["monster-1"]
+    monster = room.tokens["asset-1"]
     assert monster.x == 1250
     assert monster.y == 809
     assert monster.radius == 70
@@ -870,7 +870,7 @@ def test_dm_cannot_delete_party_characters() -> None:
     assert dm_socket.messages == []
 
 
-def test_dm_can_delete_loaded_npc_or_monster() -> None:
+def test_dm_can_delete_loaded_asset() -> None:
     room = server.get_or_create_room("delete-asset-test")
     dm_socket = FakeSocket()
     player_socket = FakeSocket()
@@ -879,12 +879,12 @@ def test_dm_can_delete_loaded_npc_or_monster() -> None:
     room.players[dm.id] = dm
     room.players[player.id] = player
 
-    asyncio.run(server.load_asset_token(room, dm, "monster", "aboleth"))
-    asyncio.run(server.delete_token(room, dm, "monster-1"))
+    asyncio.run(server.load_asset_token(room, dm, "asset", "aboleth"))
+    asyncio.run(server.delete_token(room, dm, "asset-1"))
 
-    assert "monster-1" not in room.tokens
-    assert dm_socket.messages[-1] == {"type": "token_deleted", "tokenId": "monster-1"}
-    assert player_socket.messages[-1] == {"type": "token_deleted", "tokenId": "monster-1"}
+    assert "asset-1" not in room.tokens
+    assert dm_socket.messages[-1] == {"type": "token_deleted", "tokenId": "asset-1"}
+    assert player_socket.messages[-1] == {"type": "token_deleted", "tokenId": "asset-1"}
 
 
 def make_image(image_format: str) -> bytes:

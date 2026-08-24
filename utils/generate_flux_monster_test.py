@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 BASE_URL = "https://api.bfl.ai/v1"
 DEFAULT_MODEL = "flux-2-pro"
 DEFAULT_MONSTER = "boar"
-DEFAULT_OUTPUT_DIR = Path("shared/monsters/")
+DEFAULT_OUTPUT_DIR = Path("shared/assets/")
 DEFAULT_KEY_FILE = Path("flux-api")
 POLL_INTERVAL_SECONDS = 1.5
 TIMEOUT_SECONDS = 20

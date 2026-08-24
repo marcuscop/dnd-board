@@ -104,8 +104,8 @@ Example:
 ```json
 {
   "members": [
-    { "id": "player-1", "name": "Marina", "image": "ex1.png", "color": "#2563eb" },
-    { "id": "player-2", "name": "Edward", "image": "ex2.png", "color": "#f8fafc" }
+    { "id": "player-1", "name": "Marina", "image": "ex1.png" },
+    { "id": "player-2", "name": "Edward", "image": "ex2.png" }
   ]
 }
 ```
@@ -116,29 +116,22 @@ Use the configured names in player URLs:
 http://127.0.0.1:5173/?campaign=test-campaign&player=Marina
 ```
 
-## Shared Actors
+## Shared Assets
 
-NPCs and monsters are shared across campaigns.
+Non-party images are shared across campaigns. This can include monsters, NPCs, beasts, objects, items, props, or anything else the DM wants to place on the board.
 
 ```text
 shared/
-  npcs/
-  monsters/
+  assets/
 ```
 
-Add an NPC image to:
+Add shared images to:
 
 ```text
-shared/npcs/
+shared/assets/
 ```
 
-Add a monster or beast image to:
-
-```text
-shared/monsters/
-```
-
-The DM can search shared actors in the sidebar and click **Add**. Added actors appear on the board and sync to player windows. The DM can resize or delete NPC/monster tokens.
+The DM can search shared assets in the sidebar and click **Add**. Added assets appear on the board and sync to player windows. The DM can resize or delete shared asset tokens.
 
 ## DM Controls
 
@@ -151,9 +144,9 @@ http://127.0.0.1:5173/?campaign=test-campaign&player=dm
 The DM can:
 
 - choose a board
-- add shared NPCs/monsters
+- add shared assets
 - resize tokens
-- delete NPC/monster tokens
+- delete shared asset tokens
 - clear the scene
 - enable fog of war and reveal areas
 - save/load the current campaign state
@@ -178,16 +171,16 @@ Generate a batch from `shared/dndbeyond_monster_names.json`:
 poetry run python utils/generate_flux_monsters_batch.py --start 0 --limit 50
 ```
 
-The script skips existing files in `shared/monsters/`. Moderated requests are written to:
+The script skips existing files in `shared/assets/`. Moderated requests are written to:
 
 ```text
-shared/monsters/request-moderated.json
+shared/assets/request-moderated.json
 ```
 
 Timed-out tasks are written to:
 
 ```text
-shared/monsters/generated/flux_pending.jsonl
+shared/assets/generated/flux_pending.jsonl
 ```
 
 Debug polling:

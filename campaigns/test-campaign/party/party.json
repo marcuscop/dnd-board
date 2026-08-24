@@ -3,26 +3,22 @@
     {
       "id": "player-1",
       "name": "Marina",
-      "image": "ex1.png",
-      "color": "#2563eb"
+      "image": "ex1.png"
     },
     {
       "id": "player-2",
       "name": "Edward",
-      "image": "ex2.png",
-      "color": "#f8fafc"
+      "image": "ex2.png"
     },
     {
       "id": "player-3",
       "name": "Hal",
-      "image": "ex3.png",
-      "color": "#f59e0b"
+      "image": "ex3.png"
     },
     {
       "id": "player-4",
       "name": "Valarie",
-      "image": "ex4.png",
-      "color": "#dc2626"
+      "image": "ex4.png"
     }
   ]
 }
