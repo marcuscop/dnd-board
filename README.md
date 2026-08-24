@@ -2,6 +2,8 @@
 
 A small web-based shared battle map. The FastAPI backend owns realtime room state and token locks; the React/Vite frontend renders the board, sidebar, fog, and tokens.
 
+![DnD Board demo](demo.gif)
+
 ## Local Dev
 
 Install dependencies:
