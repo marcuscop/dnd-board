@@ -1,0 +1,14 @@
+{
+  "members": [
+    {
+      "id": "player-1",
+      "name": "Marina",
+      "image": "ex1.png"
+    },
+    {
+      "id": "player-2",
+      "name": "Edward",
+      "image": "ex2.png"
+    }
+  ]
+}

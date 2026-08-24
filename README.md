@@ -48,7 +48,7 @@ npm run check
 
 ## Campaign Setup
 
-Current campaign assets are loaded from `campaigns/test-campaign/`. The URL `campaign=test-campaign` should match the active room/state name.
+Each campaign lives under `campaigns/<campaign-id>/`. The URL value `campaign=<campaign-id>` selects that campaign's boards, party config, and local save file.
 
 ```text
 campaigns/
@@ -76,6 +76,12 @@ campaigns/test-campaign/boards/
 ```
 
 Supported image formats include PNG, JPG/JPEG, WebP, and GIF. Board images use their native aspect ratio.
+
+To create another campaign, copy the same folder shape under a new folder name and open that campaign in the URL:
+
+```text
+http://127.0.0.1:5173/?campaign=my-campaign&player=dm
+```
 
 Runtime saves are written to:
 

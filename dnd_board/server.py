@@ -138,7 +138,7 @@ async def upload_avatar(room_id: str, token_id: str, playerKey: str, file: Uploa
     if token is None:
         raise HTTPException(status_code=404, detail="Token not found")
 
-    player = Player(id="http-upload", name="Uploader", player_key=normalize_player_key(playerKey), websocket=None)
+    player = Player(id="http-upload", name="Uploader", player_key=normalize_player_key(playerKey, room.id), websocket=None)
     if not can_control_token(player, token):
         raise HTTPException(status_code=403, detail="Cannot update another player's avatar")
 
@@ -161,7 +161,7 @@ async def upload_avatar(room_id: str, token_id: str, playerKey: str, file: Uploa
 @app.post("/api/rooms/{room_id}/tokens/{token_id}/radius")
 async def resize_token(room_id: str, token_id: str, playerKey: str, radius: float) -> dict[str, Any]:
     room = get_or_create_room(sanitize_room_id(room_id))
-    player = Player(id="http-resize", name="DM", player_key=normalize_player_key(playerKey), websocket=None, room_id=room.id)
+    player = Player(id="http-resize", name="DM", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
     token = await set_token_radius(room, player, token_id, radius)
     if token is None:
         raise HTTPException(status_code=404 if is_dm(player) else 403, detail="Token resize failed")
@@ -170,10 +170,11 @@ async def resize_token(room_id: str, token_id: str, playerKey: str, radius: floa
 
 @app.post("/api/rooms/{room_id}/save")
 async def save_room(room_id: str, playerKey: str) -> dict[str, Any]:
-    if normalize_player_key(playerKey) != "dm":
+    sanitized_room_id = sanitize_room_id(room_id)
+    if normalize_player_key(playerKey, sanitized_room_id) != "dm":
         raise HTTPException(status_code=403, detail="Only the DM can save room state")
 
-    room = get_or_create_room(sanitize_room_id(room_id))
+    room = get_or_create_room(sanitized_room_id)
     save_room_to_disk(room)
     return {
         "roomId": room.id,
@@ -204,10 +205,11 @@ async def serve_campaign_asset(campaign_id: str, asset_kind: str, filename: str)
 
 @app.post("/api/rooms/{room_id}/load")
 async def load_room(room_id: str, playerKey: str) -> dict[str, Any]:
-    if normalize_player_key(playerKey) != "dm":
+    sanitized_room_id = sanitize_room_id(room_id)
+    if normalize_player_key(playerKey, sanitized_room_id) != "dm":
         raise HTTPException(status_code=403, detail="Only the DM can load room state")
 
-    room = get_or_create_room(sanitize_room_id(room_id))
+    room = get_or_create_room(sanitized_room_id)
     loaded = await load_room_from_disk(room, Player(id="http-load", name="DM", player_key="dm", websocket=None))
     if not loaded:
         raise HTTPException(status_code=404, detail="No saved room state found")
@@ -314,7 +316,7 @@ async def join_room(player: Player, requested_room_id: str, player_name: str, pl
         return
 
     player.room_id = room_id
-    player.player_key = normalize_player_key(player_key)
+    player.player_key = normalize_player_key(player_key, room_id)
     player.name = player_name.strip()[:24] or "Player"
     room.players[player.id] = player
 
@@ -468,7 +470,7 @@ async def set_board(room: Room, player: Player, board_id: str) -> None:
     if not is_dm(player):
         return
 
-    board = get_board(board_id)
+    board = get_board(board_id, room.id)
     if board is None:
         return
 
@@ -534,8 +536,8 @@ def get_or_create_room(room_id: str) -> Room:
         return room
 
     saved_board_id = load_saved_board_id(room_id)
-    saved_tokens = load_saved_tokens(room_id, get_board(saved_board_id) or fallback_board())
-    tokens = merge_saved_tokens_with_party(saved_tokens) if saved_tokens is not None else seed_tokens()
+    saved_tokens = load_saved_tokens(room_id, get_board(saved_board_id, room_id) or fallback_board())
+    tokens = merge_saved_tokens_with_party(saved_tokens, room_id) if saved_tokens is not None else seed_tokens(room_id)
     room = Room(
         id=room_id,
         tokens={token.id: token for token in tokens},
@@ -548,8 +550,8 @@ def get_or_create_room(room_id: str) -> Room:
     return room
 
 
-def seed_tokens() -> list[Token]:
-    return [party_member_to_token(member, index) for index, member in enumerate(load_party_members())]
+def seed_tokens(campaign_id: str | None = None) -> list[Token]:
+    return [party_member_to_token(member, index) for index, member in enumerate(load_party_members(campaign_id))]
 
 
 def party_member_to_token(member: PartyMember, index: int) -> Token:
@@ -567,10 +569,10 @@ def party_member_to_token(member: PartyMember, index: int) -> Token:
     )
 
 
-def merge_saved_tokens_with_party(saved_tokens: list[Token]) -> list[Token]:
+def merge_saved_tokens_with_party(saved_tokens: list[Token], campaign_id: str | None = None) -> list[Token]:
     saved_by_id = {token.id: token for token in saved_tokens}
     tokens: list[Token] = []
-    for index, member in enumerate(load_party_members()):
+    for index, member in enumerate(load_party_members(campaign_id)):
         token = party_member_to_token(member, index)
         saved = saved_by_id.get(token.id)
         if saved is not None and saved.kind == "character":
@@ -591,7 +593,7 @@ def get_player_room(player: Player) -> Room | None:
 
 
 def get_room_board(room: Room) -> Board:
-    return get_board(room.board_id) or fallback_board()
+    return get_board(room.board_id, room.id) or fallback_board()
 
 
 def max_token_radius(board: Board) -> float:
@@ -614,7 +616,7 @@ def room_state_message(room: Room) -> dict[str, Any]:
         "tokens": [token_to_dict(token) for token in room.tokens.values()],
         "fog": fog_to_dict(room.fog),
         "board": board_to_dict(get_room_board(room)),
-        "boards": [board_to_dict(board) for board in list_boards()],
+        "boards": [board_to_dict(board) for board in list_boards(room.id)],
         "assets": [asset_to_dict(asset) for asset in list_assets()],
     }
 
@@ -659,9 +661,9 @@ def sanitize_room_id(room_id: str) -> str:
     return sanitized[:40] or "table"
 
 
-def normalize_player_key(player_key: str) -> str:
+def normalize_player_key(player_key: str, campaign_id: str | None = None) -> str:
     normalized = player_key.strip().lower()
-    party_members = load_party_members()
+    party_members = load_party_members(campaign_id)
     valid_player_keys = {member.owner for member in party_members}
     if normalized in valid_player_keys or normalized == "dm":
         return normalized
@@ -688,11 +690,11 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
         return False
 
     saved_board_id = load_saved_board_id(room.id)
-    saved_tokens = load_saved_tokens(room.id, get_board(saved_board_id) or fallback_board())
+    saved_tokens = load_saved_tokens(room.id, get_board(saved_board_id, room.id) or fallback_board())
     if saved_tokens is None:
         return False
 
-    tokens = merge_saved_tokens_with_party(saved_tokens)
+    tokens = merge_saved_tokens_with_party(saved_tokens, room.id)
     room.tokens = {token.id: token for token in tokens}
     room.fog = load_saved_fog(room.id)
     room.board_id = saved_board_id
@@ -709,7 +711,7 @@ def load_saved_tokens(room_id: str, board: Board | None = None) -> list[Token] |
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         active_board = board or fallback_board()
-        return [token_from_dict(token_data, active_board) for token_data in data.get("tokens", [])]
+        return [token_from_dict(token_data, active_board, room_id) for token_data in data.get("tokens", [])]
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
 
@@ -729,17 +731,17 @@ def load_saved_fog(room_id: str) -> FogState:
 def load_saved_board_id(room_id: str) -> str:
     path = existing_save_path(room_id)
     if not path.exists():
-        return default_board_id()
+        return default_board_id(room_id)
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        board_id = str(data.get("boardId", default_board_id()))
-        return board_id if get_board(board_id) is not None else default_board_id()
+        board_id = str(data.get("boardId", default_board_id(room_id)))
+        return board_id if get_board(board_id, room_id) is not None else default_board_id(room_id)
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return default_board_id()
+        return default_board_id(room_id)
 
 
-def token_from_dict(data: dict[str, Any], board: Board | None = None) -> Token:
+def token_from_dict(data: dict[str, Any], board: Board | None = None, campaign_id: str | None = None) -> Token:
     kind = str(data.get("kind", "character"))
     if kind not in {"character", "asset"}:
         kind = "character"
@@ -749,7 +751,7 @@ def token_from_dict(data: dict[str, Any], board: Board | None = None) -> Token:
         id=str(data["id"]),
         kind=kind,
         name=str(data["name"]),
-        owner=normalize_owner(str(data["owner"])),
+        owner=normalize_owner(str(data["owner"]), campaign_id),
         color=DEFAULT_TOKEN_COLOR,
         x=clamp(to_float(data["x"]), 0, active_board.width),
         y=clamp(to_float(data["y"]), 0, active_board.height),
@@ -772,14 +774,14 @@ def blank_board() -> Board:
     return Board(id="-", name="-", url=None, width=BOARD_WIDTH, height=BOARD_HEIGHT)
 
 
-def default_board_id() -> str:
-    boards = list_boards()
+def default_board_id(campaign_id: str | None = None) -> str:
+    boards = list_boards(campaign_id)
     return boards[0].id if boards else blank_board().id
 
 
-def list_boards() -> list[Board]:
+def list_boards(campaign_id: str | None = None) -> list[Board]:
     boards: list[Board] = [blank_board()]
-    for path in list_image_files(campaign_asset_dir("boards"), BOARD_DIR):
+    for path in list_image_files(campaign_asset_dir("boards", campaign_id), BOARD_DIR):
         board_id = sanitize_asset_id(path.stem)
         if not board_id:
             continue
@@ -787,30 +789,30 @@ def list_boards() -> list[Board]:
         if dimensions is None:
             continue
         width, height = dimensions
-        boards.append(Board(id=board_id, name=humanize_asset_name(path.stem), url=campaign_file_url("boards", path), width=width, height=height))
+        boards.append(Board(id=board_id, name=humanize_asset_name(path.stem), url=campaign_file_url("boards", path, campaign_id), width=width, height=height))
     return boards
 
 
-def load_party_members() -> list[PartyMember]:
-    configured = load_party_members_from_manifest(campaign_asset_dir("party") / "party.json")
+def load_party_members(campaign_id: str | None = None) -> list[PartyMember]:
+    configured = load_party_members_from_manifest(campaign_asset_dir("party", campaign_id) / "party.json", campaign_id)
     if configured:
         return configured[:MAX_PLAYERS]
 
     members: list[PartyMember] = []
-    for index, path in enumerate(list_image_files(campaign_asset_dir("party"))[:MAX_PLAYERS], start=1):
+    for index, path in enumerate(list_image_files(campaign_asset_dir("party", campaign_id))[:MAX_PLAYERS], start=1):
         player_id = f"player-{index}"
         members.append(
             PartyMember(
                 id=player_id,
                 name=humanize_asset_name(path.stem),
                 owner=player_id,
-                avatarUrl=campaign_file_url("party", path),
+                avatarUrl=campaign_file_url("party", path, campaign_id),
             )
         )
     return members or default_party_members()
 
 
-def load_party_members_from_manifest(path: Path) -> list[PartyMember]:
+def load_party_members_from_manifest(path: Path, campaign_id: str | None = None) -> list[PartyMember]:
     if not path.is_file():
         return []
 
@@ -835,13 +837,13 @@ def load_party_members_from_manifest(path: Path) -> list[PartyMember]:
             continue
         seen.add(player_id)
 
-        image_path = party_image_path(str(raw_member.get("image", "")))
+        image_path = party_image_path(str(raw_member.get("image", "")), campaign_id)
         members.append(
             PartyMember(
                 id=player_id,
                 name=str(raw_member.get("name", humanize_asset_name(player_id))).strip()[:40] or humanize_asset_name(player_id),
                 owner=player_id,
-                avatarUrl=campaign_file_url("party", image_path) if image_path is not None else None,
+                avatarUrl=campaign_file_url("party", image_path, campaign_id) if image_path is not None else None,
             )
         )
     return members
@@ -859,10 +861,10 @@ def normalize_party_member_id(value: str, fallback: str) -> str:
     return fallback
 
 
-def party_image_path(filename: str) -> Path | None:
+def party_image_path(filename: str, campaign_id: str | None = None) -> Path | None:
     if not filename:
         return None
-    path = campaign_asset_dir("party") / Path(filename).name
+    path = campaign_asset_dir("party", campaign_id) / Path(filename).name
     return path if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".gif"} else None
 
 
@@ -873,9 +875,9 @@ def default_party_members() -> list[PartyMember]:
     ]
 
 
-def get_board(board_id: str) -> Board | None:
+def get_board(board_id: str, campaign_id: str | None = None) -> Board | None:
     normalized = sanitize_asset_id(board_id)
-    for board in list_boards():
+    for board in list_boards(campaign_id):
         if board.id == normalized:
             return board
     return None
@@ -931,11 +933,11 @@ def asset_to_dict(asset: Asset) -> dict[str, Any]:
     return asdict(asset)
 
 
-def normalize_owner(owner: str) -> str:
+def normalize_owner(owner: str, campaign_id: str | None = None) -> str:
     normalized = owner.strip().lower()
     if normalized == "dm":
         return normalized
-    return normalize_player_key(normalized)
+    return normalize_player_key(normalized, campaign_id)
 
 
 def next_dynamic_token_number(tokens: list[Token]) -> int:
@@ -950,9 +952,13 @@ def next_dynamic_token_number(tokens: list[Token]) -> int:
     return highest + 1
 
 
-def active_campaign() -> Campaign:
-    campaign = get_campaign(DEFAULT_CAMPAIGN_ID)
-    return campaign or Campaign(id=DEFAULT_CAMPAIGN_ID, name=humanize_asset_name(DEFAULT_CAMPAIGN_ID), path=CAMPAIGN_DIR / DEFAULT_CAMPAIGN_ID)
+def active_campaign(campaign_id: str | None = None) -> Campaign:
+    requested_id = sanitize_asset_id(campaign_id or DEFAULT_CAMPAIGN_ID)
+    campaign = get_campaign(requested_id)
+    if campaign is not None:
+        return campaign
+    default_campaign = get_campaign(DEFAULT_CAMPAIGN_ID)
+    return default_campaign or Campaign(id=DEFAULT_CAMPAIGN_ID, name=humanize_asset_name(DEFAULT_CAMPAIGN_ID), path=CAMPAIGN_DIR / DEFAULT_CAMPAIGN_ID)
 
 
 def get_campaign(campaign_id: str) -> Campaign | None:
@@ -962,18 +968,18 @@ def get_campaign(campaign_id: str) -> Campaign | None:
     return Campaign(id=campaign_path.name, name=humanize_asset_name(campaign_path.name), path=campaign_path)
 
 
-def campaign_asset_dir(directory_name: str) -> Path:
-    return active_campaign().path / directory_name
+def campaign_asset_dir(directory_name: str, campaign_id: str | None = None) -> Path:
+    return active_campaign(campaign_id).path / directory_name
 
 
-def campaign_save_dir() -> Path:
-    return active_campaign().path / "saves"
+def campaign_save_dir(campaign_id: str | None = None) -> Path:
+    return active_campaign(campaign_id).path / "saves"
 
 
 def save_path(room_id: str) -> Path:
     if SAVE_DIR != LEGACY_SAVE_DIR:
         return SAVE_DIR / f"{room_id}.json"
-    return campaign_save_dir() / f"{room_id}.json"
+    return campaign_save_dir(room_id) / f"{room_id}.json"
 
 
 def existing_save_path(room_id: str) -> Path:
@@ -1006,13 +1012,14 @@ def asset_file_url(path: Path) -> str:
     return f"/shared/assets/{path.name}"
 
 
-def campaign_file_url(directory_name: str, path: Path) -> str:
-    campaign_directory = campaign_asset_dir(directory_name)
+def campaign_file_url(directory_name: str, path: Path, campaign_id: str | None = None) -> str:
+    campaign = active_campaign(campaign_id)
+    campaign_directory = campaign_asset_dir(directory_name, campaign.id)
     if path.parent == campaign_directory:
-        return f"/campaigns/{active_campaign().id}/{directory_name}/{path.name}"
+        return f"/campaigns/{campaign.id}/{directory_name}/{path.name}"
     if path.parent == BOARD_DIR:
         return f"/boards/{path.name}"
-    return f"/campaigns/{active_campaign().id}/{directory_name}/{path.name}"
+    return f"/campaigns/{campaign.id}/{directory_name}/{path.name}"
 
 
 def fog_to_dict(fog: FogState) -> dict[str, Any]:

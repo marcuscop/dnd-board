@@ -95,6 +95,41 @@ def test_player_can_join_with_configured_character_name() -> None:
     assert locked["token"]["lockedBy"] == "player-1"
 
 
+def test_room_uses_campaign_specific_boards_and_party() -> None:
+    client = TestClient(server.app)
+
+    with client.websocket_connect("/ws") as websocket:
+        websocket.receive_json()
+        websocket.send_json({"type": "join_room", "roomId": "test-campaign-2", "playerKey": "dm"})
+        state = websocket.receive_json()
+
+    assert state["type"] == "room_state"
+    assert [token["id"] for token in state["tokens"]] == ["player-1", "player-2"]
+    assert [token["name"] for token in state["tokens"]] == ["Marina", "Edward"]
+    assert [token["avatarUrl"] for token in state["tokens"]] == [
+        "/campaigns/test-campaign-2/party/ex1.png",
+        "/campaigns/test-campaign-2/party/ex2.png",
+    ]
+    assert any(board["id"] == "village" and board["url"] == "/campaigns/test-campaign-2/boards/village.png" for board in state["boards"])
+    assert all(board["id"] not in {"store-basement", "windmill"} for board in state["boards"])
+
+
+def test_campaign_specific_player_name_resolution() -> None:
+    client = TestClient(server.app)
+
+    with client.websocket_connect("/ws") as marina:
+        marina.receive_json()
+        marina.send_json({"type": "join_room", "roomId": "test-campaign-2", "playerKey": "Marina"})
+        marina.receive_json()
+
+        marina.send_json({"type": "request_token_lock", "tokenId": "player-1"})
+        locked = marina.receive_json()
+
+    assert locked["type"] == "token_updated"
+    assert locked["token"]["id"] == "player-1"
+    assert locked["token"]["lockedBy"] == "player-1"
+
+
 def test_other_players_see_owned_character_lock_but_cannot_take_it() -> None:
     room = server.get_or_create_room("lock-test")
     player_one_socket = FakeSocket()
@@ -239,6 +274,10 @@ def test_default_save_path_is_campaign_scoped() -> None:
     assert server.save_path("save-test") == server.CAMPAIGN_DIR / server.DEFAULT_CAMPAIGN_ID / "saves" / "save-test.json"
 
 
+def test_campaign_save_path_uses_matching_campaign_folder() -> None:
+    assert server.save_path("test-campaign-2") == server.CAMPAIGN_DIR / "test-campaign-2" / "saves" / "test-campaign-2.json"
+
+
 def test_saved_room_state_loads_when_room_is_recreated(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(server, "SAVE_DIR", tmp_path)
     client = TestClient(server.app)
@@ -313,7 +352,7 @@ def test_saved_character_metadata_is_replaced_by_static_party_manifest(tmp_path,
 
 
 def test_room_state_uses_blank_board_when_no_campaign_boards(monkeypatch) -> None:
-    monkeypatch.setattr(server, "list_boards", lambda: [])
+    monkeypatch.setattr(server, "list_boards", lambda campaign_id=None: [])
 
     room = server.get_or_create_room("no-board-test")
     state = server.room_state_message(room)
@@ -497,6 +536,19 @@ def test_dm_can_switch_to_blank_board() -> None:
     assert room.board_id == "-"
     assert dm_socket.messages[-1]["type"] == "board_updated"
     assert dm_socket.messages[-1]["board"] == {"id": "-", "name": "-", "width": 1200, "height": 720}
+
+
+def test_dm_switches_board_within_room_campaign() -> None:
+    room = server.get_or_create_room("test-campaign-2")
+    dm_socket = FakeSocket()
+    dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
+    room.players[dm.id] = dm
+
+    asyncio.run(server.set_board(room, dm, "village"))
+
+    assert room.board_id == "village"
+    assert dm_socket.messages[-1]["type"] == "board_updated"
+    assert dm_socket.messages[-1]["board"]["url"] == "/campaigns/test-campaign-2/boards/village.png"
 
 
 def test_switching_boards_while_hidden_resets_fog_reveals() -> None:
