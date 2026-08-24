@@ -7,8 +7,14 @@ A small web-based shared battle map. The FastAPI backend owns realtime room stat
 Install dependencies:
 
 ```sh
-poetry install
+poetry install --with dev
 npm install
+```
+
+For local FLUX/image generation utilities, install the heavier optional group:
+
+```sh
+poetry install --with dev,imagegen
 ```
 
 Start the backend:
@@ -154,6 +160,12 @@ The DM can:
 
 ## Monster Image Generation
 
+Install image generation dependencies first:
+
+```sh
+poetry install --with imagegen
+```
+
 Generate one monster image with the BFL API:
 
 ```sh
@@ -217,3 +229,21 @@ npm start
 ```
 
 When `dist/` exists, FastAPI serves the built frontend and static assets from one Python web service.
+
+## Render
+
+This repo includes `render.yaml` for a Render web service.
+
+Render build command:
+
+```sh
+poetry install --only main --no-root && npm ci && npm run build
+```
+
+Render start command:
+
+```sh
+poetry run uvicorn dnd_board.server:app --host 0.0.0.0 --port $PORT
+```
+
+`--only main` keeps Render from installing local-only test and image-generation dependencies such as Torch and Diffusers.

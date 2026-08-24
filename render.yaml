@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: dnd-board
+    runtime: python
+    plan: free
+    buildCommand: poetry install --only main --no-root && npm ci && npm run build
+    startCommand: poetry run uvicorn dnd_board.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.15
+      - key: NODE_VERSION
+        value: 22
