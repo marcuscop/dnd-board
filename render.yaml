@@ -10,3 +10,5 @@ services:
         value: 3.11.15
       - key: NODE_VERSION
         value: 22
+      - key: POETRY_VERSION
+        value: 2.3.4

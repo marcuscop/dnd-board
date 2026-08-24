@@ -246,4 +246,12 @@ Render start command:
 poetry run uvicorn dnd_board.server:app --host 0.0.0.0 --port $PORT
 ```
 
+Render environment variables:
+
+```text
+PYTHON_VERSION=3.11.15
+NODE_VERSION=22
+POETRY_VERSION=2.3.4
+```
+
 `--only main` keeps Render from installing local-only test and image-generation dependencies such as Torch and Diffusers.
