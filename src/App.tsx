@@ -108,7 +108,6 @@ export function App() {
     setConnection("connecting");
 
     socket.addEventListener("open", () => {
-      setConnection("connected");
       socket.send(
         JSON.stringify({
           type: "join_room",
@@ -130,6 +129,7 @@ export function App() {
       }
 
       if (message.type === "room_state") {
+        setConnection("connected");
         applyRoomState(message);
         return;
       }
