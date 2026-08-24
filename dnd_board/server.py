@@ -536,13 +536,14 @@ def get_or_create_room(room_id: str) -> Room:
         return room
 
     saved_board_id = load_saved_board_id(room_id)
-    saved_tokens = load_saved_tokens(room_id, get_board(saved_board_id, room_id) or fallback_board())
+    saved_board = get_board(saved_board_id, room_id) or fallback_board()
+    saved_tokens = load_saved_tokens(room_id, saved_board)
     tokens = merge_saved_tokens_with_party(saved_tokens, room_id) if saved_tokens is not None else seed_tokens(room_id)
     room = Room(
         id=room_id,
         tokens={token.id: token for token in tokens},
         players={},
-        fog=load_saved_fog(room_id),
+        fog=load_saved_fog(room_id, saved_board),
         board_id=saved_board_id,
         next_token_number=next_dynamic_token_number(tokens),
     )
@@ -690,13 +691,14 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
         return False
 
     saved_board_id = load_saved_board_id(room.id)
-    saved_tokens = load_saved_tokens(room.id, get_board(saved_board_id, room.id) or fallback_board())
+    saved_board = get_board(saved_board_id, room.id) or fallback_board()
+    saved_tokens = load_saved_tokens(room.id, saved_board)
     if saved_tokens is None:
         return False
 
     tokens = merge_saved_tokens_with_party(saved_tokens, room.id)
     room.tokens = {token.id: token for token in tokens}
-    room.fog = load_saved_fog(room.id)
+    room.fog = load_saved_fog(room.id, saved_board)
     room.board_id = saved_board_id
     room.next_token_number = next_dynamic_token_number(tokens)
     await broadcast_room_state(room)
@@ -716,14 +718,14 @@ def load_saved_tokens(room_id: str, board: Board | None = None) -> list[Token] |
         return None
 
 
-def load_saved_fog(room_id: str) -> FogState:
+def load_saved_fog(room_id: str, board: Board | None = None) -> FogState:
     path = existing_save_path(room_id)
     if not path.exists():
         return default_fog()
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return fog_from_dict(data.get("fog", {}))
+        return fog_from_dict(data.get("fog", {}), board or fallback_board())
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return default_fog()
 
@@ -1030,14 +1032,15 @@ def fog_to_dict(fog: FogState) -> dict[str, Any]:
     }
 
 
-def fog_from_dict(data: dict[str, Any]) -> FogState:
+def fog_from_dict(data: dict[str, Any], board: Board | None = None) -> FogState:
+    active_board = board or fallback_board()
     return FogState(
         hideMode=bool(data.get("hideMode", False)),
         brushSize=clamp(to_float(data.get("brushSize", 120)), 20, 360),
         revealedAreas=[
             RevealedArea(
-                x=clamp(to_float(area.get("x")), 0, BOARD_WIDTH),
-                y=clamp(to_float(area.get("y")), 0, BOARD_HEIGHT),
+                x=clamp(to_float(area.get("x")), 0, active_board.width),
+                y=clamp(to_float(area.get("y")), 0, active_board.height),
                 radius=clamp(to_float(area.get("radius", 120)), 20, 360),
             )
             for area in data.get("revealedAreas", [])

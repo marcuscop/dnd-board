@@ -104,9 +104,10 @@ def test_room_uses_campaign_specific_boards_and_party() -> None:
         state = websocket.receive_json()
 
     assert state["type"] == "room_state"
-    assert [token["id"] for token in state["tokens"]] == ["player-1", "player-2"]
-    assert [token["name"] for token in state["tokens"]] == ["Marina", "Edward"]
-    assert [token["avatarUrl"] for token in state["tokens"]] == [
+    party_tokens = [token for token in state["tokens"] if token["kind"] == "character"]
+    assert [token["id"] for token in party_tokens] == ["player-1", "player-2"]
+    assert [token["name"] for token in party_tokens] == ["Marina", "Edward"]
+    assert [token["avatarUrl"] for token in party_tokens] == [
         "/campaigns/test-campaign-2/party/ex1.png",
         "/campaigns/test-campaign-2/party/ex2.png",
     ]
@@ -409,6 +410,23 @@ def test_saved_large_board_token_positions_load_without_green_board_clamp(tmp_pa
     assert loaded.board_id == "windmill"
     assert loaded.tokens["player-1"].x == 2500
     assert loaded.tokens["player-1"].y == 1200
+
+
+def test_saved_large_board_fog_positions_load_without_default_board_clamp(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "SAVE_DIR", tmp_path)
+    room = server.get_or_create_room("large-board-fog-load-test")
+    room.board_id = "windmill"
+    room.fog.hideMode = True
+    room.fog.brushSize = 120
+    room.fog.revealedAreas = [server.RevealedArea(x=2200, y=1400, radius=120)]
+    server.save_room_to_disk(room)
+
+    server.rooms.clear()
+    loaded = server.get_or_create_room("large-board-fog-load-test")
+
+    assert loaded.board_id == "windmill"
+    assert loaded.fog.hideMode is True
+    assert loaded.fog.revealedAreas == [server.RevealedArea(x=2200, y=1400, radius=120)]
 
 
 def test_non_dm_cannot_load_saved_room_state(tmp_path, monkeypatch) -> None:
