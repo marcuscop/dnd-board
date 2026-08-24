@@ -12,7 +12,7 @@ const MAX_TOKEN_RADIUS = 480;
 const WS_URL = import.meta.env.VITE_WS_URL ?? getDefaultWebSocketUrl();
 const REQUESTED_PLAYER_KEY = getInitialPlayerKey();
 const DEFAULT_FOG: FogState = { hideMode: false, brushSize: 120, revealedAreas: [] };
-const DEFAULT_BOARD: Board = { id: "green", name: "Green Field", width: DEFAULT_BOARD_WIDTH, height: DEFAULT_BOARD_HEIGHT };
+const DEFAULT_BOARD: Board = { id: "", name: "", width: DEFAULT_BOARD_WIDTH, height: DEFAULT_BOARD_HEIGHT };
 
 type ConnectionState = "connecting" | "connected" | "disconnected";
 type DragPreview = {
@@ -59,7 +59,7 @@ export function App() {
   const [loadStatus, setLoadStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [fog, setFog] = useState<FogState>(DEFAULT_FOG);
   const [board, setBoard] = useState<Board>(DEFAULT_BOARD);
-  const [boards, setBoards] = useState<Board[]>([DEFAULT_BOARD]);
+  const [boards, setBoards] = useState<Board[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [selectedAssetKey, setSelectedAssetKey] = useState("");
   const [assetSearch, setAssetSearch] = useState("");
@@ -544,16 +544,18 @@ export function App() {
 
             <button onClick={clearScene}>Clear Scene</button>
 
-            <label>
-              Board
-              <select value={board.id} onChange={(event) => setActiveBoard(event.currentTarget.value)}>
-                {boards.map((availableBoard) => (
-                  <option key={availableBoard.id} value={availableBoard.id}>
-                    {availableBoard.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {boards.length > 0 && (
+              <label>
+                Board
+                <select value={board.id} onChange={(event) => setActiveBoard(event.currentTarget.value)}>
+                  {boards.map((availableBoard) => (
+                    <option key={availableBoard.id} value={availableBoard.id}>
+                      {availableBoard.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             {assets.length > 0 && (
               <div className="asset-loader">
@@ -855,9 +857,6 @@ function drawBoard(
 }
 
 function drawBoardBackground(ctx: CanvasRenderingContext2D, board: Board, boardImages: Map<string, HTMLImageElement>, boardSize: BoardSize) {
-  ctx.fillStyle = "#2f7d46";
-  ctx.fillRect(0, 0, boardSize.width, boardSize.height);
-
   if (!board.url) return;
 
   const image = boardImages.get(board.url);

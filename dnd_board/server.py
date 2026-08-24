@@ -183,7 +183,7 @@ async def save_room(room_id: str, playerKey: str) -> dict[str, Any]:
         "saved": True,
         "tokens": [token_to_dict(token) for token in room.tokens.values()],
         "fog": fog_to_dict(room.fog),
-        "board": board_to_dict(get_board(room.board_id) or default_board()),
+        "board": board_to_dict(get_room_board(room)),
     }
 
 
@@ -220,7 +220,7 @@ async def load_room(room_id: str, playerKey: str) -> dict[str, Any]:
         "loaded": True,
         "tokens": [token_to_dict(token) for token in room.tokens.values()],
         "fog": fog_to_dict(room.fog),
-        "board": board_to_dict(get_board(room.board_id) or default_board()),
+        "board": board_to_dict(get_room_board(room)),
     }
 
 
@@ -475,8 +475,12 @@ async def set_board(room: Room, player: Player, board_id: str) -> None:
     if board is None:
         return
 
+    board_changed = room.board_id != board.id
     room.board_id = board.id
     await broadcast(room, {"type": "board_updated", "board": board_to_dict(board)})
+    if board_changed and room.fog.hideMode:
+        room.fog.revealedAreas = []
+        await broadcast(room, {"type": "fog_updated", "fog": fog_to_dict(room.fog)})
 
 
 async def load_asset_token(room: Room, player: Player, asset_kind: str, asset_id: str) -> None:
@@ -533,7 +537,7 @@ def get_or_create_room(room_id: str) -> Room:
         return room
 
     saved_board_id = load_saved_board_id(room_id)
-    saved_tokens = load_saved_tokens(room_id, get_board(saved_board_id) or default_board())
+    saved_tokens = load_saved_tokens(room_id, get_board(saved_board_id) or fallback_board())
     tokens = merge_saved_tokens_with_party(saved_tokens) if saved_tokens is not None else seed_tokens()
     room = Room(
         id=room_id,
@@ -590,7 +594,7 @@ def get_player_room(player: Player) -> Room | None:
 
 
 def get_room_board(room: Room) -> Board:
-    return get_board(room.board_id) or default_board()
+    return get_board(room.board_id) or fallback_board()
 
 
 def max_token_radius(board: Board) -> float:
@@ -612,7 +616,7 @@ def room_state_message(room: Room) -> dict[str, Any]:
         "players": [{"id": player.id, "name": player.name} for player in room.players.values()],
         "tokens": [token_to_dict(token) for token in room.tokens.values()],
         "fog": fog_to_dict(room.fog),
-        "board": board_to_dict(get_board(room.board_id) or default_board()),
+        "board": board_to_dict(get_room_board(room)),
         "boards": [board_to_dict(board) for board in list_boards()],
         "assets": [asset_to_dict(asset) for asset in list_assets()],
     }
@@ -687,7 +691,7 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
         return False
 
     saved_board_id = load_saved_board_id(room.id)
-    saved_tokens = load_saved_tokens(room.id, get_board(saved_board_id) or default_board())
+    saved_tokens = load_saved_tokens(room.id, get_board(saved_board_id) or fallback_board())
     if saved_tokens is None:
         return False
 
@@ -707,7 +711,7 @@ def load_saved_tokens(room_id: str, board: Board | None = None) -> list[Token] |
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        active_board = board or default_board()
+        active_board = board or fallback_board()
         return [token_from_dict(token_data, active_board) for token_data in data.get("tokens", [])]
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
@@ -728,14 +732,14 @@ def load_saved_fog(room_id: str) -> FogState:
 def load_saved_board_id(room_id: str) -> str:
     path = existing_save_path(room_id)
     if not path.exists():
-        return default_board().id
+        return default_board_id()
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        board_id = str(data.get("boardId", default_board().id))
-        return board_id if get_board(board_id) is not None else default_board().id
+        board_id = str(data.get("boardId", default_board_id()))
+        return board_id if get_board(board_id) is not None else default_board_id()
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return default_board().id
+        return default_board_id()
 
 
 def token_from_dict(data: dict[str, Any], board: Board | None = None) -> Token:
@@ -744,7 +748,7 @@ def token_from_dict(data: dict[str, Any], board: Board | None = None) -> Token:
         kind = "monster"
     if kind not in {"character", "npc", "monster"}:
         kind = "character"
-    active_board = board or default_board()
+    active_board = board or fallback_board()
 
     return Token(
         id=str(data["id"]),
@@ -765,12 +769,21 @@ def default_fog() -> FogState:
     return FogState(hideMode=False, brushSize=120, revealedAreas=[])
 
 
-def default_board() -> Board:
-    return Board(id="green", name="Green Field", url=None, width=BOARD_WIDTH, height=BOARD_HEIGHT)
+def fallback_board() -> Board:
+    return blank_board()
+
+
+def blank_board() -> Board:
+    return Board(id="-", name="-", url=None, width=BOARD_WIDTH, height=BOARD_HEIGHT)
+
+
+def default_board_id() -> str:
+    boards = list_boards()
+    return boards[0].id if boards else blank_board().id
 
 
 def list_boards() -> list[Board]:
-    boards = [default_board()]
+    boards: list[Board] = [blank_board()]
     for path in list_image_files(campaign_asset_dir("boards"), BOARD_DIR):
         board_id = sanitize_asset_id(path.stem)
         if not board_id:

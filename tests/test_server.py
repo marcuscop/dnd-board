@@ -34,10 +34,12 @@ def test_room_starts_with_four_owned_player_characters() -> None:
     ]
     assert all(token["inScene"] is False for token in state["tokens"])
     assert state["fog"] == {"hideMode": False, "brushSize": 120, "revealedAreas": []}
-    assert state["board"]["id"] == "green"
+    assert state["board"]["id"] == "-"
     assert state["board"]["width"] == 1200
     assert state["board"]["height"] == 720
-    assert any(board["id"] == "phandalin" and board["width"] == 4000 and board["height"] == 2788 for board in state["boards"])
+    assert state["boards"][0]["id"] == "-"
+    assert any(board["id"] == "store-basement" and board["width"] == 1000 and board["height"] == 700 for board in state["boards"])
+    assert all(board["id"] != "green" for board in state["boards"])
     assert any(asset["kind"] == "npc" and asset["id"] == "npc1" for asset in state["assets"])
     assert any(asset["kind"] == "monster" and asset["id"] == "aboleth" for asset in state["assets"])
     assert any(asset["kind"] == "monster" and asset["id"] == "black-greatwyrm" for asset in state["assets"])
@@ -310,6 +312,17 @@ def test_saved_character_metadata_is_replaced_by_static_party_manifest(tmp_path,
     assert token.inScene is True
 
 
+def test_room_state_uses_blank_board_when_no_campaign_boards(monkeypatch) -> None:
+    monkeypatch.setattr(server, "list_boards", lambda: [])
+
+    room = server.get_or_create_room("no-board-test")
+    state = server.room_state_message(room)
+
+    assert room.board_id == "-"
+    assert state["board"] == {"id": "-", "name": "-", "width": 1200, "height": 720}
+    assert state["boards"] == []
+
+
 def test_dm_can_load_saved_room_state_without_restart(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(server, "SAVE_DIR", tmp_path)
     room = server.get_or_create_room("manual-load-test")
@@ -320,14 +333,14 @@ def test_dm_can_load_saved_room_state_without_restart(tmp_path, monkeypatch) -> 
     room.tokens["player-1"].inScene = True
     room.tokens["player-1"].x = 111
     room.tokens["player-1"].y = 222
-    room.board_id = "phandalin"
+    room.board_id = "windmill"
     room.fog.hideMode = True
     room.fog.revealedAreas.append(server.RevealedArea(x=200, y=300, radius=80))
     server.save_room_to_disk(room)
 
     room.tokens["player-1"].x = 900
     room.tokens["player-1"].y = 600
-    room.board_id = "green"
+    room.board_id = ""
     room.fog.hideMode = False
     room.fog.revealedAreas = []
 
@@ -335,17 +348,17 @@ def test_dm_can_load_saved_room_state_without_restart(tmp_path, monkeypatch) -> 
 
     assert room.tokens["player-1"].x == 111
     assert room.tokens["player-1"].y == 222
-    assert room.board_id == "phandalin"
+    assert room.board_id == "windmill"
     assert room.fog.hideMode is True
     assert room.fog.revealedAreas == [server.RevealedArea(x=200, y=300, radius=80)]
     assert dm_socket.messages[-1]["type"] == "room_state"
-    assert dm_socket.messages[-1]["board"]["id"] == "phandalin"
+    assert dm_socket.messages[-1]["board"]["id"] == "windmill"
 
 
 def test_saved_large_board_token_positions_load_without_green_board_clamp(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(server, "SAVE_DIR", tmp_path)
     room = server.get_or_create_room("large-board-position-load-test")
-    room.board_id = "phandalin"
+    room.board_id = "windmill"
     room.tokens["player-1"].inScene = True
     room.tokens["player-1"].x = 2500
     room.tokens["player-1"].y = 1200
@@ -354,7 +367,7 @@ def test_saved_large_board_token_positions_load_without_green_board_clamp(tmp_pa
     server.rooms.clear()
     loaded = server.get_or_create_room("large-board-position-load-test")
 
-    assert loaded.board_id == "phandalin"
+    assert loaded.board_id == "windmill"
     assert loaded.tokens["player-1"].x == 2500
     assert loaded.tokens["player-1"].y == 1200
 
@@ -445,10 +458,10 @@ def test_only_dm_can_switch_boards() -> None:
         player_one.send_json({"type": "join_room", "roomId": "board-permission-test", "playerKey": "player-1"})
         player_one.receive_json()
 
-        player_one.send_json({"type": "set_board", "boardId": "phandalin"})
+        player_one.send_json({"type": "set_board", "boardId": "windmill"})
 
         room = server.rooms["board-permission-test"]
-        assert room.board_id == "green"
+        assert room.board_id == "-"
 
 
 def test_dm_can_switch_board_and_broadcast_update() -> None:
@@ -460,16 +473,66 @@ def test_dm_can_switch_board_and_broadcast_update() -> None:
     room.players[dm.id] = dm
     room.players[player_one.id] = player_one
 
-    asyncio.run(server.set_board(room, dm, "phandalin"))
+    asyncio.run(server.set_board(room, dm, "windmill"))
     dm_update = dm_socket.messages[-1]
     player_update = player_socket.messages[-1]
 
     assert dm_update["type"] == "board_updated"
-    assert dm_update["board"]["id"] == "phandalin"
-    assert dm_update["board"]["width"] == 4000
-    assert dm_update["board"]["height"] == 2788
+    assert dm_update["board"]["id"] == "windmill"
+    assert dm_update["board"]["width"] == 2500
+    assert dm_update["board"]["height"] == 1618
     assert player_update["type"] == "board_updated"
-    assert player_update["board"]["id"] == "phandalin"
+    assert player_update["board"]["id"] == "windmill"
+
+
+def test_dm_can_switch_to_blank_board() -> None:
+    room = server.get_or_create_room("blank-board-switch-test")
+    room.board_id = "windmill"
+    dm_socket = FakeSocket()
+    dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
+    room.players[dm.id] = dm
+
+    asyncio.run(server.set_board(room, dm, "-"))
+
+    assert room.board_id == "-"
+    assert dm_socket.messages[-1]["type"] == "board_updated"
+    assert dm_socket.messages[-1]["board"] == {"id": "-", "name": "-", "width": 1200, "height": 720}
+
+
+def test_switching_boards_while_hidden_resets_fog_reveals() -> None:
+    room = server.get_or_create_room("board-fog-reset-test")
+    dm_socket = FakeSocket()
+    player_socket = FakeSocket()
+    dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
+    player = server.Player(id="connection-2", name="Player 1", player_key="player-1", websocket=player_socket, room_id=room.id)
+    room.players[dm.id] = dm
+    room.players[player.id] = player
+    room.fog.hideMode = True
+    room.fog.revealedAreas.append(server.RevealedArea(x=100, y=120, radius=80))
+
+    asyncio.run(server.set_board(room, dm, "windmill"))
+
+    assert room.board_id == "windmill"
+    assert room.fog.hideMode is True
+    assert room.fog.revealedAreas == []
+    assert [message["type"] for message in dm_socket.messages] == ["board_updated", "fog_updated"]
+    assert dm_socket.messages[-1]["fog"] == {"hideMode": True, "brushSize": 120, "revealedAreas": []}
+    assert [message["type"] for message in player_socket.messages] == ["board_updated", "fog_updated"]
+
+
+def test_switching_boards_while_unhidden_does_not_reset_fog() -> None:
+    room = server.get_or_create_room("board-fog-unhidden-test")
+    dm_socket = FakeSocket()
+    dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
+    room.players[dm.id] = dm
+    room.fog.hideMode = False
+    room.fog.revealedAreas.append(server.RevealedArea(x=100, y=120, radius=80))
+
+    asyncio.run(server.set_board(room, dm, "windmill"))
+
+    assert room.board_id == "windmill"
+    assert room.fog.revealedAreas == [server.RevealedArea(x=100, y=120, radius=80)]
+    assert [message["type"] for message in dm_socket.messages] == ["board_updated"]
 
 
 def test_saved_room_state_loads_selected_board(tmp_path, monkeypatch) -> None:
@@ -480,7 +543,7 @@ def test_saved_room_state_loads_selected_board(tmp_path, monkeypatch) -> None:
         dm.receive_json()
         dm.send_json({"type": "join_room", "roomId": "board-save-test", "playerKey": "dm"})
         dm.receive_json()
-        dm.send_json({"type": "set_board", "boardId": "phandalin"})
+        dm.send_json({"type": "set_board", "boardId": "windmill"})
         dm.receive_json()
 
         saved = client.post("/api/rooms/board-save-test/save?playerKey=dm")
@@ -493,7 +556,7 @@ def test_saved_room_state_loads_selected_board(tmp_path, monkeypatch) -> None:
         dm.send_json({"type": "join_room", "roomId": "board-save-test", "playerKey": "dm"})
         state = dm.receive_json()
 
-    assert state["board"]["id"] == "phandalin"
+    assert state["board"]["id"] == "windmill"
 
 
 def test_only_dm_can_load_registry_asset() -> None:
@@ -542,7 +605,7 @@ def test_shared_monsters_are_available_as_global_assets() -> None:
 
 def test_dm_loaded_asset_uses_active_board_center() -> None:
     room = server.get_or_create_room("asset-board-size-test")
-    room.board_id = "phandalin"
+    room.board_id = "windmill"
     dm_socket = FakeSocket()
     dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
     room.players[dm.id] = dm
@@ -550,8 +613,8 @@ def test_dm_loaded_asset_uses_active_board_center() -> None:
     asyncio.run(server.load_asset_token(room, dm, "monster", "aboleth"))
 
     monster = room.tokens["monster-1"]
-    assert monster.x == 2000
-    assert monster.y == 1394
+    assert monster.x == 1250
+    assert monster.y == 809
     assert monster.radius == 70
 
 
@@ -602,7 +665,7 @@ def test_dm_can_clear_scene_without_resetting_fog_or_board() -> None:
     dm_socket = FakeSocket()
     dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
     room.players[dm.id] = dm
-    room.board_id = "phandalin"
+    room.board_id = "windmill"
     room.fog.hideMode = True
     room.fog.revealedAreas.append(server.RevealedArea(x=20, y=30, radius=40))
     room.tokens["player-1"].inScene = True
@@ -612,7 +675,7 @@ def test_dm_can_clear_scene_without_resetting_fog_or_board() -> None:
 
     assert all(token.inScene is False for token in room.tokens.values())
     assert all(token.lockedBy is None for token in room.tokens.values())
-    assert room.board_id == "phandalin"
+    assert room.board_id == "windmill"
     assert room.fog.hideMode is True
     assert room.fog.revealedAreas == [server.RevealedArea(x=20, y=30, radius=40)]
     assert dm_socket.messages[-1]["type"] == "room_state"
@@ -772,7 +835,7 @@ def test_resize_token_clamps_position_to_active_board() -> None:
 
 def test_dm_can_resize_token_above_old_fixed_limit_on_large_board() -> None:
     room = server.get_or_create_room("resize-large-board-test")
-    room.board_id = "phandalin"
+    room.board_id = "windmill"
     dm_socket = FakeSocket()
     dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
     room.players[dm.id] = dm
