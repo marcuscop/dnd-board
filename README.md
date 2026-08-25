@@ -31,12 +31,20 @@ Start the frontend in another terminal:
 npm run dev -- --host 127.0.0.1
 ```
 
-Open:
+Open board tabs:
 
 ```text
 http://127.0.0.1:5173/?campaign=test-campaign&player=dm
 http://127.0.0.1:5173/?campaign=test-campaign&player=Marina
 http://127.0.0.1:5173/?campaign=test-campaign&player=Edward
+```
+
+Open sheet tabs:
+
+```text
+http://127.0.0.1:5173/test-campaign/player=dm/sheet
+http://127.0.0.1:5173/test-campaign/player=Marina/sheet
+http://127.0.0.1:5173/test-campaign/player=Edward/sheet
 ```
 
 `player=dm` opens DM controls. Player names come from the party config.
