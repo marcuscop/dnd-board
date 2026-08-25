@@ -566,6 +566,120 @@ canvas.is-dragging,
   gap: 8px;
 }
 
+.sheet-stat-row {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(86px, 1fr));
+  gap: 8px;
+}
+
+.sheet-stat-row div,
+.sheet-panel {
+  border: 1px solid rgba(216, 156, 70, 0.58);
+  border-radius: 6px;
+  background: rgba(31, 18, 9, 0.82);
+}
+
+.sheet-stat-row div {
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  min-height: 72px;
+  padding: 8px;
+}
+
+.sheet-stat-row span,
+.sheet-panel span,
+.resource-row p,
+.feature-list p {
+  color: #d8b778;
+}
+
+.sheet-stat-row strong {
+  color: #f7dfaa;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.sheet-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.sheet-panel {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+}
+
+.compact-list,
+.tag-list,
+.skill-grid,
+.feature-list,
+.resource-list {
+  display: grid;
+  gap: 6px;
+}
+
+.compact-list span,
+.tag-list span,
+.skill-grid span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  border: 1px solid rgba(216, 156, 70, 0.28);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: rgba(20, 12, 6, 0.54);
+}
+
+.skill-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.skill-grid span.proficient {
+  border-color: rgba(247, 223, 170, 0.62);
+}
+
+.resource-row,
+.feature-list article {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(216, 156, 70, 0.28);
+  border-radius: 6px;
+  padding: 8px;
+  background: rgba(20, 12, 6, 0.54);
+}
+
+.resource-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.resource-row p {
+  grid-column: 1 / -1;
+  font-size: 0.84rem;
+}
+
+.stepper {
+  display: grid;
+  grid-template-columns: 34px 56px 34px;
+  align-items: center;
+  gap: 4px;
+}
+
+.stepper button {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+
+.stepper strong {
+  text-align: center;
+}
+
 .attack-actions {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) minmax(120px, auto) minmax(100px, auto);
@@ -756,6 +870,10 @@ canvas.is-dragging,
 
   .ability-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sheet-stat-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .sheet-grid,

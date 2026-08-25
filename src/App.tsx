@@ -609,6 +609,22 @@ export function App() {
     [playerKey]
   );
 
+  const updateResource = useCallback(
+    async (sheet: CharacterSheet, resourceId: string, currentUses: number) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/resources/${encodeURIComponent(resourceId)}?playerKey=${encodeURIComponent(playerKey)}&currentUses=${encodeURIComponent(currentUses)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      const body = (await response.json()) as { sheet: CharacterSheet };
+      setSheets((current) => current.map((candidate) => (candidate.id === body.sheet.id ? body.sheet : candidate)));
+    },
+    [playerKey]
+  );
+
   if (view === "sheet") {
     return (
       <SheetView
@@ -618,6 +634,7 @@ export function App() {
         onExpand={setExpandedSheetId}
         onRollDamage={rollDamage}
         onRollAttack={rollAttack}
+        onUpdateResource={updateResource}
         playerKey={playerKey}
         rollResolutions={rollResolutions}
         rolls={rolls}
@@ -796,6 +813,7 @@ type SheetViewProps = {
   onExpand: (sheetId: string | null) => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
+  onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   playerKey: string;
   rollResolutions: RollResolution[];
   rolls: RollPayload[];
@@ -804,7 +822,7 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, onRollDamage, playerKey, rollResolutions, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, onRollDamage, onUpdateResource, playerKey, rollResolutions, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === "character"), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== "character"), [sheets]);
@@ -855,6 +873,7 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, 
           onDragRollStart={setDraggingRollId}
           onRollAttack={onRollAttack}
           onRollDamage={onRollDamage}
+          onUpdateResource={onUpdateResource}
           onClose={() => onExpand(null)}
         />
       ) : (
@@ -1118,7 +1137,8 @@ function FullSheet({
   onDragRollStart,
   onClose,
   onRollAttack,
-  onRollDamage
+  onRollDamage,
+  onUpdateResource
 }: {
   sheet: CharacterSheet;
   canRoll: boolean;
@@ -1129,8 +1149,10 @@ function FullSheet({
   onClose: () => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
+  onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
 }) {
   const scores = Object.entries(sheet.abilityScores);
+  const metadata = [sheet.race, sheet.background, sheet.alignment].filter(Boolean).join(" · ");
 
   return (
     <section className="full-sheet">
@@ -1143,7 +1165,8 @@ function FullSheet({
           <div>
             <h2>{sheet.name}</h2>
             <p className="status">
-              HP {sheet.hp.current}/{sheet.hp.max} · AC {sheet.armorClass} · Initiative {formatSigned(sheet.initiativeBonus)}
+              {sheet.characterClass.name} {sheet.characterClass.level}
+              {metadata ? ` · ${metadata}` : ""}
             </p>
           </div>
         </div>
@@ -1171,12 +1194,75 @@ function FullSheet({
         ))}
       </div>
 
-      <div className="attack-list">
+      <div className="sheet-stat-row">
+        <SheetStat label="Armor" value={String(sheet.armorClass)} />
+        <SheetStat label="Initiative" value={formatSigned(sheet.initiativeBonus)} />
+        <SheetStat label="Speed" value={`${sheet.speed} ft`} />
+        <SheetStat label="Proficiency" value={formatSigned(sheet.proficiencyBonus)} />
+        <SheetStat label="HP" value={`${sheet.hp.current}/${sheet.hp.max}`} />
+        <SheetStat label="Temp HP" value={String(sheet.hp.temporary)} />
+      </div>
+
+      <div className="sheet-columns">
+        <section className="sheet-panel">
+          <h2>Saving Throws</h2>
+          <div className="compact-list">
+            {sheet.savingThrows.map((save) => (
+              <span key={save.ability}>
+                {cleanName(save.ability)} {save.proficient ? "*" : ""} <strong>{formatSigned(save.modifier)}</strong>
+              </span>
+            ))}
+          </div>
+        </section>
+
+        <section className="sheet-panel">
+          <h2>Passive</h2>
+          <div className="compact-list">
+            {Object.entries(sheet.passiveChecks).map(([name, value]) => (
+              <span key={name}>
+                {cleanName(name)} <strong>{value}</strong>
+              </span>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      {sheet.resources.length > 0 && (
+        <section className="sheet-panel">
+          <h2>Resources</h2>
+          <div className="resource-list">
+            {sheet.resources.map((resource) => (
+              <div className="resource-row" key={resource.id}>
+                <div>
+                  <strong>{resource.name}</strong>
+                  <span>
+                    {resource.activationLabel} · {resource.resetLabel}
+                  </span>
+                </div>
+                <div className="stepper">
+                  <button disabled={!canRoll || resource.currentUses <= 0} onClick={() => onUpdateResource(sheet, resource.id, resource.currentUses - 1)}>
+                    -
+                  </button>
+                  <strong>
+                    {resource.currentUses}/{resource.maxUses}
+                  </strong>
+                  <button disabled={!canRoll || resource.currentUses >= resource.maxUses} onClick={() => onUpdateResource(sheet, resource.id, resource.currentUses + 1)}>
+                    +
+                  </button>
+                </div>
+                {resource.description && <p>{resource.description}</p>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="attack-list sheet-panel">
         <h2>Attacks</h2>
         {sheet.attacks.map((attack) => (
           <div className="attack-actions" key={attack.id}>
             <span>
-              {attack.name} · {attack.damageDie}
+              {attack.name} · {attack.abilityLabel} · {attack.damageDie} {attack.damageTypeLabel}
             </span>
             <button disabled={!canRoll} onClick={() => onRollAttack(sheet, attack.id)}>
               Attack Roll
@@ -1186,8 +1272,73 @@ function FullSheet({
             </button>
           </div>
         ))}
-      </div>
+      </section>
+
+      <section className="sheet-panel">
+        <h2>Skills</h2>
+        <div className="skill-grid">
+          {sheet.skills.map((skill) => (
+            <span key={skill.name} className={skill.proficiency !== "none" ? "proficient" : ""}>
+              {cleanName(skill.name)} <strong>{formatSigned(skill.modifier)}</strong>
+            </span>
+          ))}
+        </div>
+      </section>
+
+      {(sheet.features.length > 0 || sheet.proficiencies.length > 0 || sheet.equipment.length > 0) && (
+        <div className="sheet-columns">
+          {sheet.features.length > 0 && (
+            <section className="sheet-panel">
+              <h2>Features</h2>
+              <div className="feature-list">
+                {sheet.features.map((feature) => (
+                  <article key={feature.id}>
+                    <strong>{feature.name}</strong>
+                    <span>
+                      {feature.source}
+                      {feature.source ? " · " : ""}
+                      {feature.activationLabel}
+                    </span>
+                    {feature.description && <p>{feature.description}</p>}
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {sheet.proficiencies.length > 0 && (
+            <section className="sheet-panel">
+              <h2>Proficiencies</h2>
+              <div className="tag-list">{sheet.proficiencies.map((proficiency) => <span key={proficiency}>{proficiency}</span>)}</div>
+            </section>
+          )}
+
+          {sheet.equipment.length > 0 && (
+            <section className="sheet-panel">
+              <h2>Equipment</h2>
+              <div className="compact-list">
+                {sheet.equipment.map((item) => (
+                  <span key={item.id}>
+                    {item.equipped ? "* " : ""}
+                    {item.name}
+                    {item.quantity > 1 ? ` x${item.quantity}` : ""}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
     </section>
+  );
+}
+
+function SheetStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -1676,6 +1827,10 @@ function resolutionLogText(resolution: RollResolution, sheets: CharacterSheet[])
 
 function shortAbilityName(ability: string) {
   return ability.slice(0, 3).toUpperCase();
+}
+
+function cleanName(identifier: string) {
+  return identifier.replace(/([A-Z])/g, " $1").replace(/[-_]/g, " ").replace(/\b\w/g, (match) => match.toUpperCase()).trim();
 }
 
 function assetKey(asset: Asset | undefined) {

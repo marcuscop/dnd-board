@@ -14,9 +14,26 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
+from dnd_board.character_sheet import (
+    AbilityScores,
+    CharacterSheet,
+    PartyMember,
+    RollKind,
+    RollPayload,
+    RollResolution,
+    ability_scores_from_dict,
+    build_character_sheet,
+    build_roll_payload,
+    party_member_sheet_from_dict,
+    positive_int,
+    resolve_roll_against_target as resolve_dnd_roll_against_target,
+    roll_payload_to_dict,
+    roll_resolution_to_dict,
+    sheet_to_dict,
+)
+
 AssetKind = Literal["asset"]
 TokenKind = Literal["character", "asset"]
-RollKind = Literal["attack", "damage"]
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -99,94 +116,6 @@ class Asset:
 
 
 @dataclass
-class PartyMember:
-    id: str
-    name: str
-    owner: str
-    avatarUrl: str | None
-    abilityScores: AbilityScores | None = None
-    maxHp: int | None = None
-
-
-@dataclass
-class AbilityScores:
-    strength: int
-    dexterity: int
-    constitution: int
-    intelligence: int
-    wisdom: int
-    charisma: int
-
-
-@dataclass
-class HitPoints:
-    current: int
-    max: int
-    temporary: int
-
-
-@dataclass
-class AttackAction:
-    id: str
-    name: str
-    ability: str
-    damageDie: str
-
-
-@dataclass
-class CharacterClass:
-    name: str
-    level: int
-
-
-@dataclass
-class CharacterSheet:
-    id: str
-    tokenId: str
-    kind: TokenKind
-    name: str
-    owner: str
-    avatarUrl: str | None
-    characterClass: CharacterClass
-    hp: HitPoints
-    abilityScores: AbilityScores
-    armorClass: int
-    initiativeBonus: int
-    conditions: list[str]
-    attacks: list[AttackAction]
-
-
-@dataclass
-class RollPayload:
-    id: str
-    sheetId: str
-    tokenId: str
-    roller: str
-    kind: RollKind
-    label: str
-    iconUrl: str | None
-    action: AttackAction
-    dice: list[int]
-    die: str
-    modifier: int
-    total: int
-    createdAt: int
-
-
-@dataclass
-class RollResolution:
-    id: str
-    roll: RollPayload
-    targetSheetId: str
-    targetTokenId: str
-    targetName: str
-    targetArmorClass: int
-    targetHp: HitPoints
-    outcome: str
-    createdAt: int
-
-
-@dataclass
 class Campaign:
     id: str
     name: str
@@ -203,6 +132,7 @@ class Room:
     next_token_number: int
     pending_rolls: dict[str, RollPayload]
     hit_points: dict[str, int]
+    resource_uses: dict[str, dict[str, int]]
 
 
 app = FastAPI()
@@ -302,6 +232,26 @@ async def roll_sheet_attack(room_id: str, sheet_id: str, playerKey: str, attackI
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/damage")
 async def roll_sheet_damage(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand") -> dict[str, Any]:
     return await create_sheet_roll(room_id, sheet_id, playerKey, attackId, "damage")
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/resources/{resource_id}")
+async def update_sheet_resource(room_id: str, sheet_id: str, resource_id: str, playerKey: str, currentUses: int) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-resource", name="Sheet Tracker", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    sheet = get_visible_sheet(room, player, sanitize_asset_id(sheet_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    if not can_control_sheet_roll(player, sheet):
+        raise HTTPException(status_code=403, detail="Cannot update this sheet")
+
+    resource = next((candidate for candidate in sheet.resources if sanitize_asset_id(candidate.id) == sanitize_asset_id(resource_id)), None)
+    if resource is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    room.resource_uses.setdefault(sheet.tokenId, {})[resource.id] = clamp_int(int(currentUses), 0, resource.maxUses)
+    updated = get_visible_sheet(room, player, sheet.id)
+    return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else sheet_to_dict(sheet)}
 
 
 @app.post("/api/rooms/{room_id}/rolls/{roll_id}/resolve")
@@ -686,6 +636,7 @@ def get_or_create_room(room_id: str) -> Room:
         next_token_number=next_dynamic_token_number(tokens),
         pending_rolls={},
         hit_points={},
+        resource_uses=load_saved_resource_uses(room_id),
     )
     rooms[room_id] = room
     return room
@@ -798,30 +749,17 @@ def can_control_sheet_roll(player: Player, sheet: CharacterSheet) -> bool:
 
 def token_to_sheet(token: Token, campaign_id: str | None = None, current_hp: int | None = None) -> CharacterSheet:
     party_member = party_member_by_id(token.id, campaign_id) if token.kind == "character" else None
-    ability_scores = party_member.abilityScores if party_member and party_member.abilityScores else generated_ability_scores(token.id)
-    max_hp = party_member.maxHp if party_member and party_member.maxHp is not None else generated_max_hp(token.id, ability_scores)
-    dexterity_modifier = ability_modifier(ability_scores.dexterity)
-    return CharacterSheet(
-        id=token.id,
-        tokenId=token.id,
+    room = rooms.get(campaign_id or "")
+    resource_overrides = room.resource_uses.get(token.id, {}) if room is not None else {}
+    return build_character_sheet(
+        token_id=token.id,
         kind=token.kind,
         name=token.name,
         owner=token.owner,
-        avatarUrl=token.avatarUrl,
-        characterClass=CharacterClass(name="Adventurer" if token.kind == "character" else "Creature", level=1),
-        hp=HitPoints(current=clamp_int(current_hp, 0, max_hp) if current_hp is not None else max_hp, max=max_hp, temporary=0),
-        abilityScores=ability_scores,
-        armorClass=12 + min(3, dexterity_modifier),
-        initiativeBonus=dexterity_modifier,
-        conditions=[],
-        attacks=[
-            AttackAction(
-                id="main-hand",
-                name="Main Hand",
-                ability="strength",
-                damageDie="1d8",
-            )
-        ],
+        avatar_url=token.avatarUrl,
+        party_member=party_member,
+        current_hp=current_hp,
+        resource_overrides=resource_overrides,
     )
 
 
@@ -835,79 +773,25 @@ async def create_sheet_roll(room_id: str, sheet_id: str, player_key: str, attack
     if not can_control_sheet_roll(player, sheet):
         raise HTTPException(status_code=403, detail="Cannot roll for this sheet")
 
-    action = next((attack for attack in sheet.attacks if attack.id == sanitize_asset_id(attack_id)), None)
+    sanitized_attack_id = sanitize_asset_id(attack_id)
+    action = next((attack for attack in sheet.attacks if attack.id == sanitized_attack_id), None)
+    if action is None and sanitized_attack_id == "main-hand" and sheet.attacks:
+        action = sheet.attacks[0]
     if action is None:
         raise HTTPException(status_code=404, detail="Attack not found")
 
-    payload = build_roll_payload(sheet, player, action, roll_kind)
+    payload = build_roll_payload(sheet, player.player_key, action, roll_kind)
     room.pending_rolls[sheet.tokenId] = payload
     roll = roll_payload_to_dict(payload)
     await broadcast(room, {"type": "roll_created", "roll": roll})
     return {"roomId": room.id, "roll": roll}
 
 
-def build_roll_payload(sheet: CharacterSheet, player: Player, action: AttackAction, roll_kind: RollKind) -> RollPayload:
-    modifier = ability_modifier(getattr(sheet.abilityScores, action.ability))
-    created_at = time_ns()
-    if roll_kind == "attack":
-        dice = [random.randint(1, 20)]
-        die = "d20"
-        label = "Attack Roll"
-        icon_url = None
-    else:
-        count, sides = parse_die(action.damageDie)
-        dice = [random.randint(1, sides) for _ in range(count)]
-        die = action.damageDie
-        label = "Damage Roll"
-        icon_url = None
-
-    return RollPayload(
-        id=f"roll-{created_at}",
-        sheetId=sheet.id,
-        tokenId=sheet.tokenId,
-        roller=player.player_key,
-        kind=roll_kind,
-        label=label,
-        iconUrl=icon_url,
-        action=action,
-        dice=dice,
-        die=die,
-        modifier=modifier,
-        total=sum(dice) + modifier,
-        createdAt=created_at,
-    )
-
-
 def resolve_roll_against_target(room: Room, roll: RollPayload, target: CharacterSheet) -> RollResolution:
-    if roll.kind == "attack":
-        outcome = "hits" if roll.total >= target.armorClass else "misses"
-        target_hp = target.hp
-    else:
-        next_hp = max(0, target.hp.current - max(0, roll.total))
-        room.hit_points[target.tokenId] = next_hp
-        target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=target.hp.temporary)
-        outcome = f"deals {roll.total} damage"
-
-    return RollResolution(
-        id=f"resolution-{time_ns()}",
-        roll=roll,
-        targetSheetId=target.id,
-        targetTokenId=target.tokenId,
-        targetName=target.name,
-        targetArmorClass=target.armorClass,
-        targetHp=target_hp,
-        outcome=outcome,
-        createdAt=time_ns(),
-    )
-
-
-def parse_die(die: str) -> tuple[int, int]:
-    count_text, sides_text = die.lower().split("d", 1)
-    count = int(count_text or "1")
-    sides = int(sides_text)
-    if count < 1 or count > 20 or sides < 2 or sides > 100:
-        raise ValueError("Unsupported damage die")
-    return count, sides
+    resolution = resolve_dnd_roll_against_target(roll, target)
+    if roll.kind == "damage":
+        room.hit_points[target.tokenId] = resolution.targetHp.current
+    return resolution
 
 
 def party_member_by_id(member_id: str, campaign_id: str | None = None) -> PartyMember | None:
@@ -915,46 +799,6 @@ def party_member_by_id(member_id: str, campaign_id: str | None = None) -> PartyM
         if member.id == member_id:
             return member
     return None
-
-
-def generated_ability_scores(seed: str) -> AbilityScores:
-    rng = random.Random(seed)
-    return AbilityScores(
-        strength=rng.randint(8, 15),
-        dexterity=rng.randint(8, 15),
-        constitution=rng.randint(8, 15),
-        intelligence=rng.randint(8, 15),
-        wisdom=rng.randint(8, 15),
-        charisma=rng.randint(8, 15),
-    )
-
-
-def generated_max_hp(seed: str, ability_scores: AbilityScores) -> int:
-    rng = random.Random(f"{seed}:hp")
-    return max(1, rng.randint(8, 24) + ability_modifier(ability_scores.constitution))
-
-
-def ability_modifier(score: int) -> int:
-    return (score - 10) // 2
-
-
-def format_modifier(modifier: int) -> str:
-    return f"+{modifier}" if modifier >= 0 else str(modifier)
-
-
-def sheet_to_dict(sheet: CharacterSheet) -> dict[str, Any]:
-    data = asdict(sheet)
-    if data["avatarUrl"] is None:
-        data.pop("avatarUrl")
-    return data
-
-
-def roll_payload_to_dict(payload: RollPayload) -> dict[str, Any]:
-    return asdict(payload)
-
-
-def roll_resolution_to_dict(resolution: RollResolution) -> dict[str, Any]:
-    return asdict(resolution)
 
 
 async def broadcast(room: Room, message: dict[str, Any]) -> None:
@@ -1017,6 +861,7 @@ def save_room_to_disk(room: Room) -> None:
         "tokens": [token_to_dict(token) for token in room.tokens.values()],
         "fog": fog_to_dict(room.fog),
         "boardId": room.board_id,
+        "resources": room.resource_uses,
     }
     path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -1038,6 +883,7 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.next_token_number = next_dynamic_token_number(tokens)
     room.pending_rolls = {}
     room.hit_points = {}
+    room.resource_uses = load_saved_resource_uses(room.id)
     await broadcast_room_state(room)
     return True
 
@@ -1078,6 +924,36 @@ def load_saved_board_id(room_id: str) -> str:
         return board_id if get_board(board_id, room_id) is not None else default_board_id(room_id)
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return default_board_id(room_id)
+
+
+def load_saved_resource_uses(room_id: str) -> dict[str, dict[str, int]]:
+    path = existing_save_path(room_id)
+    if not path.exists():
+        return {}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    raw_resources = data.get("resources")
+    if not isinstance(raw_resources, dict):
+        return {}
+
+    resources: dict[str, dict[str, int]] = {}
+    for raw_token_id, raw_token_resources in raw_resources.items():
+        if not isinstance(raw_token_resources, dict):
+            continue
+        token_id = sanitize_asset_id(str(raw_token_id))
+        token_resources: dict[str, int] = {}
+        for raw_resource_id, raw_current_uses in raw_token_resources.items():
+            try:
+                token_resources[sanitize_asset_id(str(raw_resource_id))] = max(0, int(raw_current_uses))
+            except (TypeError, ValueError):
+                continue
+        if token_id and token_resources:
+            resources[token_id] = token_resources
+    return resources
 
 
 def token_from_dict(data: dict[str, Any], board: Board | None = None, campaign_id: str | None = None) -> Token:
@@ -1187,43 +1063,10 @@ def load_party_members_from_manifest(path: Path, campaign_id: str | None = None)
                 avatarUrl=campaign_file_url("party", image_path, campaign_id) if image_path is not None else None,
                 abilityScores=ability_scores_from_dict(raw_member.get("abilityScores")),
                 maxHp=positive_int(raw_member.get("maxHp")),
+                sheet=party_member_sheet_from_dict(raw_member.get("sheet")),
             )
         )
     return members
-
-
-def ability_scores_from_dict(value: Any) -> AbilityScores | None:
-    if not isinstance(value, dict):
-        return None
-
-    try:
-        scores = AbilityScores(
-            strength=clamped_ability_score(value.get("strength")),
-            dexterity=clamped_ability_score(value.get("dexterity")),
-            constitution=clamped_ability_score(value.get("constitution")),
-            intelligence=clamped_ability_score(value.get("intelligence")),
-            wisdom=clamped_ability_score(value.get("wisdom")),
-            charisma=clamped_ability_score(value.get("charisma")),
-        )
-    except (TypeError, ValueError):
-        return None
-
-    return scores
-
-
-def clamped_ability_score(value: Any) -> int:
-    score = int(value)
-    if score < 1 or score > 30:
-        raise ValueError("Ability scores must be between 1 and 30")
-    return score
-
-
-def positive_int(value: Any) -> int | None:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
 
 
 def normalize_party_member_id(value: str, fallback: str) -> str:

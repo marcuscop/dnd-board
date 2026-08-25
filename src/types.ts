@@ -46,11 +46,41 @@ export type Asset = {
   avatarUrl: string;
 };
 
+export type AbilityType = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
+export type DamageType =
+  | "acid"
+  | "bludgeoning"
+  | "cold"
+  | "fire"
+  | "force"
+  | "lightning"
+  | "necrotic"
+  | "piercing"
+  | "poison"
+  | "psychic"
+  | "radiant"
+  | "slashing"
+  | "thunder";
+export type DiceType = "d4" | "d6" | "d8" | "d10" | "d12" | "d20";
+export type TimeEconomy = "action" | "bonusAction" | "reaction" | "movement" | "passive" | "special";
+export type ProficiencyLevel = "none" | "proficient" | "expertise";
+
 export type AttackAction = {
   id: string;
   name: string;
-  ability: string;
+  ability: AbilityType;
+  abilityLabel: string;
+  damageDiceCount: number;
+  damageDiceType: DiceType;
   damageDie: string;
+  damageType: DamageType;
+  damageTypeLabel: string;
+  proficient: boolean;
+  toHitBonus: number;
+  damageBonus: number;
+  activation: TimeEconomy;
+  activationLabel: string;
+  properties: string[];
 };
 
 export type AbilityScores = {
@@ -73,16 +103,69 @@ export type CharacterSheet = {
     name: string;
     level: number;
   };
+  classes: {
+    name: string;
+    level: number;
+    subclass?: string;
+    fightingStyle?: string;
+  }[];
+  race: string;
+  background: string;
+  alignment: string;
+  proficiencyBonus: number;
   hp: {
     current: number;
     max: number;
     temporary: number;
   };
   abilityScores: AbilityScores;
+  abilityModifiers: AbilityScores;
   armorClass: number;
   initiativeBonus: number;
+  speed: number;
+  savingThrows: {
+    ability: AbilityType;
+    proficient: boolean;
+    modifier: number;
+  }[];
+  skills: {
+    name: string;
+    ability: AbilityType;
+    proficiency: ProficiencyLevel;
+    modifier: number;
+    passive: number;
+  }[];
+  passiveChecks: Record<string, number>;
+  resources: {
+    id: string;
+    name: string;
+    currentUses: number;
+    maxUses: number;
+    reset: string;
+    resetLabel: string;
+    activation: TimeEconomy;
+    activationLabel: string;
+    description: string;
+  }[];
+  features: {
+    id: string;
+    name: string;
+    source: string;
+    activation: TimeEconomy;
+    activationLabel: string;
+    description: string;
+  }[];
+  proficiencies: string[];
   conditions: string[];
   attacks: AttackAction[];
+  equipment: {
+    id: string;
+    name: string;
+    equipped: boolean;
+    quantity: number;
+    weight: number;
+    notes: string;
+  }[];
 };
 
 export type RollPayload = {

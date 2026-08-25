@@ -265,3 +265,7 @@ POETRY_VERSION=2.3.4
 ```
 
 `--only main` keeps Render from installing local-only test and image-generation dependencies such as Torch and Diffusers.
+
+## Design
+
+See [DESIGN.md](DESIGN.md) for the character sheet and rules-model design philosophy.

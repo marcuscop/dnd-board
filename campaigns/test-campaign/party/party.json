@@ -3,7 +3,65 @@
     {
       "id": "player-1",
       "name": "Marina",
-      "image": "ex1.png"
+      "image": "ex1.png",
+      "maxHp": 31,
+      "abilityScores": {
+        "strength": 16,
+        "dexterity": 14,
+        "constitution": 15,
+        "intelligence": 10,
+        "wisdom": 12,
+        "charisma": 8
+      },
+      "sheet": {
+        "race": "Human",
+        "background": "Soldier",
+        "alignment": "Neutral Good",
+        "armorClass": 18,
+        "speed": 30,
+        "classes": [
+          {
+            "name": "FIGHTER",
+            "level": 3,
+            "subclass": "Champion",
+            "fightingStyle": "DEFENSE"
+          }
+        ],
+        "skills": {
+          "athletics": "PROFICIENT",
+          "intimidation": "PROFICIENT",
+          "perception": "PROFICIENT",
+          "survival": "PROFICIENT"
+        },
+        "savingThrowProficiencies": ["STRENGTH", "CONSTITUTION"],
+        "proficiencies": ["All armor", "Shields", "Simple weapons", "Martial weapons", "Dice set", "Vehicles"],
+        "attacks": [
+          {
+            "id": "longsword",
+            "name": "Longsword",
+            "ability": "STRENGTH",
+            "damageDiceCount": 1,
+            "damageDiceType": "D8",
+            "damageType": "SLASHING",
+            "properties": ["Versatile 1d10"]
+          },
+          {
+            "id": "longbow",
+            "name": "Longbow",
+            "ability": "DEXTERITY",
+            "damageDiceCount": 1,
+            "damageDiceType": "D8",
+            "damageType": "PIERCING",
+            "properties": ["Ammunition", "Heavy", "Two-handed"]
+          }
+        ],
+        "equipment": [
+          { "id": "chain-mail", "name": "Chain Mail", "equipped": true, "quantity": 1, "weight": 55 },
+          { "id": "shield", "name": "Shield", "equipped": true, "quantity": 1, "weight": 6 },
+          { "id": "longsword", "name": "Longsword", "equipped": true, "quantity": 1, "weight": 3 },
+          { "id": "longbow", "name": "Longbow", "equipped": false, "quantity": 1, "weight": 2 }
+        ]
+      }
     },
     {
       "id": "player-2",

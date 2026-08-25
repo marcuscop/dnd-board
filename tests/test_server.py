@@ -970,9 +970,12 @@ def test_sheet_endpoint_returns_party_sheets_for_player() -> None:
     marina = body["sheets"][0]
     assert marina["name"] == "Marina"
     assert marina["hp"]["current"] == marina["hp"]["max"]
-    assert marina["characterClass"] == {"name": "Adventurer", "level": 1}
+    assert marina["characterClass"] == {"name": "Fighter", "level": 3}
+    assert marina["race"] == "Human"
+    assert marina["resources"][0]["id"] == "secondWind"
+    assert any(resource["id"] == "actionSurge" for resource in marina["resources"])
     assert set(marina["abilityScores"]) == {"strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"}
-    assert marina["attacks"][0]["id"] == "main-hand"
+    assert marina["attacks"][0]["id"] == "longsword"
     assert marina["attacks"][0]["damageDie"] == "1d8"
     assert body["pendingRolls"] == []
 
@@ -1018,6 +1021,17 @@ def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
     assert dm_roll.json()["roll"]["roller"] == "dm"
     assert dm_socket.messages[0] == {"type": "roll_created", "roll": own_roll_body}
     assert player_socket.messages[0] == {"type": "roll_created", "roll": own_roll_body}
+
+
+def test_player_can_update_owned_sheet_resource() -> None:
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/resource-test/sheet/player-1/resources/actionSurge?playerKey=player-1&currentUses=0")
+    sheet = client.get("/api/rooms/resource-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    action_surge = next(resource for resource in sheet["resources"] if resource["id"] == "actionSurge")
+
+    assert response.status_code == 200
+    assert action_surge["currentUses"] == 0
 
 
 def test_sheet_roll_queue_keeps_one_pending_roll_per_character_and_resolves(monkeypatch) -> None:
