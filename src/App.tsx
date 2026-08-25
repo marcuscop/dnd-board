@@ -846,6 +846,13 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, 
         <FullSheet
           sheet={expandedSheet}
           canRoll={canRollSheet(expandedSheet, playerKey, isDm)}
+          pendingRoll={rolls.find((roll) => roll.tokenId === expandedSheet.tokenId)}
+          rollDraggable={isDm}
+          onDragRollEnd={() => {
+            setDraggingRollId(null);
+            setDropTargetSheetId(null);
+          }}
+          onDragRollStart={setDraggingRollId}
           onRollAttack={onRollAttack}
           onRollDamage={onRollDamage}
           onClose={() => onExpand(null)}
@@ -1105,12 +1112,20 @@ function RollLogRow({ roll, roller }: { roll: RollPayload; roller: CharacterShee
 function FullSheet({
   sheet,
   canRoll,
+  pendingRoll,
+  rollDraggable,
+  onDragRollEnd,
+  onDragRollStart,
   onClose,
   onRollAttack,
   onRollDamage
 }: {
   sheet: CharacterSheet;
   canRoll: boolean;
+  pendingRoll: RollPayload | undefined;
+  rollDraggable: boolean;
+  onDragRollEnd: () => void;
+  onDragRollStart: (rollId: string) => void;
   onClose: () => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
@@ -1131,6 +1146,18 @@ function FullSheet({
               HP {sheet.hp.current}/{sheet.hp.max} · AC {sheet.armorClass} · Initiative {formatSigned(sheet.initiativeBonus)}
             </p>
           </div>
+        </div>
+        <div className="full-sheet-roll-slot">
+          {pendingRoll && (
+            <RollCard
+              roll={pendingRoll}
+              roller={sheet}
+              draggable={false}
+              compact
+              onDragEnd={onDragRollEnd}
+              onDragStart={() => onDragRollStart(pendingRoll.id)}
+            />
+          )}
         </div>
       </div>
 

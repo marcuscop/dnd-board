@@ -368,10 +368,18 @@ canvas.is-dragging,
 
 .sheet-header,
 .full-sheet-title {
-  display: flex;
+  display: grid;
   align-items: center;
-  justify-content: flex-start;
   gap: 12px;
+}
+
+.sheet-header {
+  grid-template-columns: 1fr;
+}
+
+.full-sheet-title {
+  grid-template-columns: 42px minmax(260px, max-content) minmax(210px, auto);
+  justify-content: start;
 }
 
 .full-sheet-identity {
@@ -379,6 +387,14 @@ canvas.is-dragging,
   align-items: center;
   gap: 12px;
   min-width: 0;
+}
+
+.full-sheet-roll-slot {
+  min-width: 210px;
+}
+
+.full-sheet-roll-slot:empty {
+  min-height: 1px;
 }
 
 .back-button {
@@ -509,7 +525,11 @@ canvas.is-dragging,
   align-content: start;
   gap: 18px;
   min-height: 0;
+  border: 1px solid rgba(216, 156, 70, 0.58);
+  border-radius: 6px;
+  padding: 18px;
   overflow-y: auto;
+  background: rgba(20, 12, 6, 0.82);
 }
 
 .ability-grid {
@@ -647,7 +667,7 @@ canvas.is-dragging,
   font-size: 0.8rem;
   line-height: 1;
   pointer-events: none;
-  transform: translateY(-3%);
+  transform: translateY(-2%);
 }
 
 .roll-main {
@@ -731,7 +751,7 @@ canvas.is-dragging,
   .sheet-header,
   .full-sheet-title {
     align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .ability-grid {
