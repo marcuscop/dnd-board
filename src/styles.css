@@ -374,15 +374,22 @@ canvas.is-dragging,
   gap: 12px;
 }
 
-.full-sheet-title button {
-  min-width: 96px;
-}
-
 .full-sheet-identity {
   display: flex;
   align-items: center;
   gap: 12px;
   min-width: 0;
+}
+
+.back-button {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  min-width: 42px;
+  min-height: 42px;
+  padding: 0;
+  font-size: 2.25rem;
+  line-height: 1;
 }
 
 .full-sheet-portrait {
@@ -514,8 +521,8 @@ canvas.is-dragging,
 .ability-grid div {
   display: grid;
   place-items: center;
-  gap: 4px;
-  min-height: 88px;
+  gap: 6px;
+  min-height: 118px;
   border: 1px solid rgba(216, 156, 70, 0.58);
   border-radius: 6px;
   background: rgba(31, 18, 9, 0.82);
@@ -524,13 +531,14 @@ canvas.is-dragging,
 .ability-grid span,
 .ability-grid small {
   color: #d8b778;
-  font-size: 1rem;
+  font-size: 1.2rem;
   font-weight: 900;
 }
 
 .ability-grid strong {
   color: #f7dfaa;
-  font-size: 0.8rem;
+  font-size: 2.8rem;
+  line-height: 1;
 }
 
 .attack-list {
@@ -724,10 +732,6 @@ canvas.is-dragging,
   .full-sheet-title {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .full-sheet-title button {
-    width: 100%;
   }
 
   .ability-grid {

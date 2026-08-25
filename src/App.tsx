@@ -894,10 +894,8 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, 
       )}
 
       <aside className="roll-log">
-        <h2>Rolls</h2>
-        {rolls.length === 0 ? (
-          <p className="status">No rolls yet</p>
-        ) : (
+        <h2>Logs</h2>
+        {rolls.length > 0 && (
           <ol>
             {rolls.map((roll) => (
               <RollLogRow
@@ -1122,6 +1120,9 @@ function FullSheet({
   return (
     <section className="full-sheet">
       <div className="full-sheet-title">
+        <button className="back-button" onClick={onClose} aria-label="Back to sheets">
+          &lt;
+        </button>
         <div className="full-sheet-identity">
           <span className="full-sheet-portrait">{sheet.avatarUrl ? <img src={sheet.avatarUrl} alt="" draggable={false} /> : sheet.name.slice(0, 2).toUpperCase()}</span>
           <div>
@@ -1131,7 +1132,6 @@ function FullSheet({
             </p>
           </div>
         </div>
-        <button onClick={onClose}>Minimize</button>
       </div>
 
       <div className="ability-grid">
