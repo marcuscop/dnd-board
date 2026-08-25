@@ -1,8 +1,15 @@
+@font-face {
+  font-family: "Parchment MF";
+  src: url("/fonts/ParchmentMF.ttf") format("truetype");
+  font-display: swap;
+}
+
 :root {
   --sidebar-text: #f4d99d;
   color: #f1d7a0;
   background: #140e08;
-  font-family: Papyrus, "Segoe Print", "Segoe Script", "Copperplate Gothic Light", Copperplate, "Bradley Hand", "Comic Sans MS", fantasy;
+  font-family: "Parchment MF", Papyrus, "Segoe Print", "Segoe Script", "Copperplate Gothic Light", Copperplate, "Bradley Hand", "Comic Sans MS", fantasy;
+  font-size: 20px;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -79,7 +86,7 @@ p {
 }
 
 h1 {
-  font-size: 1.45rem;
+  font-size: 1.85rem;
   font-weight: 900;
 }
 

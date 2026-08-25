@@ -34,9 +34,9 @@ npm run dev -- --host 127.0.0.1
 Open board tabs:
 
 ```text
-http://127.0.0.1:5173/?campaign=test-campaign&player=dm
-http://127.0.0.1:5173/?campaign=test-campaign&player=Marina
-http://127.0.0.1:5173/?campaign=test-campaign&player=Edward
+http://127.0.0.1:5173/test-campaign/player=dm
+http://127.0.0.1:5173/test-campaign/player=Marina
+http://127.0.0.1:5173/test-campaign/player=Edward
 ```
 
 Open sheet tabs:
@@ -48,6 +48,7 @@ http://127.0.0.1:5173/test-campaign/player=Edward/sheet
 ```
 
 `player=dm` opens DM controls. Player names come from the party config.
+Add `/sheet` to a board URL to open that player's character sheet tab.
 
 Useful checks:
 
@@ -90,7 +91,7 @@ Supported image formats include PNG, JPG/JPEG, WebP, and GIF. Board images use t
 To create another campaign, copy the same folder shape under a new folder name and open that campaign in the URL:
 
 ```text
-http://127.0.0.1:5173/?campaign=my-campaign&player=dm
+http://127.0.0.1:5173/my-campaign/player=dm
 ```
 
 Runtime saves are written to:
@@ -129,7 +130,7 @@ Example:
 Use the configured names in player URLs:
 
 ```text
-http://127.0.0.1:5173/?campaign=test-campaign&player=Marina
+http://127.0.0.1:5173/test-campaign/player=Marina
 ```
 
 ## Shared Assets
@@ -154,7 +155,7 @@ The DM can search shared assets in the sidebar and click **Add**. Added assets a
 DM URL:
 
 ```text
-http://127.0.0.1:5173/?campaign=test-campaign&player=dm
+http://127.0.0.1:5173/test-campaign/player=dm
 ```
 
 The DM can:

@@ -1584,10 +1584,11 @@ function getInitialRoomId() {
 }
 
 function routePath(roomId: string, player: string, view: AppView) {
+  const basePath = `/${encodeURIComponent(roomId)}/player=${encodeURIComponent(player)}`;
   if (view === "sheet") {
-    return `/${encodeURIComponent(roomId)}/player=${encodeURIComponent(player)}/sheet`;
+    return `${basePath}/sheet`;
   }
-  return `?campaign=${encodeURIComponent(roomId)}&player=${encodeURIComponent(player)}`;
+  return basePath;
 }
 
 function normalizeRequestedPlayerKey(value: string) {
