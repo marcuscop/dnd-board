@@ -957,6 +957,149 @@ def test_dm_can_delete_loaded_asset() -> None:
     assert player_socket.messages[-1] == {"type": "token_deleted", "tokenId": "asset-1"}
 
 
+def test_sheet_endpoint_returns_party_sheets_for_player() -> None:
+    client = TestClient(server.app)
+
+    response = client.get("/api/rooms/sheet-player-test/sheet?playerKey=Marina")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "sheet_state"
+    assert body["playerKey"] == "player-1"
+    assert [sheet["id"] for sheet in body["sheets"]] == ["player-1", "player-2", "player-3", "player-4"]
+    marina = body["sheets"][0]
+    assert marina["name"] == "Marina"
+    assert marina["hp"]["current"] == marina["hp"]["max"]
+    assert marina["characterClass"] == {"name": "Adventurer", "level": 1}
+    assert set(marina["abilityScores"]) == {"strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"}
+    assert marina["attacks"][0]["id"] == "main-hand"
+    assert marina["attacks"][0]["damageDie"] == "1d8"
+    assert body["pendingRolls"] == []
+
+
+def test_dm_sheet_endpoint_includes_loaded_asset_sheets() -> None:
+    client = TestClient(server.app)
+    room = server.get_or_create_room("sheet-dm-test")
+    dm = server.Player(id="connection-1", name="DM", player_key="dm", websocket=FakeSocket(), room_id=room.id)
+    asyncio.run(server.load_asset_token(room, dm, "asset", "aboleth"))
+
+    dm_response = client.get("/api/rooms/sheet-dm-test/sheet?playerKey=dm")
+    player_response = client.get("/api/rooms/sheet-dm-test/sheet?playerKey=player-1")
+
+    assert dm_response.status_code == 200
+    assert any(sheet["id"] == "asset-1" and sheet["name"] == "Aboleth" for sheet in dm_response.json()["sheets"])
+    assert all(sheet["kind"] == "character" for sheet in player_response.json()["sheets"])
+
+
+def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 12)
+    room = server.get_or_create_room("sheet-roll-test")
+    dm_socket = FakeSocket()
+    player_socket = FakeSocket()
+    room.players["connection-1"] = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
+    room.players["connection-2"] = server.Player(id="connection-2", name="Player 1", player_key="player-1", websocket=player_socket, room_id=room.id)
+
+    own_roll = client.post("/api/rooms/sheet-roll-test/sheet/player-1/rolls/attack?playerKey=player-1")
+    forbidden = client.post("/api/rooms/sheet-roll-test/sheet/player-2/rolls/attack?playerKey=player-1")
+    dm_roll = client.post("/api/rooms/sheet-roll-test/sheet/player-2/rolls/attack?playerKey=dm")
+
+    assert own_roll.status_code == 200
+    own_roll_body = own_roll.json()["roll"]
+    assert own_roll_body["sheetId"] == "player-1"
+    assert own_roll_body["kind"] == "attack"
+    assert own_roll_body["label"] == "Attack Roll"
+    assert own_roll_body["iconUrl"] is None
+    assert own_roll_body["dice"] == [12]
+    assert own_roll_body["die"] == "d20"
+    assert own_roll_body["total"] == 12 + own_roll_body["modifier"]
+    assert forbidden.status_code == 403
+    assert dm_roll.status_code == 200
+    assert dm_roll.json()["roll"]["roller"] == "dm"
+    assert dm_socket.messages[0] == {"type": "roll_created", "roll": own_roll_body}
+    assert player_socket.messages[0] == {"type": "roll_created", "roll": own_roll_body}
+
+
+def test_sheet_roll_queue_keeps_one_pending_roll_per_character_and_resolves(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
+    room = server.get_or_create_room("sheet-roll-queue-test")
+    dm_socket = FakeSocket()
+    room.players["connection-1"] = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
+
+    attack = client.post("/api/rooms/sheet-roll-queue-test/sheet/player-1/rolls/attack?playerKey=player-1")
+    damage = client.post("/api/rooms/sheet-roll-queue-test/sheet/player-1/rolls/damage?playerKey=player-1")
+    pending = client.get("/api/rooms/sheet-roll-queue-test/sheet?playerKey=dm").json()["pendingRolls"]
+    resolution = client.post(
+        f"/api/rooms/sheet-roll-queue-test/rolls/{damage.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+
+    assert attack.status_code == 200
+    assert damage.status_code == 200
+    assert damage.json()["roll"]["kind"] == "damage"
+    assert damage.json()["roll"]["label"] == "Damage Roll"
+    assert damage.json()["roll"]["iconUrl"] is None
+    assert [roll["id"] for roll in pending] == [damage.json()["roll"]["id"]]
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["roll"]["id"] == damage.json()["roll"]["id"]
+    assert client.get("/api/rooms/sheet-roll-queue-test/sheet?playerKey=dm").json()["pendingRolls"] == []
+    assert dm_socket.messages[-1]["type"] == "roll_resolved"
+
+
+def test_damage_roll_resolution_reduces_target_hp(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 8)
+    room = server.get_or_create_room("sheet-damage-hp-test")
+    target_starting_hp = server.token_to_sheet(room.tokens["player-2"], room.id).hp.max
+
+    damage = client.post("/api/rooms/sheet-damage-hp-test/sheet/player-1/rolls/damage?playerKey=player-1").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-damage-hp-test/rolls/{damage['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target_sheet = client.get("/api/rooms/sheet-damage-hp-test/sheet/player-2?playerKey=player-1").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetHp"]["current"] == max(0, target_starting_hp - damage["total"])
+    assert target_sheet["hp"]["current"] == max(0, target_starting_hp - damage["total"])
+
+
+def test_sheet_endpoint_uses_party_manifest_stats(tmp_path, monkeypatch) -> None:
+    campaign = tmp_path / "stat-campaign"
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text('{"id":"stat-campaign","name":"Stat Campaign"}', encoding="utf-8")
+    (party / "party.json").write_text(
+        json.dumps(
+            {
+                "members": [
+                    {
+                        "id": "player-1",
+                        "name": "Configured Hero",
+                        "maxHp": 31,
+                        "abilityScores": {
+                            "strength": 16,
+                            "dexterity": 14,
+                            "constitution": 13,
+                            "intelligence": 12,
+                            "wisdom": 10,
+                            "charisma": 8,
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+
+    response = TestClient(server.app).get("/api/rooms/stat-campaign/sheet?playerKey=player-1")
+
+    assert response.status_code == 200
+    sheet = response.json()["sheets"][0]
+    assert sheet["name"] == "Configured Hero"
+    assert sheet["hp"] == {"current": 31, "max": 31, "temporary": 0}
+    assert sheet["abilityScores"]["strength"] == 16
+    assert sheet["attacks"][0]["damageDie"] == "1d8"
+
+
 def make_image(image_format: str) -> bytes:
     image = Image.new("RGBA", (8, 8), (255, 0, 0, 255))
     output = BytesIO()

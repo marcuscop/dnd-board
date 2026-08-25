@@ -46,6 +46,77 @@ export type Asset = {
   avatarUrl: string;
 };
 
+export type AttackAction = {
+  id: string;
+  name: string;
+  ability: string;
+  damageDie: string;
+};
+
+export type AbilityScores = {
+  strength: number;
+  dexterity: number;
+  constitution: number;
+  intelligence: number;
+  wisdom: number;
+  charisma: number;
+};
+
+export type CharacterSheet = {
+  id: string;
+  tokenId: string;
+  kind: TokenKind;
+  name: string;
+  owner: string;
+  avatarUrl?: string;
+  characterClass: {
+    name: string;
+    level: number;
+  };
+  hp: {
+    current: number;
+    max: number;
+    temporary: number;
+  };
+  abilityScores: AbilityScores;
+  armorClass: number;
+  initiativeBonus: number;
+  conditions: string[];
+  attacks: AttackAction[];
+};
+
+export type RollPayload = {
+  id: string;
+  sheetId: string;
+  tokenId: string;
+  roller: string;
+  kind: "attack" | "damage";
+  label: string;
+  iconUrl?: string;
+  action: AttackAction;
+  dice: number[];
+  die: string;
+  modifier: number;
+  total: number;
+  createdAt: number;
+};
+
+export type RollResolution = {
+  id: string;
+  roll: RollPayload;
+  targetSheetId: string;
+  targetTokenId: string;
+  targetName: string;
+  targetArmorClass: number;
+  targetHp: {
+    current: number;
+    max: number;
+    temporary: number;
+  };
+  outcome: string;
+  createdAt: number;
+};
+
 export type ServerMessage =
   | { type: "hello"; playerId: string }
   | {
@@ -62,5 +133,7 @@ export type ServerMessage =
   | { type: "token_deleted"; tokenId: string }
   | { type: "fog_updated"; fog: FogState }
   | { type: "board_updated"; board: Board }
+  | { type: "roll_created"; roll: RollPayload }
+  | { type: "roll_resolved"; rollId: string; tokenId: string; resolution: RollResolution }
   | { type: "token_lock_denied"; tokenId: string; lockedBy?: string }
   | { type: "player_count"; count: number };

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from io import BytesIO
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ from pillow_heif import register_heif_opener
 
 AssetKind = Literal["asset"]
 TokenKind = Literal["character", "asset"]
+RollKind = Literal["attack", "damage"]
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -102,6 +104,86 @@ class PartyMember:
     name: str
     owner: str
     avatarUrl: str | None
+    abilityScores: AbilityScores | None = None
+    maxHp: int | None = None
+
+
+@dataclass
+class AbilityScores:
+    strength: int
+    dexterity: int
+    constitution: int
+    intelligence: int
+    wisdom: int
+    charisma: int
+
+
+@dataclass
+class HitPoints:
+    current: int
+    max: int
+    temporary: int
+
+
+@dataclass
+class AttackAction:
+    id: str
+    name: str
+    ability: str
+    damageDie: str
+
+
+@dataclass
+class CharacterClass:
+    name: str
+    level: int
+
+
+@dataclass
+class CharacterSheet:
+    id: str
+    tokenId: str
+    kind: TokenKind
+    name: str
+    owner: str
+    avatarUrl: str | None
+    characterClass: CharacterClass
+    hp: HitPoints
+    abilityScores: AbilityScores
+    armorClass: int
+    initiativeBonus: int
+    conditions: list[str]
+    attacks: list[AttackAction]
+
+
+@dataclass
+class RollPayload:
+    id: str
+    sheetId: str
+    tokenId: str
+    roller: str
+    kind: RollKind
+    label: str
+    iconUrl: str | None
+    action: AttackAction
+    dice: list[int]
+    die: str
+    modifier: int
+    total: int
+    createdAt: int
+
+
+@dataclass
+class RollResolution:
+    id: str
+    roll: RollPayload
+    targetSheetId: str
+    targetTokenId: str
+    targetName: str
+    targetArmorClass: int
+    targetHp: HitPoints
+    outcome: str
+    createdAt: int
 
 
 @dataclass
@@ -119,6 +201,8 @@ class Room:
     fog: FogState
     board_id: str
     next_token_number: int
+    pending_rolls: dict[str, RollPayload]
+    hit_points: dict[str, int]
 
 
 app = FastAPI()
@@ -189,6 +273,58 @@ async def save_room(room_id: str, playerKey: str) -> dict[str, Any]:
 async def get_room_state(room_id: str) -> dict[str, Any]:
     room = get_or_create_room(sanitize_room_id(room_id))
     return room_state_message(room)
+
+
+@app.get("/api/rooms/{room_id}/sheet")
+async def get_room_sheets(room_id: str, playerKey: str) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet", name="Sheet Viewer", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    return sheet_state_message(room, player)
+
+
+@app.get("/api/rooms/{room_id}/sheet/{sheet_id}")
+async def get_room_sheet(room_id: str, sheet_id: str, playerKey: str) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet", name="Sheet Viewer", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    sheet = get_visible_sheet(room, player, sanitize_asset_id(sheet_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    return {"roomId": room.id, "playerKey": player.player_key, "sheet": sheet_to_dict(sheet)}
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/attack")
+async def roll_sheet_attack(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand") -> dict[str, Any]:
+    return await create_sheet_roll(room_id, sheet_id, playerKey, attackId, "attack")
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/damage")
+async def roll_sheet_damage(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand") -> dict[str, Any]:
+    return await create_sheet_roll(room_id, sheet_id, playerKey, attackId, "damage")
+
+
+@app.post("/api/rooms/{room_id}/rolls/{roll_id}/resolve")
+async def resolve_roll(room_id: str, roll_id: str, playerKey: str, targetSheetId: str) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-roll-resolve", name="DM", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    if not is_dm(player):
+        raise HTTPException(status_code=403, detail="Only the DM can resolve rolls")
+
+    roll = next((candidate for candidate in room.pending_rolls.values() if candidate.id == sanitize_asset_id(roll_id)), None)
+    if roll is None:
+        raise HTTPException(status_code=404, detail="Roll not found")
+
+    target = get_visible_sheet(room, player, sanitize_asset_id(targetSheetId))
+    if target is None:
+        raise HTTPException(status_code=404, detail="Target sheet not found")
+
+    resolution = resolve_roll_against_target(room, roll, target)
+    room.pending_rolls.pop(roll.tokenId, None)
+    resolution_data = roll_resolution_to_dict(resolution)
+    await broadcast(room, {"type": "roll_resolved", "rollId": roll.id, "tokenId": roll.tokenId, "resolution": resolution_data})
+    return {"roomId": room.id, "resolution": resolution_data}
 
 
 @app.get("/campaigns/{campaign_id}/{asset_kind}/{filename}")
@@ -517,6 +653,8 @@ async def delete_token(room: Room, player: Player, token_id: str) -> None:
         return
 
     room.tokens.pop(token_id)
+    room.pending_rolls.pop(token_id, None)
+    room.hit_points.pop(token_id, None)
     await broadcast(room, {"type": "token_deleted", "tokenId": token_id})
 
 
@@ -546,6 +684,8 @@ def get_or_create_room(room_id: str) -> Room:
         fog=load_saved_fog(room_id, saved_board),
         board_id=saved_board_id,
         next_token_number=next_dynamic_token_number(tokens),
+        pending_rolls={},
+        hit_points={},
     )
     rooms[room_id] = room
     return room
@@ -620,6 +760,201 @@ def room_state_message(room: Room) -> dict[str, Any]:
         "boards": [board_to_dict(board) for board in list_boards(room.id)],
         "assets": [asset_to_dict(asset) for asset in list_assets()],
     }
+
+
+def sheet_state_message(room: Room, player: Player) -> dict[str, Any]:
+    return {
+        "type": "sheet_state",
+        "roomId": room.id,
+        "playerKey": player.player_key,
+        "sheets": [sheet_to_dict(sheet) for sheet in visible_sheets(room, player)],
+        "pendingRolls": [roll_payload_to_dict(roll) for roll in visible_pending_rolls(room, player)],
+    }
+
+
+def visible_sheets(room: Room, player: Player) -> list[CharacterSheet]:
+    return [token_to_sheet(token, room.id, room.hit_points.get(token.id)) for token in room.tokens.values() if can_view_sheet(player, token)]
+
+
+def visible_pending_rolls(room: Room, player: Player) -> list[RollPayload]:
+    visible_token_ids = {sheet.tokenId for sheet in visible_sheets(room, player)}
+    return [roll for roll in room.pending_rolls.values() if roll.tokenId in visible_token_ids]
+
+
+def get_visible_sheet(room: Room, player: Player, sheet_id: str) -> CharacterSheet | None:
+    for sheet in visible_sheets(room, player):
+        if sheet.id == sheet_id:
+            return sheet
+    return None
+
+
+def can_view_sheet(player: Player, token: Token) -> bool:
+    return is_dm(player) or token.kind == "character"
+
+
+def can_control_sheet_roll(player: Player, sheet: CharacterSheet) -> bool:
+    return is_dm(player) or player.player_key == sheet.owner
+
+
+def token_to_sheet(token: Token, campaign_id: str | None = None, current_hp: int | None = None) -> CharacterSheet:
+    party_member = party_member_by_id(token.id, campaign_id) if token.kind == "character" else None
+    ability_scores = party_member.abilityScores if party_member and party_member.abilityScores else generated_ability_scores(token.id)
+    max_hp = party_member.maxHp if party_member and party_member.maxHp is not None else generated_max_hp(token.id, ability_scores)
+    dexterity_modifier = ability_modifier(ability_scores.dexterity)
+    return CharacterSheet(
+        id=token.id,
+        tokenId=token.id,
+        kind=token.kind,
+        name=token.name,
+        owner=token.owner,
+        avatarUrl=token.avatarUrl,
+        characterClass=CharacterClass(name="Adventurer" if token.kind == "character" else "Creature", level=1),
+        hp=HitPoints(current=clamp_int(current_hp, 0, max_hp) if current_hp is not None else max_hp, max=max_hp, temporary=0),
+        abilityScores=ability_scores,
+        armorClass=12 + min(3, dexterity_modifier),
+        initiativeBonus=dexterity_modifier,
+        conditions=[],
+        attacks=[
+            AttackAction(
+                id="main-hand",
+                name="Main Hand",
+                ability="strength",
+                damageDie="1d8",
+            )
+        ],
+    )
+
+
+async def create_sheet_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str, roll_kind: RollKind) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-roll", name="Sheet Roller", player_key=normalize_player_key(player_key, room.id), websocket=None, room_id=room.id)
+    sheet = get_visible_sheet(room, player, sanitize_asset_id(sheet_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    if not can_control_sheet_roll(player, sheet):
+        raise HTTPException(status_code=403, detail="Cannot roll for this sheet")
+
+    action = next((attack for attack in sheet.attacks if attack.id == sanitize_asset_id(attack_id)), None)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Attack not found")
+
+    payload = build_roll_payload(sheet, player, action, roll_kind)
+    room.pending_rolls[sheet.tokenId] = payload
+    roll = roll_payload_to_dict(payload)
+    await broadcast(room, {"type": "roll_created", "roll": roll})
+    return {"roomId": room.id, "roll": roll}
+
+
+def build_roll_payload(sheet: CharacterSheet, player: Player, action: AttackAction, roll_kind: RollKind) -> RollPayload:
+    modifier = ability_modifier(getattr(sheet.abilityScores, action.ability))
+    created_at = time_ns()
+    if roll_kind == "attack":
+        dice = [random.randint(1, 20)]
+        die = "d20"
+        label = "Attack Roll"
+        icon_url = None
+    else:
+        count, sides = parse_die(action.damageDie)
+        dice = [random.randint(1, sides) for _ in range(count)]
+        die = action.damageDie
+        label = "Damage Roll"
+        icon_url = None
+
+    return RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=player.player_key,
+        kind=roll_kind,
+        label=label,
+        iconUrl=icon_url,
+        action=action,
+        dice=dice,
+        die=die,
+        modifier=modifier,
+        total=sum(dice) + modifier,
+        createdAt=created_at,
+    )
+
+
+def resolve_roll_against_target(room: Room, roll: RollPayload, target: CharacterSheet) -> RollResolution:
+    if roll.kind == "attack":
+        outcome = "hits" if roll.total >= target.armorClass else "misses"
+        target_hp = target.hp
+    else:
+        next_hp = max(0, target.hp.current - max(0, roll.total))
+        room.hit_points[target.tokenId] = next_hp
+        target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=target.hp.temporary)
+        outcome = f"deals {roll.total} damage"
+
+    return RollResolution(
+        id=f"resolution-{time_ns()}",
+        roll=roll,
+        targetSheetId=target.id,
+        targetTokenId=target.tokenId,
+        targetName=target.name,
+        targetArmorClass=target.armorClass,
+        targetHp=target_hp,
+        outcome=outcome,
+        createdAt=time_ns(),
+    )
+
+
+def parse_die(die: str) -> tuple[int, int]:
+    count_text, sides_text = die.lower().split("d", 1)
+    count = int(count_text or "1")
+    sides = int(sides_text)
+    if count < 1 or count > 20 or sides < 2 or sides > 100:
+        raise ValueError("Unsupported damage die")
+    return count, sides
+
+
+def party_member_by_id(member_id: str, campaign_id: str | None = None) -> PartyMember | None:
+    for member in load_party_members(campaign_id):
+        if member.id == member_id:
+            return member
+    return None
+
+
+def generated_ability_scores(seed: str) -> AbilityScores:
+    rng = random.Random(seed)
+    return AbilityScores(
+        strength=rng.randint(8, 15),
+        dexterity=rng.randint(8, 15),
+        constitution=rng.randint(8, 15),
+        intelligence=rng.randint(8, 15),
+        wisdom=rng.randint(8, 15),
+        charisma=rng.randint(8, 15),
+    )
+
+
+def generated_max_hp(seed: str, ability_scores: AbilityScores) -> int:
+    rng = random.Random(f"{seed}:hp")
+    return max(1, rng.randint(8, 24) + ability_modifier(ability_scores.constitution))
+
+
+def ability_modifier(score: int) -> int:
+    return (score - 10) // 2
+
+
+def format_modifier(modifier: int) -> str:
+    return f"+{modifier}" if modifier >= 0 else str(modifier)
+
+
+def sheet_to_dict(sheet: CharacterSheet) -> dict[str, Any]:
+    data = asdict(sheet)
+    if data["avatarUrl"] is None:
+        data.pop("avatarUrl")
+    return data
+
+
+def roll_payload_to_dict(payload: RollPayload) -> dict[str, Any]:
+    return asdict(payload)
+
+
+def roll_resolution_to_dict(resolution: RollResolution) -> dict[str, Any]:
+    return asdict(resolution)
 
 
 async def broadcast(room: Room, message: dict[str, Any]) -> None:
@@ -701,6 +1036,8 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.fog = load_saved_fog(room.id, saved_board)
     room.board_id = saved_board_id
     room.next_token_number = next_dynamic_token_number(tokens)
+    room.pending_rolls = {}
+    room.hit_points = {}
     await broadcast_room_state(room)
     return True
 
@@ -809,6 +1146,8 @@ def load_party_members(campaign_id: str | None = None) -> list[PartyMember]:
                 name=humanize_asset_name(path.stem),
                 owner=player_id,
                 avatarUrl=campaign_file_url("party", path, campaign_id),
+                abilityScores=None,
+                maxHp=None,
             )
         )
     return members or default_party_members()
@@ -846,9 +1185,45 @@ def load_party_members_from_manifest(path: Path, campaign_id: str | None = None)
                 name=str(raw_member.get("name", humanize_asset_name(player_id))).strip()[:40] or humanize_asset_name(player_id),
                 owner=player_id,
                 avatarUrl=campaign_file_url("party", image_path, campaign_id) if image_path is not None else None,
+                abilityScores=ability_scores_from_dict(raw_member.get("abilityScores")),
+                maxHp=positive_int(raw_member.get("maxHp")),
             )
         )
     return members
+
+
+def ability_scores_from_dict(value: Any) -> AbilityScores | None:
+    if not isinstance(value, dict):
+        return None
+
+    try:
+        scores = AbilityScores(
+            strength=clamped_ability_score(value.get("strength")),
+            dexterity=clamped_ability_score(value.get("dexterity")),
+            constitution=clamped_ability_score(value.get("constitution")),
+            intelligence=clamped_ability_score(value.get("intelligence")),
+            wisdom=clamped_ability_score(value.get("wisdom")),
+            charisma=clamped_ability_score(value.get("charisma")),
+        )
+    except (TypeError, ValueError):
+        return None
+
+    return scores
+
+
+def clamped_ability_score(value: Any) -> int:
+    score = int(value)
+    if score < 1 or score > 30:
+        raise ValueError("Ability scores must be between 1 and 30")
+    return score
+
+
+def positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def normalize_party_member_id(value: str, fallback: str) -> str:
@@ -872,7 +1247,7 @@ def party_image_path(filename: str, campaign_id: str | None = None) -> Path | No
 
 def default_party_members() -> list[PartyMember]:
     return [
-        PartyMember(id=f"player-{index + 1}", name=f"Player {index + 1}", owner=f"player-{index + 1}", avatarUrl=None)
+        PartyMember(id=f"player-{index + 1}", name=f"Player {index + 1}", owner=f"player-{index + 1}", avatarUrl=None, abilityScores=None, maxHp=None)
         for index in range(4)
     ]
 
@@ -1071,6 +1446,10 @@ def to_float(value: Any) -> float:
 
 
 def clamp(value: float, minimum: float, maximum: float) -> float:
+    return min(maximum, max(minimum, value))
+
+
+def clamp_int(value: int, minimum: int, maximum: int) -> int:
     return min(maximum, max(minimum, value))
 
 
