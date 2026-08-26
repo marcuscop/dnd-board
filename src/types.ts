@@ -10,6 +10,11 @@ export enum RollResolutionMode {
   HEAL_SELF = "healSelf"
 }
 
+export enum RollLogEntryType {
+  ROLL_CREATED = "rollCreated",
+  ROLL_RESOLVED = "rollResolved"
+}
+
 export enum RollModifierType {
   NONE = "none",
   CLASS_LEVEL = "classLevel",
@@ -87,6 +92,15 @@ export type DamageType =
 export type DiceType = "d4" | "d6" | "d8" | "d10" | "d12" | "d20";
 export type TimeEconomy = "action" | "bonusAction" | "reaction" | "movement" | "passive" | "special";
 export type ProficiencyLevel = "none" | "proficient" | "expertise";
+export type WeaponProperty = "ammunition" | "finesse" | "heavy" | "light" | "thrown" | "twoHanded" | "versatile";
+export type AttackRangeType = "melee" | "ranged";
+export type WeaponCategory = "melee" | "ranged";
+export type AttackDamageAbilityModifierMode = "included" | "excluded";
+export type AttackKind = "standard" | "twoWeaponFighting";
+export type AttackActionType = "standard" | "unarmedStrike" | "thrownWeapon";
+export type EquipmentSlot = "carried" | "mainHand" | "offHand" | "twoHands" | "armor";
+export type EquipmentType = "armor" | "gear" | "shield" | "weapon";
+export type ArmorCategory = "light" | "medium" | "heavy";
 
 export type AttackAction = {
   id: string;
@@ -103,7 +117,18 @@ export type AttackAction = {
   damageBonus: number;
   activation: TimeEconomy;
   activationLabel: string;
-  properties: string[];
+  attackRange: AttackRangeType;
+  attackRangeLabel: string;
+  weaponCategory: WeaponCategory;
+  weaponCategoryLabel: string;
+  damageAbilityModifier: AttackDamageAbilityModifierMode;
+  damageAbilityModifierLabel: string;
+  attackKind: AttackKind;
+  attackKindLabel: string;
+  attackType: AttackActionType;
+  attackTypeLabel: string;
+  properties: WeaponProperty[];
+  propertiesLabel?: string[];
 };
 
 export type RollAction = {
@@ -219,6 +244,14 @@ export type CharacterSheet = {
     quantity: number;
     weight: number;
     notes: string;
+    itemType: EquipmentType;
+    itemTypeLabel: string;
+    slot: EquipmentSlot;
+    slotLabel: string;
+    armorCategory?: ArmorCategory;
+    armorCategoryLabel?: string;
+    armorClass: number;
+    armorClassBonus: number;
   }[];
 };
 
@@ -241,6 +274,11 @@ export type RollPayload = {
   diceType: DiceType;
   die: string;
   modifier: number;
+  modifierBreakdown: {
+    source: string;
+    value: number;
+    description: string;
+  }[];
   total: number;
   createdAt: number;
   resourceSpent?: {
@@ -267,6 +305,15 @@ export type RollResolution = {
   createdAt: number;
 };
 
+export type RollLogEntry = {
+  id: string;
+  entryType: RollLogEntryType;
+  entryTypeLabel: string;
+  createdAt: number;
+  roll: RollPayload;
+  resolution?: RollResolution;
+};
+
 export type ServerMessage =
   | { type: "hello"; playerId: string }
   | {
@@ -283,7 +330,7 @@ export type ServerMessage =
   | { type: "token_deleted"; tokenId: string }
   | { type: "fog_updated"; fog: FogState }
   | { type: "board_updated"; board: Board }
-  | { type: "roll_created"; roll: RollPayload }
-  | { type: "roll_resolved"; rollId: string; tokenId: string; resolution: RollResolution }
+  | { type: "roll_created"; roll: RollPayload; logEntry: RollLogEntry }
+  | { type: "roll_resolved"; rollId: string; tokenId: string; resolution: RollResolution; logEntry: RollLogEntry }
   | { type: "token_lock_denied"; tokenId: string; lockedBy?: string }
   | { type: "player_count"; count: number };

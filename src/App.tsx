@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MutableRefObject } from "react";
 import { SheetSectionType, TokenKind } from "./types";
-import type { Asset, Board, CharacterSheet, FogState, PlayerSummary, RollAction, RollPayload, RollResolution, ServerMessage, Token } from "./types";
+import type { Asset, Board, CharacterSheet, EquipmentSlot, FogState, PlayerSummary, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
 
 const DEFAULT_BOARD_WIDTH = 1200;
 const DEFAULT_BOARD_HEIGHT = 720;
@@ -15,6 +15,7 @@ const INITIAL_ROUTE = getInitialRoute();
 const REQUESTED_PLAYER_KEY = INITIAL_ROUTE.playerKey;
 const DEFAULT_FOG: FogState = { hideMode: false, brushSize: 120, revealedAreas: [] };
 const DEFAULT_BOARD: Board = { id: "", name: "", width: DEFAULT_BOARD_WIDTH, height: DEFAULT_BOARD_HEIGHT };
+const ROLL_HISTORY_LIMIT = 10;
 
 type ConnectionState = "connecting" | "connected" | "disconnected";
 type AppView = "board" | "sheet";
@@ -72,7 +73,7 @@ export function App() {
   const [sheets, setSheets] = useState<CharacterSheet[]>([]);
   const [expandedSheetId, setExpandedSheetId] = useState<string | null>(null);
   const [rolls, setRolls] = useState<RollPayload[]>([]);
-  const [rollResolutions, setRollResolutions] = useState<RollResolution[]>([]);
+  const [rollHistory, setRollHistory] = useState<RollLogEntry[]>([]);
   const [sheetStatus, setSheetStatus] = useState<"idle" | "loading" | "error">("idle");
   const [selectedAssetKey, setSelectedAssetKey] = useState("");
   const [assetSearch, setAssetSearch] = useState("");
@@ -178,13 +179,13 @@ export function App() {
 
       if (message.type === "roll_created") {
         setRolls((current) => upsertPendingRoll(current, message.roll));
-        setRollResolutions((current) => current.filter((resolution) => rollKey(resolution.roll) !== rollKey(message.roll)));
+        setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
         return;
       }
 
       if (message.type === "roll_resolved") {
         setRolls((current) => current.filter((roll) => roll.id !== message.rollId));
-        setRollResolutions((current) => [message.resolution, ...current].slice(0, 20));
+        setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
         setSheets((current) =>
           current.map((sheet) => (sheet.id === message.resolution.targetSheetId ? { ...sheet, hp: message.resolution.targetHp } : sheet))
         );
@@ -206,9 +207,10 @@ export function App() {
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[] };
+      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; rollHistory: RollLogEntry[] };
       setSheets(body.sheets);
       setRolls(body.pendingRolls);
+      setRollHistory(body.rollHistory);
       setExpandedSheetId((current) => current && body.sheets.some((sheet) => sheet.id === current) ? current : null);
       setSheetStatus("idle");
     } catch (error) {
@@ -641,6 +643,22 @@ export function App() {
     [playerKey]
   );
 
+  const updateEquipmentSlot = useCallback(
+    async (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/equipment/${encodeURIComponent(itemId)}/slot?playerKey=${encodeURIComponent(playerKey)}&slot=${encodeURIComponent(slot)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      const body = (await response.json()) as { sheet: CharacterSheet };
+      setSheets((current) => current.map((candidate) => (candidate.id === body.sheet.id ? body.sheet : candidate)));
+    },
+    [playerKey]
+  );
+
   if (view === "sheet") {
     return (
       <SheetView
@@ -651,10 +669,11 @@ export function App() {
         onRollDamage={rollDamage}
         onRollAttack={rollAttack}
         onRollResourceAction={rollResourceAction}
+        onUpdateEquipmentSlot={updateEquipmentSlot}
         onUpdateResource={updateResource}
-        playerKey={playerKey}
-        rollResolutions={rollResolutions}
-        rolls={rolls}
+          playerKey={playerKey}
+          rollHistory={rollHistory}
+          rolls={rolls}
         sheets={sheets}
         sheetStatus={sheetStatus}
         tokens={tokens}
@@ -831,16 +850,17 @@ type SheetViewProps = {
   onRollAttack: (sheet: CharacterSheet, attackId: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, abilityId: string, actionId: string) => void;
+  onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   playerKey: string;
-  rollResolutions: RollResolution[];
+  rollHistory: RollLogEntry[];
   rolls: RollPayload[];
   sheets: CharacterSheet[];
   sheetStatus: "idle" | "loading" | "error";
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, onRollDamage, onRollResourceAction, onUpdateResource, playerKey, rollResolutions, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, onRollDamage, onRollResourceAction, onUpdateEquipmentSlot, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -892,6 +912,7 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, 
           onRollAttack={onRollAttack}
           onRollDamage={onRollDamage}
           onRollResourceAction={onRollResourceAction}
+          onUpdateEquipmentSlot={onUpdateEquipmentSlot}
           onUpdateResource={onUpdateResource}
           onClose={() => onExpand(null)}
         />
@@ -940,23 +961,10 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, 
 
       <aside className="roll-log">
         <h2>Logs</h2>
-        {rolls.length > 0 && (
+        {rollHistory.length > 0 && (
           <ol>
-            {rolls.map((roll) => (
-              <RollLogRow
-                key={roll.id}
-                roll={roll}
-                roller={sheets.find((sheet) => sheet.tokenId === roll.tokenId)}
-              />
-            ))}
-          </ol>
-        )}
-        {rollResolutions.length > 0 && (
-          <ol className="applied-rolls">
-            {rollResolutions.map((resolution) => (
-              <li key={resolution.id}>
-                {resolutionLogText(resolution, sheets)}
-              </li>
+            {rollHistory.map((entry) => (
+              <RollLogRow key={entry.id} entry={entry} roller={sheets.find((sheet) => sheet.tokenId === entry.roll.tokenId)} />
             ))}
           </ol>
         )}
@@ -1139,12 +1147,19 @@ function RollCard({
   );
 }
 
-function RollLogRow({ roll, roller }: { roll: RollPayload; roller: CharacterSheet | undefined }) {
+function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: CharacterSheet | undefined }) {
+  const roll = entry.roll;
+  const actor = roller?.name ?? formatPlayerName(roll.roller);
+
   return (
     <li className="roll-log-row">
-      <strong>{roll.sourceLabel}</strong>
+      <time dateTime={logEntryDate(entry).toISOString()}>{formatLogTime(entry)}</time>
       <span>
-        {(roller?.name ?? formatPlayerName(roll.roller))}: {roll.label} <span className="roll-result-number">{rollMathText(roll)}</span>
+        <strong>{roll.sourceLabel}</strong>
+        {entry.resolution
+          ? ` ${actor}: ${roll.label} ${rollMathText(roll)}; ${entry.resolution.outcome} to ${entry.resolution.targetName}`
+          : ` ${actor}: ${roll.label} `}
+        {!entry.resolution && <span className="roll-result-number">{rollMathText(roll)}</span>}
         {roll.resourceSpent ? ` · ${roll.resourceSpent.resourceName} ${roll.resourceSpent.remainingUses}/${roll.resourceSpent.maxUses}` : ""}
       </span>
     </li>
@@ -1339,6 +1354,7 @@ function FullSheet({
   onRollAttack,
   onRollDamage,
   onRollResourceAction,
+  onUpdateEquipmentSlot,
   onUpdateResource
 }: {
   sheet: CharacterSheet;
@@ -1351,6 +1367,7 @@ function FullSheet({
   onRollAttack: (sheet: CharacterSheet, attackId: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
+  onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
 }) {
   const scores = Object.entries(sheet.abilityScores);
@@ -1504,13 +1521,20 @@ function FullSheet({
           {sheet.equipment.length > 0 && (
             <section className="sheet-panel">
               <h2>Equipment</h2>
-              <div className="compact-list">
+              <div className="equipment-list">
                 {sheet.equipment.map((item) => (
-                  <span key={item.id}>
-                    {item.equipped ? "* " : ""}
-                    {item.name}
-                    {item.quantity > 1 ? ` x${item.quantity}` : ""}
-                  </span>
+                  <div className="equipment-row" key={item.id}>
+                    <span>
+                      <strong>{item.name}</strong>
+                      {item.quantity > 1 ? ` x${item.quantity}` : ""}
+                      <small>{item.itemTypeLabel} · {item.slotLabel}</small>
+                    </span>
+                    <select disabled={!canRoll} value={item.slot} onChange={(event) => onUpdateEquipmentSlot(sheet, item.id, event.target.value as EquipmentSlot)}>
+                      {equipmentSlotOptions(item.itemType).map((slot) => (
+                        <option key={slot} value={slot}>{cleanName(slot)}</option>
+                      ))}
+                    </select>
+                  </div>
                 ))}
               </div>
             </section>
@@ -1931,6 +1955,10 @@ function upsertPendingRoll(rolls: RollPayload[], roll: RollPayload) {
   return [roll, ...rolls.filter((candidate) => rollKey(candidate) !== rollKey(roll))];
 }
 
+function appendRollLogEntry(entries: RollLogEntry[], entry: RollLogEntry) {
+  return [...entries, entry].slice(-ROLL_HISTORY_LIMIT);
+}
+
 function rollKey(roll: RollPayload) {
   return `${roll.tokenId}:${roll.source.section}:${roll.source.sourceId}:${roll.source.actionId}`;
 }
@@ -2017,16 +2045,31 @@ function formatSigned(value: number) {
 }
 
 function rollMathText(roll: RollPayload) {
-  return `${roll.dice.join("+")} ${formatSigned(roll.modifier)} = ${roll.total}`;
+  const dice = roll.dice.join("+");
+  const modifierParts = (roll.modifierBreakdown ?? []).filter((part) => part.value !== 0);
+  const modifiers = modifierParts.length
+    ? modifierParts.map((part) => `${part.value >= 0 ? "+" : "-"} ${part.source} (${Math.abs(part.value)})`).join(" ")
+    : formatSigned(roll.modifier);
+  return `${dice} ${modifiers} = ${roll.total}`;
 }
 
 function diceImagePath(diceType: RollPayload["diceType"]) {
   return `/${diceType}.png`;
 }
 
-function resolutionLogText(resolution: RollResolution, sheets: CharacterSheet[]) {
-  const actor = sheets.find((sheet) => sheet.tokenId === resolution.roll.tokenId)?.name ?? formatPlayerName(resolution.roll.roller);
-  return `${actor} ${resolution.roll.label} ${resolution.roll.total} ${resolution.outcome} ${resolution.targetName}`;
+function formatLogTime(entry: RollLogEntry) {
+  return logEntryDate(entry).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
+function logEntryDate(entry: RollLogEntry) {
+  return new Date(Math.floor(entry.createdAt / 1_000_000));
+}
+
+function equipmentSlotOptions(itemType: CharacterSheet["equipment"][number]["itemType"]): EquipmentSlot[] {
+  if (itemType === "armor") return ["carried", "armor"];
+  if (itemType === "shield") return ["carried", "mainHand", "offHand"];
+  if (itemType === "weapon") return ["carried", "mainHand", "offHand", "twoHands"];
+  return ["carried"];
 }
 
 function shortAbilityName(ability: string) {

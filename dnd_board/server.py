@@ -17,8 +17,11 @@ from pillow_heif import register_heif_opener
 from dnd_board.character_sheet import (
     AbilityScores,
     CharacterSheet,
+    EquipmentSlot,
     PartyMember,
     RollPayload,
+    RollLogEntry,
+    RollLogEntryType,
     RollResolutionMode,
     RollResourceSpend,
     RollResolution,
@@ -29,11 +32,13 @@ from dnd_board.character_sheet import (
     build_character_sheet,
     build_damage_roll_payload,
     build_roll_action_payload,
+    enum_value,
     enum_key,
     party_manifest_from_dict,
     positive_int,
     resolve_roll_against_target as resolve_dnd_roll_against_target,
     roll_payload_to_dict,
+    roll_log_entry_to_dict,
     roll_resolution_to_dict,
     sheet_to_dict,
 )
@@ -41,6 +46,7 @@ from dnd_board.character_sheet import (
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
 MAX_PLAYERS = 8
+ROLL_HISTORY_LIMIT = 10
 DEFAULT_CAMPAIGN_ID = "test-campaign"
 CAMPAIGN_DIR = Path("campaigns")
 SHARED_DIR = Path("shared")
@@ -134,8 +140,10 @@ class Room:
     board_id: str
     next_token_number: int
     pending_rolls: dict[tuple[str, str, str, str], RollPayload]
+    roll_history: list[RollLogEntry]
     hit_points: dict[str, int]
     resource_uses: dict[str, dict[str, int]]
+    equipment_slots: dict[str, dict[str, EquipmentSlot]]
 
 
 app = FastAPI()
@@ -267,6 +275,32 @@ async def update_sheet_resource(room_id: str, sheet_id: str, resource_id: str, p
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else sheet_to_dict(sheet)}
 
 
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/equipment/{item_id}/slot")
+async def update_sheet_equipment_slot(room_id: str, sheet_id: str, item_id: str, playerKey: str, slot: str) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-equipment", name="Sheet Equipment", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    sheet = get_visible_sheet(room, player, sanitize_asset_id(sheet_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    if not can_control_sheet_roll(player, sheet):
+        raise HTTPException(status_code=403, detail="Cannot update this sheet")
+
+    item = next((candidate for candidate in sheet.equipment if sanitize_asset_id(candidate.id) == sanitize_asset_id(item_id)), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Equipment item not found")
+
+    equipment_slot = enum_value(EquipmentSlot, slot)
+    if equipment_slot is None:
+        raise HTTPException(status_code=400, detail="Invalid equipment slot")
+    if equipment_slot not in valid_equipment_slots(item):
+        raise HTTPException(status_code=400, detail="Invalid slot for equipment item")
+
+    set_equipment_slot(room, sheet, item.id, equipment_slot)
+    updated = get_visible_sheet(room, player, sheet.id)
+    return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else sheet_to_dict(sheet)}
+
+
 @app.post("/api/rooms/{room_id}/rolls/{roll_id}/resolve")
 async def resolve_roll(room_id: str, roll_id: str, playerKey: str, targetSheetId: str) -> dict[str, Any]:
     sanitized_room_id = sanitize_room_id(room_id)
@@ -286,8 +320,27 @@ async def resolve_roll(room_id: str, roll_id: str, playerKey: str, targetSheetId
     resolution = resolve_roll_against_target(room, roll, target)
     room.pending_rolls.pop(roll_queue_key(roll), None)
     resolution_data = roll_resolution_to_dict(resolution)
-    await broadcast(room, {"type": "roll_resolved", "rollId": roll.id, "tokenId": roll.tokenId, "resolution": resolution_data})
-    return {"roomId": room.id, "resolution": resolution_data}
+    log_entry = append_roll_log_entry(
+        room,
+        RollLogEntry(
+            id=f"log-{resolution.id}",
+            entryType=RollLogEntryType.ROLL_RESOLVED,
+            createdAt=resolution.createdAt,
+            roll=roll,
+            resolution=resolution,
+        ),
+    )
+    await broadcast(
+        room,
+        {
+            "type": "roll_resolved",
+            "rollId": roll.id,
+            "tokenId": roll.tokenId,
+            "resolution": resolution_data,
+            "logEntry": roll_log_entry_to_dict(log_entry),
+        },
+    )
+    return {"roomId": room.id, "resolution": resolution_data, "logEntry": roll_log_entry_to_dict(log_entry)}
 
 
 @app.get("/campaigns/{campaign_id}/{asset_kind}/{filename}")
@@ -648,8 +701,10 @@ def get_or_create_room(room_id: str) -> Room:
         board_id=saved_board_id,
         next_token_number=next_dynamic_token_number(tokens),
         pending_rolls={},
+        roll_history=[],
         hit_points={},
         resource_uses=load_saved_resource_uses(room_id),
+        equipment_slots={},
     )
     rooms[room_id] = room
     return room
@@ -733,6 +788,7 @@ def sheet_state_message(room: Room, player: Player) -> dict[str, Any]:
         "playerKey": player.player_key,
         "sheets": [sheet_to_dict(sheet) for sheet in visible_sheets(room, player)],
         "pendingRolls": [roll_payload_to_dict(roll) for roll in visible_pending_rolls(room, player)],
+        "rollHistory": [roll_log_entry_to_dict(entry) for entry in visible_roll_history(room, player)],
     }
 
 
@@ -743,6 +799,11 @@ def visible_sheets(room: Room, player: Player) -> list[CharacterSheet]:
 def visible_pending_rolls(room: Room, player: Player) -> list[RollPayload]:
     visible_token_ids = {sheet.tokenId for sheet in visible_sheets(room, player)}
     return [roll for roll in room.pending_rolls.values() if roll.tokenId in visible_token_ids]
+
+
+def visible_roll_history(room: Room, player: Player) -> list[RollLogEntry]:
+    visible_token_ids = {sheet.tokenId for sheet in visible_sheets(room, player)}
+    return [entry for entry in room.roll_history if entry.roll.tokenId in visible_token_ids]
 
 
 def get_visible_sheet(room: Room, player: Player, sheet_id: str) -> CharacterSheet | None:
@@ -764,6 +825,7 @@ def token_to_sheet(token: Token, campaign_id: str | None = None, current_hp: int
     party_member = party_member_by_id(token.id, campaign_id) if token.kind == TokenKind.CHARACTER else None
     room = rooms.get(campaign_id or "")
     resource_overrides = room.resource_uses.get(token.id, {}) if room is not None else {}
+    equipment_slot_overrides = room.equipment_slots.get(token.id, {}) if room is not None else {}
     return build_character_sheet(
         token_id=token.id,
         kind=token.kind,
@@ -773,6 +835,7 @@ def token_to_sheet(token: Token, campaign_id: str | None = None, current_hp: int
         party_member=party_member,
         current_hp=current_hp,
         resource_overrides=resource_overrides,
+        equipment_slot_overrides=equipment_slot_overrides,
     )
 
 
@@ -844,7 +907,7 @@ def roll_context(room_id: str, sheet_id: str, player_key: str) -> tuple[Room, Pl
 
 def find_attack(sheet: CharacterSheet, attack_id: str):
     sanitized_attack_id = sanitize_asset_id(attack_id)
-    action = next((attack for attack in sheet.attacks if attack.id == sanitized_attack_id), None)
+    action = next((attack for attack in sheet.attacks if sanitize_asset_id(attack.id) == sanitized_attack_id), None)
     if action is None and sanitized_attack_id == "main-hand" and sheet.attacks:
         action = sheet.attacks[0]
     if action is None:
@@ -855,8 +918,52 @@ def find_attack(sheet: CharacterSheet, attack_id: str):
 async def store_roll(room: Room, payload: RollPayload) -> dict[str, Any]:
     room.pending_rolls[roll_queue_key(payload)] = payload
     roll = roll_payload_to_dict(payload)
-    await broadcast(room, {"type": "roll_created", "roll": roll})
-    return {"roomId": room.id, "roll": roll}
+    log_entry = append_roll_log_entry(
+        room,
+        RollLogEntry(
+            id=f"log-{payload.id}",
+            entryType=RollLogEntryType.ROLL_CREATED,
+            createdAt=payload.createdAt,
+            roll=payload,
+        ),
+    )
+    await broadcast(room, {"type": "roll_created", "roll": roll, "logEntry": roll_log_entry_to_dict(log_entry)})
+    return {"roomId": room.id, "roll": roll, "logEntry": roll_log_entry_to_dict(log_entry)}
+
+
+def append_roll_log_entry(room: Room, entry: RollLogEntry) -> RollLogEntry:
+    room.roll_history.append(entry)
+    room.roll_history = room.roll_history[-ROLL_HISTORY_LIMIT:]
+    return entry
+
+
+def set_equipment_slot(room: Room, sheet: CharacterSheet, item_id: str, slot: EquipmentSlot) -> None:
+    token_slots = room.equipment_slots.setdefault(sheet.tokenId, {})
+    if slot == EquipmentSlot.ARMOR:
+        for item in sheet.equipment:
+            if item.slot == EquipmentSlot.ARMOR:
+                token_slots[item.id] = EquipmentSlot.CARRIED
+    elif slot == EquipmentSlot.TWO_HANDS:
+        for item in sheet.equipment:
+            if item.slot in {EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND, EquipmentSlot.TWO_HANDS}:
+                token_slots[item.id] = EquipmentSlot.CARRIED
+    elif slot in {EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND}:
+        for item in sheet.equipment:
+            if item.slot in {slot, EquipmentSlot.TWO_HANDS}:
+                token_slots[item.id] = EquipmentSlot.CARRIED
+    token_slots[item_id] = slot
+
+
+def valid_equipment_slots(item) -> set[EquipmentSlot]:
+    from dnd_board.character_sheet import EquipmentType
+
+    if item.itemType == EquipmentType.ARMOR:
+        return {EquipmentSlot.CARRIED, EquipmentSlot.ARMOR}
+    if item.itemType == EquipmentType.SHIELD:
+        return {EquipmentSlot.CARRIED, EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND}
+    if item.itemType == EquipmentType.WEAPON:
+        return {EquipmentSlot.CARRIED, EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND, EquipmentSlot.TWO_HANDS}
+    return {EquipmentSlot.CARRIED}
 
 
 def spend_resource_use(room: Room, sheet: CharacterSheet, resource_id: str, payload: RollPayload) -> None:
@@ -979,8 +1086,10 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.board_id = saved_board_id
     room.next_token_number = next_dynamic_token_number(tokens)
     room.pending_rolls = {}
+    room.roll_history = []
     room.hit_points = {}
     room.resource_uses = load_saved_resource_uses(room.id)
+    room.equipment_slots = {}
     await broadcast_room_state(room)
     return True
 

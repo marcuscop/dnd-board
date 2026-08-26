@@ -20,6 +20,11 @@ class RollResolutionMode(Enum):
     HEAL_SELF = auto()
 
 
+class RollLogEntryType(Enum):
+    ROLL_CREATED = auto()
+    ROLL_RESOLVED = auto()
+
+
 class RollModifierType(Enum):
     NONE = auto()
     CLASS_LEVEL = auto()
@@ -69,6 +74,63 @@ class DamageType(Enum):
     THUNDER = auto()
 
 
+class WeaponProperty(Enum):
+    AMMUNITION = auto()
+    FINESSE = auto()
+    HEAVY = auto()
+    LIGHT = auto()
+    THROWN = auto()
+    TWO_HANDED = auto()
+    VERSATILE = auto()
+
+
+class AttackRangeType(Enum):
+    MELEE = auto()
+    RANGED = auto()
+
+
+class WeaponCategory(Enum):
+    MELEE = auto()
+    RANGED = auto()
+
+
+class EquipmentType(Enum):
+    ARMOR = auto()
+    GEAR = auto()
+    SHIELD = auto()
+    WEAPON = auto()
+
+
+class EquipmentSlot(Enum):
+    CARRIED = auto()
+    MAIN_HAND = auto()
+    OFF_HAND = auto()
+    TWO_HANDS = auto()
+    ARMOR = auto()
+
+
+class ArmorCategory(Enum):
+    LIGHT = auto()
+    MEDIUM = auto()
+    HEAVY = auto()
+
+
+class AttackDamageAbilityModifierMode(Enum):
+    INCLUDED = auto()
+    EXCLUDED = auto()
+
+
+class AttackKind(Enum):
+    STANDARD = auto()
+    TWO_WEAPON_FIGHTING = auto()
+
+
+class AttackActionType(Enum):
+    STANDARD = auto()
+    UNARMED_STRIKE = auto()
+    THROWN_WEAPON = auto()
+
+
 class DiceType(Enum):
     D4 = 4
     D6 = 6
@@ -108,13 +170,16 @@ class ClassType(Enum):
 class FightingStyleType(Enum):
     ARCHERY = auto()
     BLIND_FIGHTING = auto()
+    CLOSE_QUARTERS_SHOOTER = auto()
     DEFENSE = auto()
     DUELING = auto()
     GREAT_WEAPON_FIGHTING = auto()
     INTERCEPTION = auto()
+    MARINER = auto()
     PROTECTION = auto()
     SUPERIOR_TECHNIQUE = auto()
     THROWN_WEAPON_FIGHTING = auto()
+    TUNNEL_FIGHTER = auto()
     TWO_WEAPON_FIGHTING = auto()
     UNARMED_FIGHTING = auto()
 
@@ -153,7 +218,12 @@ class AttackAction:
     toHitBonus: int = 0
     damageBonus: int = 0
     activation: TimeEconomy = TimeEconomy.ACTION
-    properties: list[str] | None = None
+    attackRange: AttackRangeType = AttackRangeType.MELEE
+    weaponCategory: WeaponCategory = WeaponCategory.MELEE
+    damageAbilityModifier: AttackDamageAbilityModifierMode = AttackDamageAbilityModifierMode.INCLUDED
+    attackKind: AttackKind = AttackKind.STANDARD
+    attackType: AttackActionType = AttackActionType.STANDARD
+    properties: list[WeaponProperty] | None = None
 
     @api_field
     def damageDie(self) -> str:
@@ -174,6 +244,13 @@ class RollAction:
     @api_field
     def dice(self) -> str:
         return dice_formula(self.diceCount, self.diceType)
+
+
+@dataclass
+class RollModifierBreakdown:
+    source: str
+    value: int
+    description: str = ""
 
 
 @dataclass
@@ -245,10 +322,15 @@ class SheetFeature:
 class EquipmentItem:
     id: str
     name: str
-    equipped: bool
+    equipped: bool = False
     quantity: int = 1
     weight: float = 0.0
     notes: str = ""
+    itemType: EquipmentType = EquipmentType.GEAR
+    slot: EquipmentSlot = EquipmentSlot.CARRIED
+    armorCategory: ArmorCategory | None = None
+    armorClass: int = 0
+    armorClassBonus: int = 0
 
 
 @dataclass
@@ -339,6 +421,7 @@ class RollPayload:
     diceType: DiceType
     die: str
     modifier: int
+    modifierBreakdown: list[RollModifierBreakdown]
     total: int
     createdAt: int
     resourceSpent: RollResourceSpend | None = None
@@ -363,6 +446,15 @@ class RollResolution:
     targetHp: HitPoints
     outcome: str
     createdAt: int
+
+
+@dataclass
+class RollLogEntry:
+    id: str
+    entryType: RollLogEntryType
+    createdAt: int
+    roll: RollPayload
+    resolution: RollResolution | None = None
 
 
 @dataclass
@@ -421,6 +513,7 @@ def build_character_sheet(
     party_member: PartyMember | None,
     current_hp: int | None,
     resource_overrides: dict[str, int],
+    equipment_slot_overrides: dict[str, EquipmentSlot] | None = None,
 ) -> CharacterSheet:
     ability_scores = party_member.abilityScores if party_member and party_member.abilityScores else generated_ability_scores(token_id)
     max_hp = party_member.maxHp if party_member and party_member.maxHp is not None else generated_max_hp(token_id, ability_scores)
@@ -439,8 +532,11 @@ def build_character_sheet(
     features = default_features(classes)
     if sheet_config:
         features = [*(sheet_config.traits or []), *features, *(sheet_config.features or []), *(sheet_config.feats or [])]
-    armor_class = sheet_config.armorClass if sheet_config and sheet_config.armorClass is not None else 12 + min(3, dexterity_modifier)
-    armor_class += default_armor_class_bonus(classes)
+    equipment = apply_equipment_slot_overrides(sheet_config.equipment if sheet_config and sheet_config.equipment else [], equipment_slot_overrides or {})
+    armor_class = base_armor_class(sheet_config, equipment, dexterity_modifier)
+    armor_class += default_armor_class_bonus(classes, equipment)
+    attacks = sheet_config.attacks if sheet_config and sheet_config.attacks else default_attacks(kind)
+    attacks = default_feat_attacks(classes, equipment, attacks)
 
     return CharacterSheet(
         id=token_id,
@@ -469,17 +565,23 @@ def build_character_sheet(
         features=features,
         proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
         conditions=[],
-        attacks=sheet_config.attacks if sheet_config and sheet_config.attacks else default_attacks(kind),
-        equipment=sheet_config.equipment if sheet_config and sheet_config.equipment else [],
+        attacks=attacks,
+        equipment=equipment,
     )
 
 
 def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
     ability_score = getattr(sheet.abilityScores, enum_key(action.ability))
-    modifier = ability_modifier(ability_score) + action.toHitBonus
+    modifier_breakdown = [
+        RollModifierBreakdown(source=enum_label(action.ability), value=ability_modifier(ability_score)),
+        *attack_roll_modifier_breakdown(sheet.classes, action),
+    ]
+    if action.toHitBonus:
+        modifier_breakdown.append(RollModifierBreakdown(source=f"{action.name} Attack Bonus", value=action.toHitBonus))
     created_at = time_ns()
     if action.proficient:
-        modifier += sheet.proficiencyBonus
+        modifier_breakdown.append(RollModifierBreakdown(source="Proficiency", value=sheet.proficiencyBonus))
+    modifier = sum(part.value for part in modifier_breakdown)
 
     dice = [random.randint(1, 20)]
     return RollPayload(
@@ -496,6 +598,7 @@ def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         diceType=DiceType.D20,
         die=enum_key(DiceType.D20),
         modifier=modifier,
+        modifierBreakdown=modifier_breakdown,
         total=sum(dice) + modifier,
         createdAt=created_at,
     )
@@ -503,10 +606,21 @@ def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
 
 def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
     ability_score = getattr(sheet.abilityScores, enum_key(action.ability))
-    modifier = ability_modifier(ability_score) + action.toHitBonus + action.damageBonus
+    modifier_breakdown = []
+    if action.damageAbilityModifier == AttackDamageAbilityModifierMode.INCLUDED:
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(action.ability), value=ability_modifier(ability_score)))
+    modifier_breakdown.extend(damage_roll_modifier_breakdown(sheet.classes, sheet.equipment, action, ability_modifier(ability_score)))
+    if action.toHitBonus:
+        modifier_breakdown.append(RollModifierBreakdown(source=f"{action.name} Attack Bonus", value=action.toHitBonus))
+    if action.damageBonus:
+        modifier_breakdown.append(RollModifierBreakdown(source=f"{action.name} Damage Bonus", value=action.damageBonus))
+    modifier = sum(part.value for part in modifier_breakdown)
     count = action.damageDiceCount
     sides = action.damageDiceType.value
     dice = [random.randint(1, sides) for _ in range(count)]
+    if uses_great_weapon_fighting(sheet.classes, action):
+        dice = [random.randint(1, sides) if roll <= 2 else roll for roll in dice]
+        modifier_breakdown.append(RollModifierBreakdown(source="Great Weapon Fighting", value=0, description="Rerolled weapon damage dice of 1 or 2."))
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -522,6 +636,7 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         diceType=action.damageDiceType,
         die=damage_die_formula(action),
         modifier=modifier,
+        modifierBreakdown=modifier_breakdown,
         total=sum(dice) + modifier,
         createdAt=created_at,
     )
@@ -530,6 +645,9 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
 def build_roll_action_payload(sheet: CharacterSheet, roller: str, source: RollSource, action: RollAction) -> RollPayload:
     dice = [random.randint(1, action.diceType.value) for _ in range(action.diceCount)]
     modifier = roll_action_modifier(sheet, action)
+    modifier_breakdown = []
+    if modifier:
+        modifier_breakdown.append(RollModifierBreakdown(source=roll_action_modifier_label(action), value=modifier))
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -545,6 +663,7 @@ def build_roll_action_payload(sheet: CharacterSheet, roller: str, source: RollSo
         diceType=action.diceType,
         die=dice_formula(action.diceCount, action.diceType),
         modifier=modifier,
+        modifierBreakdown=modifier_breakdown,
         total=sum(dice) + modifier,
         createdAt=created_at,
     )
@@ -556,6 +675,14 @@ def roll_action_modifier(sheet: CharacterSheet, action: RollAction) -> int:
     if action.modifier == RollModifierType.PROFICIENCY_BONUS:
         return sheet.proficiencyBonus + action.staticModifier
     return action.staticModifier
+
+
+def roll_action_modifier_label(action: RollAction) -> str:
+    if action.modifier == RollModifierType.CLASS_LEVEL:
+        return "Class Level"
+    if action.modifier == RollModifierType.PROFICIENCY_BONUS:
+        return "Proficiency"
+    return "Modifier"
 
 
 def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> RollResolution:
@@ -610,6 +737,26 @@ def ability_modifier(score: int) -> int:
 
 def proficiency_bonus_for_level(level: int) -> int:
     return 2 + max(0, min(19, level - 1)) // 4
+
+
+def base_armor_class(sheet_config: PartyMemberSheet | None, equipment: list[EquipmentItem], dexterity_modifier: int) -> int:
+    if sheet_config and sheet_config.armorClass is not None:
+        return sheet_config.armorClass
+
+    worn_armor = next((item for item in equipment if item.itemType == EquipmentType.ARMOR and item.slot == EquipmentSlot.ARMOR), None)
+    wielded_shields = [item for item in equipment if item.itemType == EquipmentType.SHIELD and item.slot in {EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND}]
+    if worn_armor is not None and worn_armor.armorClass > 0:
+        armor_class = armor_item_class(worn_armor, dexterity_modifier)
+        return armor_class + sum(shield.armorClassBonus for shield in wielded_shields)
+    return 12 + min(3, dexterity_modifier) + sum(shield.armorClassBonus for shield in wielded_shields)
+
+
+def armor_item_class(item: EquipmentItem, dexterity_modifier: int) -> int:
+    if item.armorCategory == ArmorCategory.HEAVY:
+        return item.armorClass
+    if item.armorCategory == ArmorCategory.MEDIUM:
+        return item.armorClass + min(2, dexterity_modifier)
+    return item.armorClass + dexterity_modifier
 
 
 def ability_modifier_map(ability_scores: AbilityScores) -> dict[str, int]:
@@ -673,8 +820,9 @@ def default_attacks(kind: TokenKind) -> list[AttackAction]:
 
 def default_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracker]:
     from dnd_board.rules.fighter import fighter_resources
+    from dnd_board.rules.feats import feat_resources
 
-    return fighter_resources(classes)
+    return [*fighter_resources(classes), *feat_resources(classes)]
 
 
 def resource_roll_abilities(resources: list[ResourceTracker]) -> list[SheetAbility]:
@@ -711,6 +859,25 @@ def apply_resource_overrides(resources: list[ResourceTracker], overrides: dict[s
     ]
 
 
+def apply_equipment_slot_overrides(equipment: list[EquipmentItem], overrides: dict[str, EquipmentSlot]) -> list[EquipmentItem]:
+    return [
+        EquipmentItem(
+            id=item.id,
+            name=item.name,
+            equipped=overrides.get(item.id, item.slot) != EquipmentSlot.CARRIED,
+            quantity=item.quantity,
+            weight=item.weight,
+            notes=item.notes,
+            itemType=item.itemType,
+            slot=overrides.get(item.id, item.slot),
+            armorCategory=item.armorCategory,
+            armorClass=item.armorClass,
+            armorClassBonus=item.armorClassBonus,
+        )
+        for item in equipment
+    ]
+
+
 def default_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
     from dnd_board.rules.fighter import fighter_features
 
@@ -723,10 +890,34 @@ def default_feat_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbil
     return feat_abilities(classes)
 
 
-def default_armor_class_bonus(classes: list[CharacterClassLevel]) -> int:
+def default_armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:
     from dnd_board.rules.feats import armor_class_bonus
 
-    return armor_class_bonus(classes)
+    return armor_class_bonus(classes, equipment)
+
+
+def default_feat_attacks(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], attacks: list[AttackAction]) -> list[AttackAction]:
+    from dnd_board.rules.feats import feat_attacks
+
+    return feat_attacks(classes, equipment, attacks)
+
+
+def attack_roll_modifier_breakdown(classes: list[CharacterClassLevel], action: AttackAction) -> list[RollModifierBreakdown]:
+    from dnd_board.rules.feats import attack_roll_modifiers
+
+    return attack_roll_modifiers(classes, action)
+
+
+def damage_roll_modifier_breakdown(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], action: AttackAction, ability_modifier_value: int) -> list[RollModifierBreakdown]:
+    from dnd_board.rules.feats import damage_roll_modifiers
+
+    return damage_roll_modifiers(classes, equipment, action, ability_modifier_value)
+
+
+def uses_great_weapon_fighting(classes: list[CharacterClassLevel], action: AttackAction) -> bool:
+    from dnd_board.rules.feats import great_weapon_fighting_applies
+
+    return great_weapon_fighting_applies(classes, action)
 
 
 def party_manifest_from_dict(value: Any) -> PartyManifest | None:
@@ -850,11 +1041,18 @@ def typed_json_registry() -> dict[str, type[Any]]:
         for type_ in [
             AbilityScores,
             AbilityType,
+            ArmorCategory,
             AttackAction,
+            AttackActionType,
+            AttackDamageAbilityModifierMode,
+            AttackKind,
+            AttackRangeType,
             CharacterClassLevel,
             ClassType,
             DamageType,
             DiceType,
+            EquipmentSlot,
+            EquipmentType,
             EquipmentItem,
             FightingStyleType,
             FighterSubclassType,
@@ -864,12 +1062,17 @@ def typed_json_registry() -> dict[str, type[Any]]:
             ProficiencyLevel,
             RestType,
             RollAction,
+            RollLogEntry,
+            RollLogEntryType,
+            RollModifierBreakdown,
             RollModifierType,
             RollResolutionMode,
             ResourceTracker,
             SheetFeature,
             SheetAbility,
             TimeEconomy,
+            WeaponProperty,
+            WeaponCategory,
         ]
     }
 
@@ -916,6 +1119,10 @@ def roll_payload_to_dict(payload: RollPayload) -> dict[str, Any]:
 
 def roll_resolution_to_dict(resolution: RollResolution) -> dict[str, Any]:
     return serialize_dataclass(resolution)
+
+
+def roll_log_entry_to_dict(entry: RollLogEntry) -> dict[str, Any]:
+    return serialize_dataclass(entry)
 
 
 def serialize_dataclass(value: Any) -> Any:

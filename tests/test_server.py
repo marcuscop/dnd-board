@@ -6,7 +6,27 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from dnd_board import server
-from dnd_board.character_sheet import AbilityScores, PartyManifest, PartyMemberConfig, typed_json_from_value
+from dnd_board.character_sheet import (
+    AbilityScores,
+    AbilityType,
+    ArmorCategory,
+    AttackAction,
+    AttackRangeType,
+    CharacterClassLevel,
+    ClassType,
+    DamageType,
+    DiceType,
+    EquipmentItem,
+    EquipmentSlot,
+    EquipmentType,
+    FightingStyleType,
+    PartyManifest,
+    PartyMemberConfig,
+    PartyMemberSheet,
+    WeaponCategory,
+    WeaponProperty,
+    typed_json_from_value,
+)
 
 
 def setup_function() -> None:
@@ -979,6 +999,7 @@ def test_sheet_endpoint_returns_party_sheets_for_player() -> None:
     assert marina["attacks"][0]["id"] == "longsword"
     assert marina["attacks"][0]["damageDie"] == "1d8"
     assert body["pendingRolls"] == []
+    assert body["rollHistory"] == []
 
 
 def test_dm_sheet_endpoint_includes_loaded_asset_sheets() -> None:
@@ -1027,8 +1048,10 @@ def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
     assert forbidden.status_code == 403
     assert dm_roll.status_code == 200
     assert dm_roll.json()["roll"]["roller"] == "dm"
-    assert dm_socket.messages[0] == {"type": "roll_created", "roll": own_roll_body}
-    assert player_socket.messages[0] == {"type": "roll_created", "roll": own_roll_body}
+    assert dm_socket.messages[0]["type"] == "roll_created"
+    assert dm_socket.messages[0]["roll"] == own_roll_body
+    assert dm_socket.messages[0]["logEntry"]["roll"] == own_roll_body
+    assert player_socket.messages[0] == dm_socket.messages[0]
 
 
 def test_player_can_update_owned_sheet_resource() -> None:
@@ -1066,6 +1089,42 @@ def test_sheet_roll_queue_keeps_one_pending_roll_per_source_and_resolves(monkeyp
     assert resolution.json()["resolution"]["roll"]["id"] == damage.json()["roll"]["id"]
     assert [roll["id"] for roll in client.get("/api/rooms/sheet-roll-queue-test/sheet?playerKey=dm").json()["pendingRolls"]] == [attack.json()["roll"]["id"]]
     assert dm_socket.messages[-1]["type"] == "roll_resolved"
+
+
+def test_sheet_roll_history_keeps_duplicate_rolls_and_caps_at_ten(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
+
+    first_roll_ids = []
+    for _ in range(11):
+        response = client.post("/api/rooms/sheet-roll-history-test/sheet/player-1/rolls/attack?playerKey=player-1")
+        assert response.status_code == 200
+        first_roll_ids.append(response.json()["roll"]["id"])
+
+    sheet_state = client.get("/api/rooms/sheet-roll-history-test/sheet?playerKey=dm").json()
+    pending = sheet_state["pendingRolls"]
+    history = sheet_state["rollHistory"]
+
+    assert len(pending) == 1
+    assert pending[0]["id"] == first_roll_ids[-1]
+    assert len(history) == 10
+    assert [entry["roll"]["id"] for entry in history] == first_roll_ids[1:]
+    assert all(entry["entryType"] == "rollCreated" for entry in history)
+
+
+def test_sheet_roll_history_logs_resolution_after_roll_creation(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
+
+    damage = client.post("/api/rooms/sheet-roll-resolution-history-test/sheet/player-1/rolls/damage?playerKey=player-1")
+    resolution = client.post(
+        f"/api/rooms/sheet-roll-resolution-history-test/rolls/{damage.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+    history = client.get("/api/rooms/sheet-roll-resolution-history-test/sheet?playerKey=dm").json()["rollHistory"]
+
+    assert resolution.status_code == 200
+    assert [entry["entryType"] for entry in history] == ["rollCreated", "rollResolved"]
+    assert history[-1]["resolution"]["id"] == resolution.json()["resolution"]["id"]
 
 
 def test_tactical_mind_roll_consumes_second_wind_and_has_own_pending_slot(monkeypatch) -> None:
@@ -1155,6 +1214,159 @@ def test_sheet_endpoint_uses_party_manifest_stats(tmp_path, monkeypatch) -> None
     assert sheet["hp"] == {"current": 31, "max": 31, "temporary": 0}
     assert sheet["abilityScores"]["strength"] == 16
     assert sheet["attacks"][0]["damageDie"] == "1d8"
+
+
+def test_close_quarters_shooter_bonus_is_exposed_in_sheet_roll_payload(tmp_path, monkeypatch) -> None:
+    campaign = tmp_path / "close-quarters-campaign"
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text('{"id":"close-quarters-campaign","name":"Close Quarters Campaign"}', encoding="utf-8")
+    (party / "party.json").write_text(
+        json.dumps(
+            typed_json_from_value(
+                PartyManifest(
+                    members=[
+                        PartyMemberConfig(
+                            id="player-1",
+                            name="Configured Fighter",
+                            maxHp=31,
+                            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=13, intelligence=12, wisdom=10, charisma=8),
+                            sheet=PartyMemberSheet(
+                                classes=[
+                                    CharacterClassLevel(
+                                        name=ClassType.FIGHTER,
+                                        level=1,
+                                        fightingStyle=FightingStyleType.CLOSE_QUARTERS_SHOOTER,
+                                    )
+                                ],
+                                attacks=[
+                                    AttackAction(
+                                        id="longbow",
+                                        name="Longbow",
+                                        ability=AbilityType.DEXTERITY,
+                                        damageDiceCount=1,
+                                        damageDiceType=DiceType.D8,
+                                        damageType=DamageType.PIERCING,
+                                        attackRange=AttackRangeType.RANGED,
+                                        weaponCategory=WeaponCategory.RANGED,
+                                        properties=[WeaponProperty.AMMUNITION, WeaponProperty.TWO_HANDED],
+                                    )
+                                ],
+                            ),
+                        )
+                    ]
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 4)
+
+    response = TestClient(server.app).post("/api/rooms/close-quarters-campaign/sheet/player-1/rolls/attack?playerKey=player-1&attackId=longbow")
+    roll = response.json()["roll"]
+
+    assert response.status_code == 200
+    assert roll["modifier"] == 5
+    assert [(part["source"], part["value"]) for part in roll["modifierBreakdown"]] == [("Dexterity", 2), ("Close Quarters Shooter", 1), ("Proficiency", 2)]
+
+
+def test_equipment_slot_update_recalculates_fighting_style_armor_class(tmp_path, monkeypatch) -> None:
+    campaign = tmp_path / "equipment-slot-campaign"
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text('{"id":"equipment-slot-campaign","name":"Equipment Slot Campaign"}', encoding="utf-8")
+    (party / "party.json").write_text(
+        json.dumps(
+            typed_json_from_value(
+                PartyManifest(
+                    members=[
+                        PartyMemberConfig(
+                            id="player-1",
+                            name="Configured Fighter",
+                            maxHp=31,
+                            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=13, intelligence=12, wisdom=10, charisma=8),
+                            sheet=PartyMemberSheet(
+                                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1, fightingStyle=FightingStyleType.DEFENSE)],
+                                equipment=[
+                                    EquipmentItem(
+                                        id="chain-mail",
+                                        name="Chain Mail",
+                                        itemType=EquipmentType.ARMOR,
+                                        slot=EquipmentSlot.ARMOR,
+                                        armorCategory=ArmorCategory.HEAVY,
+                                        armorClass=16,
+                                    ),
+                                    EquipmentItem(
+                                        id="shield",
+                                        name="Shield",
+                                        itemType=EquipmentType.SHIELD,
+                                        slot=EquipmentSlot.OFF_HAND,
+                                        armorClassBonus=2,
+                                    ),
+                                ],
+                            ),
+                        )
+                    ]
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    starting_sheet = client.get("/api/rooms/equipment-slot-campaign/sheet/player-1?playerKey=player-1").json()["sheet"]
+    unwield_shield = client.post("/api/rooms/equipment-slot-campaign/sheet/player-1/equipment/shield/slot?playerKey=player-1&slot=carried")
+    unworn_armor = client.post("/api/rooms/equipment-slot-campaign/sheet/player-1/equipment/chain-mail/slot?playerKey=player-1&slot=carried")
+
+    assert starting_sheet["armorClass"] == 19
+    assert unwield_shield.json()["sheet"]["armorClass"] == 17
+    assert unworn_armor.json()["sheet"]["armorClass"] == 14
+
+
+def test_unarmed_fighting_damage_die_updates_after_equipment_slot_changes(tmp_path, monkeypatch) -> None:
+    campaign = tmp_path / "unarmed-slot-campaign"
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text('{"id":"unarmed-slot-campaign","name":"Unarmed Slot Campaign"}', encoding="utf-8")
+    (party / "party.json").write_text(
+        json.dumps(
+            typed_json_from_value(
+                PartyManifest(
+                    members=[
+                        PartyMemberConfig(
+                            id="player-1",
+                            name="Configured Fighter",
+                            maxHp=31,
+                            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=13, intelligence=12, wisdom=10, charisma=8),
+                            sheet=PartyMemberSheet(
+                                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1, fightingStyle=FightingStyleType.UNARMED_FIGHTING)],
+                                equipment=[
+                                    EquipmentItem(id="longsword", name="Longsword", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND),
+                                    EquipmentItem(id="shield", name="Shield", itemType=EquipmentType.SHIELD, slot=EquipmentSlot.OFF_HAND, armorClassBonus=2),
+                                ],
+                            ),
+                        )
+                    ]
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 5)
+    client = TestClient(server.app)
+
+    starting_sheet = client.get("/api/rooms/unarmed-slot-campaign/sheet/player-1?playerKey=player-1").json()["sheet"]
+    client.post("/api/rooms/unarmed-slot-campaign/sheet/player-1/equipment/shield/slot?playerKey=player-1&slot=carried")
+    empty_hands = client.post("/api/rooms/unarmed-slot-campaign/sheet/player-1/equipment/longsword/slot?playerKey=player-1&slot=carried").json()["sheet"]
+    damage_roll = client.post("/api/rooms/unarmed-slot-campaign/sheet/player-1/rolls/damage?playerKey=player-1&attackId=unarmedStrike").json()["roll"]
+
+    assert next(attack for attack in starting_sheet["attacks"] if attack["attackType"] == "unarmedStrike")["damageDiceType"] == "d6"
+    assert next(attack for attack in empty_hands["attacks"] if attack["attackType"] == "unarmedStrike")["damageDiceType"] == "d8"
+    assert damage_roll["diceType"] == "d8"
+    assert damage_roll["die"] == "1d8"
 
 
 def make_image(image_format: str) -> bytes:

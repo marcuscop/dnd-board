@@ -829,18 +829,27 @@ canvas.is-dragging,
 }
 
 .roll-log-row {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 12px;
+  align-items: start;
   border: 1px solid rgba(216, 156, 70, 0.36);
   border-radius: 6px;
   padding: 8px 10px;
   background: rgba(31, 18, 9, 0.68);
 }
 
+.roll-log-row time {
+  color: #f7dfaa;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .roll-log-row span {
   color: #d8b778;
   font-size: 0.86rem;
+  min-width: 0;
 }
 
 .applied-rolls {
@@ -854,6 +863,37 @@ canvas.is-dragging,
   background: rgba(73, 42, 18, 0.72);
   color: #f7dfaa;
   font-size: 0.86rem;
+}
+
+.equipment-list {
+  display: grid;
+  gap: 8px;
+}
+
+.equipment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: 8px;
+  align-items: center;
+}
+
+.equipment-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.equipment-row small {
+  color: #d8b778;
+}
+
+.equipment-row select {
+  min-width: 0;
+  border: 1px solid rgba(216, 156, 70, 0.42);
+  border-radius: 6px;
+  padding: 5px 6px;
+  background: rgba(31, 18, 9, 0.82);
+  color: #f7dfaa;
 }
 
 @media (max-width: 800px) {

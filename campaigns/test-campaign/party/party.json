@@ -42,8 +42,20 @@
                         "fightingStyles": {
                           "$type": "list",
                           "items": [
+                            { "$type": "FightingStyleType", "value": "ARCHERY" },
+                            { "$type": "FightingStyleType", "value": "BLIND_FIGHTING" },
+                            { "$type": "FightingStyleType", "value": "CLOSE_QUARTERS_SHOOTER" },
                             { "$type": "FightingStyleType", "value": "DEFENSE" },
-                            { "$type": "FightingStyleType", "value": "INTERCEPTION" }
+                            { "$type": "FightingStyleType", "value": "DUELING" },
+                            { "$type": "FightingStyleType", "value": "GREAT_WEAPON_FIGHTING" },
+                            { "$type": "FightingStyleType", "value": "MARINER" },
+                            { "$type": "FightingStyleType", "value": "PROTECTION" },
+                            { "$type": "FightingStyleType", "value": "SUPERIOR_TECHNIQUE" },
+                            { "$type": "FightingStyleType", "value": "THROWN_WEAPON_FIGHTING" },
+                            { "$type": "FightingStyleType", "value": "TUNNEL_FIGHTER" },
+                            { "$type": "FightingStyleType", "value": "INTERCEPTION" },
+                            { "$type": "FightingStyleType", "value": "TWO_WEAPON_FIGHTING" },
+                            { "$type": "FightingStyleType", "value": "UNARMED_FIGHTING" }
                           ]
                         }
                       }
@@ -91,7 +103,7 @@
                         "damageType": { "$type": "DamageType", "value": "SLASHING" },
                         "properties": {
                           "$type": "list",
-                          "items": [{ "$type": "str", "value": "Versatile 1d10" }]
+                          "items": [{ "$type": "WeaponProperty", "value": "VERSATILE" }]
                         }
                       }
                     },
@@ -104,12 +116,14 @@
                         "damageDiceCount": { "$type": "int", "value": 1 },
                         "damageDiceType": { "$type": "DiceType", "value": "D8" },
                         "damageType": { "$type": "DamageType", "value": "PIERCING" },
+                        "attackRange": { "$type": "AttackRangeType", "value": "RANGED" },
+                        "weaponCategory": { "$type": "WeaponCategory", "value": "RANGED" },
                         "properties": {
                           "$type": "list",
                           "items": [
-                            { "$type": "str", "value": "Ammunition" },
-                            { "$type": "str", "value": "Heavy" },
-                            { "$type": "str", "value": "Two-handed" }
+                            { "$type": "WeaponProperty", "value": "AMMUNITION" },
+                            { "$type": "WeaponProperty", "value": "HEAVY" },
+                            { "$type": "WeaponProperty", "value": "TWO_HANDED" }
                           ]
                         }
                       }
@@ -126,7 +140,11 @@
                         "name": { "$type": "str", "value": "Chain Mail" },
                         "equipped": { "$type": "bool", "value": true },
                         "quantity": { "$type": "int", "value": 1 },
-                        "weight": { "$type": "float", "value": 55.0 }
+                        "weight": { "$type": "float", "value": 55.0 },
+                        "itemType": { "$type": "EquipmentType", "value": "ARMOR" },
+                        "slot": { "$type": "EquipmentSlot", "value": "ARMOR" },
+                        "armorCategory": { "$type": "ArmorCategory", "value": "HEAVY" },
+                        "armorClass": { "$type": "int", "value": 16 }
                       }
                     },
                     {
@@ -136,7 +154,10 @@
                         "name": { "$type": "str", "value": "Shield" },
                         "equipped": { "$type": "bool", "value": true },
                         "quantity": { "$type": "int", "value": 1 },
-                        "weight": { "$type": "float", "value": 6.0 }
+                        "weight": { "$type": "float", "value": 6.0 },
+                        "itemType": { "$type": "EquipmentType", "value": "SHIELD" },
+                        "slot": { "$type": "EquipmentSlot", "value": "OFF_HAND" },
+                        "armorClassBonus": { "$type": "int", "value": 2 }
                       }
                     },
                     {
@@ -146,7 +167,9 @@
                         "name": { "$type": "str", "value": "Longsword" },
                         "equipped": { "$type": "bool", "value": true },
                         "quantity": { "$type": "int", "value": 1 },
-                        "weight": { "$type": "float", "value": 3.0 }
+                        "weight": { "$type": "float", "value": 3.0 },
+                        "itemType": { "$type": "EquipmentType", "value": "WEAPON" },
+                        "slot": { "$type": "EquipmentSlot", "value": "MAIN_HAND" }
                       }
                     },
                     {
@@ -156,7 +179,9 @@
                         "name": { "$type": "str", "value": "Longbow" },
                         "equipped": { "$type": "bool", "value": false },
                         "quantity": { "$type": "int", "value": 1 },
-                        "weight": { "$type": "float", "value": 2.0 }
+                        "weight": { "$type": "float", "value": 2.0 },
+                        "itemType": { "$type": "EquipmentType", "value": "WEAPON" },
+                        "slot": { "$type": "EquipmentSlot", "value": "CARRIED" }
                       }
                     }
                   ]
