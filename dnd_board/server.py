@@ -6,7 +6,7 @@ from io import BytesIO
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from time import time_ns
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -18,22 +18,25 @@ from dnd_board.character_sheet import (
     AbilityScores,
     CharacterSheet,
     PartyMember,
-    RollKind,
     RollPayload,
+    RollResolutionMode,
+    RollResourceSpend,
     RollResolution,
-    ability_scores_from_dict,
+    RollSource,
+    SheetSectionType,
+    TokenKind,
+    build_attack_roll_payload,
     build_character_sheet,
-    build_roll_payload,
-    party_member_sheet_from_dict,
+    build_damage_roll_payload,
+    build_roll_action_payload,
+    enum_key,
+    party_manifest_from_dict,
     positive_int,
     resolve_roll_against_target as resolve_dnd_roll_against_target,
     roll_payload_to_dict,
     roll_resolution_to_dict,
     sheet_to_dict,
 )
-
-AssetKind = Literal["asset"]
-TokenKind = Literal["character", "asset"]
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -110,7 +113,7 @@ class Board:
 @dataclass
 class Asset:
     id: str
-    kind: AssetKind
+    kind: TokenKind
     name: str
     avatarUrl: str
 
@@ -130,7 +133,7 @@ class Room:
     fog: FogState
     board_id: str
     next_token_number: int
-    pending_rolls: dict[str, RollPayload]
+    pending_rolls: dict[tuple[str, str, str, str], RollPayload]
     hit_points: dict[str, int]
     resource_uses: dict[str, dict[str, int]]
 
@@ -226,12 +229,22 @@ async def get_room_sheet(room_id: str, sheet_id: str, playerKey: str) -> dict[st
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/attack")
 async def roll_sheet_attack(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand") -> dict[str, Any]:
-    return await create_sheet_roll(room_id, sheet_id, playerKey, attackId, "attack")
+    return await create_attack_roll(room_id, sheet_id, playerKey, attackId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/damage")
 async def roll_sheet_damage(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand") -> dict[str, Any]:
-    return await create_sheet_roll(room_id, sheet_id, playerKey, attackId, "damage")
+    return await create_damage_roll(room_id, sheet_id, playerKey, attackId)
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/resources/{resource_id}/rolls/{action_id}")
+async def roll_sheet_resource_action(room_id: str, sheet_id: str, resource_id: str, action_id: str, playerKey: str) -> dict[str, Any]:
+    return await create_resource_roll(room_id, sheet_id, playerKey, resource_id, action_id)
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/abilities/{ability_id}/rolls/{action_id}")
+async def roll_sheet_ability_action(room_id: str, sheet_id: str, ability_id: str, action_id: str, playerKey: str) -> dict[str, Any]:
+    return await create_ability_roll(room_id, sheet_id, playerKey, ability_id, action_id)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/resources/{resource_id}")
@@ -271,7 +284,7 @@ async def resolve_roll(room_id: str, roll_id: str, playerKey: str, targetSheetId
         raise HTTPException(status_code=404, detail="Target sheet not found")
 
     resolution = resolve_roll_against_target(room, roll, target)
-    room.pending_rolls.pop(roll.tokenId, None)
+    room.pending_rolls.pop(roll_queue_key(roll), None)
     resolution_data = roll_resolution_to_dict(resolution)
     await broadcast(room, {"type": "roll_resolved", "rollId": roll.id, "tokenId": roll.tokenId, "resolution": resolution_data})
     return {"roomId": room.id, "resolution": resolution_data}
@@ -578,8 +591,8 @@ async def load_asset_token(room: Room, player: Player, asset_kind: str, asset_id
 
     board = get_room_board(room)
     token = Token(
-        id=f"{asset.kind}-{room.next_token_number}",
-        kind=asset.kind,
+        id=f"{enum_key(asset.kind)}-{room.next_token_number}",
+        kind=TokenKind.ASSET,
         name=asset.name,
         owner="dm",
         color=DEFAULT_TOKEN_COLOR,
@@ -599,11 +612,11 @@ async def delete_token(room: Room, player: Player, token_id: str) -> None:
         return
 
     token = room.tokens.get(token_id)
-    if token is None or token.kind == "character":
+    if token is None or token.kind == TokenKind.CHARACTER:
         return
 
     room.tokens.pop(token_id)
-    room.pending_rolls.pop(token_id, None)
+    remove_pending_rolls_for_token(room, token_id)
     room.hit_points.pop(token_id, None)
     await broadcast(room, {"type": "token_deleted", "tokenId": token_id})
 
@@ -649,7 +662,7 @@ def seed_tokens(campaign_id: str | None = None) -> list[Token]:
 def party_member_to_token(member: PartyMember, index: int) -> Token:
     return Token(
         id=member.id,
-        kind="character",
+        kind=TokenKind.CHARACTER,
         name=member.name,
         owner=member.owner,
         color=DEFAULT_TOKEN_COLOR,
@@ -667,14 +680,14 @@ def merge_saved_tokens_with_party(saved_tokens: list[Token], campaign_id: str | 
     for index, member in enumerate(load_party_members(campaign_id)):
         token = party_member_to_token(member, index)
         saved = saved_by_id.get(token.id)
-        if saved is not None and saved.kind == "character":
+        if saved is not None and saved.kind == TokenKind.CHARACTER:
             token.x = saved.x
             token.y = saved.y
             token.radius = saved.radius
             token.inScene = saved.inScene
         tokens.append(token)
 
-    tokens.extend(token for token in saved_tokens if token.kind != "character")
+    tokens.extend(token for token in saved_tokens if token.kind != TokenKind.CHARACTER)
     return tokens
 
 
@@ -740,7 +753,7 @@ def get_visible_sheet(room: Room, player: Player, sheet_id: str) -> CharacterShe
 
 
 def can_view_sheet(player: Player, token: Token) -> bool:
-    return is_dm(player) or token.kind == "character"
+    return is_dm(player) or token.kind == TokenKind.CHARACTER
 
 
 def can_control_sheet_roll(player: Player, sheet: CharacterSheet) -> bool:
@@ -748,7 +761,7 @@ def can_control_sheet_roll(player: Player, sheet: CharacterSheet) -> bool:
 
 
 def token_to_sheet(token: Token, campaign_id: str | None = None, current_hp: int | None = None) -> CharacterSheet:
-    party_member = party_member_by_id(token.id, campaign_id) if token.kind == "character" else None
+    party_member = party_member_by_id(token.id, campaign_id) if token.kind == TokenKind.CHARACTER else None
     room = rooms.get(campaign_id or "")
     resource_overrides = room.resource_uses.get(token.id, {}) if room is not None else {}
     return build_character_sheet(
@@ -763,7 +776,61 @@ def token_to_sheet(token: Token, campaign_id: str | None = None, current_hp: int
     )
 
 
-async def create_sheet_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str, roll_kind: RollKind) -> dict[str, Any]:
+async def create_attack_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    action = find_attack(sheet, attack_id)
+    payload = build_attack_roll_payload(sheet, player.player_key, action)
+    return await store_roll(room, payload)
+
+
+async def create_damage_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    action = find_attack(sheet, attack_id)
+    payload = build_damage_roll_payload(sheet, player.player_key, action)
+    return await store_roll(room, payload)
+
+
+async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, resource_id: str, action_id: str) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    sanitized_resource_id = sanitize_asset_id(resource_id)
+    resource = next((candidate for candidate in sheet.resources if sanitize_asset_id(candidate.id) == sanitized_resource_id), None)
+    if resource is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    actions = resource.rollActions or []
+    sanitized_action_id = sanitize_asset_id(action_id)
+    action = next((candidate for candidate in actions if sanitize_asset_id(enum_key(candidate.id)) == sanitized_action_id), None)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Roll action not found")
+
+    source = RollSource(section=SheetSectionType.RESOURCES, sourceId=resource.id, actionId=enum_key(action.id))
+    payload = build_roll_action_payload(sheet, player.player_key, source, action)
+    if action.consumesResource is not None:
+        spend_resource_use(room, sheet, enum_key(action.consumesResource), payload)
+    return await store_roll(room, payload)
+
+
+async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, ability_id: str, action_id: str) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    sanitized_ability_id = sanitize_asset_id(ability_id)
+    ability = next((candidate for candidate in sheet.abilities if sanitize_asset_id(candidate.id) == sanitized_ability_id), None)
+    if ability is None:
+        raise HTTPException(status_code=404, detail="Ability not found")
+
+    actions = ability.rollActions or []
+    sanitized_action_id = sanitize_asset_id(action_id)
+    action = next((candidate for candidate in actions if sanitize_asset_id(enum_key(candidate.id)) == sanitized_action_id), None)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Roll action not found")
+
+    source = RollSource(section=SheetSectionType.ABILITIES, sourceId=ability.id, actionId=enum_key(action.id))
+    payload = build_roll_action_payload(sheet, player.player_key, source, action)
+    if action.consumesResource is not None:
+        spend_resource_use(room, sheet, enum_key(action.consumesResource), payload)
+    return await store_roll(room, payload)
+
+
+def roll_context(room_id: str, sheet_id: str, player_key: str) -> tuple[Room, Player, CharacterSheet]:
     sanitized_room_id = sanitize_room_id(room_id)
     room = get_or_create_room(sanitized_room_id)
     player = Player(id="http-sheet-roll", name="Sheet Roller", player_key=normalize_player_key(player_key, room.id), websocket=None, room_id=room.id)
@@ -772,24 +839,53 @@ async def create_sheet_roll(room_id: str, sheet_id: str, player_key: str, attack
         raise HTTPException(status_code=404, detail="Sheet not found")
     if not can_control_sheet_roll(player, sheet):
         raise HTTPException(status_code=403, detail="Cannot roll for this sheet")
+    return room, player, sheet
 
+
+def find_attack(sheet: CharacterSheet, attack_id: str):
     sanitized_attack_id = sanitize_asset_id(attack_id)
     action = next((attack for attack in sheet.attacks if attack.id == sanitized_attack_id), None)
     if action is None and sanitized_attack_id == "main-hand" and sheet.attacks:
         action = sheet.attacks[0]
     if action is None:
         raise HTTPException(status_code=404, detail="Attack not found")
+    return action
 
-    payload = build_roll_payload(sheet, player.player_key, action, roll_kind)
-    room.pending_rolls[sheet.tokenId] = payload
+
+async def store_roll(room: Room, payload: RollPayload) -> dict[str, Any]:
+    room.pending_rolls[roll_queue_key(payload)] = payload
     roll = roll_payload_to_dict(payload)
     await broadcast(room, {"type": "roll_created", "roll": roll})
     return {"roomId": room.id, "roll": roll}
 
 
+def spend_resource_use(room: Room, sheet: CharacterSheet, resource_id: str, payload: RollPayload) -> None:
+    resource = next((candidate for candidate in sheet.resources if candidate.id == resource_id), None)
+    if resource is None:
+        return
+
+    remaining_uses = clamp_int(resource.currentUses - 1, 0, resource.maxUses)
+    room.resource_uses.setdefault(sheet.tokenId, {})[resource.id] = remaining_uses
+    payload.resourceSpent = RollResourceSpend(
+        resourceId=resource.id,
+        resourceName=resource.name,
+        remainingUses=remaining_uses,
+        maxUses=resource.maxUses,
+    )
+
+
+def roll_queue_key(roll: RollPayload) -> tuple[str, str, str, str]:
+    return (roll.tokenId, enum_key(roll.source.section), roll.source.sourceId, roll.source.actionId)
+
+
+def remove_pending_rolls_for_token(room: Room, token_id: str) -> None:
+    for key in [key for key, roll in room.pending_rolls.items() if roll.tokenId == token_id]:
+        room.pending_rolls.pop(key, None)
+
+
 def resolve_roll_against_target(room: Room, roll: RollPayload, target: CharacterSheet) -> RollResolution:
     resolution = resolve_dnd_roll_against_target(roll, target)
-    if roll.kind == "damage":
+    if roll.resolution in {RollResolutionMode.APPLY_DAMAGE, RollResolutionMode.HEAL_SELF}:
         room.hit_points[target.tokenId] = resolution.targetHp.current
     return resolution
 
@@ -821,6 +917,7 @@ async def send(player: Player, message: dict[str, Any]) -> None:
 
 def token_to_dict(token: Token) -> dict[str, Any]:
     data = asdict(token)
+    data["kind"] = enum_key(token.kind)
     if data["lockedBy"] is None:
         data.pop("lockedBy")
     if data["avatarUrl"] is None:
@@ -957,14 +1054,11 @@ def load_saved_resource_uses(room_id: str) -> dict[str, dict[str, int]]:
 
 
 def token_from_dict(data: dict[str, Any], board: Board | None = None, campaign_id: str | None = None) -> Token:
-    kind = str(data.get("kind", "character"))
-    if kind not in {"character", "asset"}:
-        kind = "character"
     active_board = board or fallback_board()
 
     return Token(
         id=str(data["id"]),
-        kind=kind,
+        kind=token_kind_from_value(data.get("kind")),
         name=str(data["name"]),
         owner=normalize_owner(str(data["owner"]), campaign_id),
         color=DEFAULT_TOKEN_COLOR,
@@ -975,6 +1069,13 @@ def token_from_dict(data: dict[str, Any], board: Board | None = None, campaign_i
         avatarUrl=str(data["avatarUrl"]) if data.get("avatarUrl") else None,
         lockedBy=None,
     )
+
+
+def token_kind_from_value(value: Any) -> TokenKind:
+    normalized = str(value or "").strip().replace("-", "_").replace(" ", "_").upper()
+    if normalized in {TokenKind.ASSET.name, enum_key(TokenKind.ASSET).upper()}:
+        return TokenKind.ASSET
+    return TokenKind.CHARACTER
 
 
 def default_fog() -> FogState:
@@ -1038,32 +1139,29 @@ def load_party_members_from_manifest(path: Path, campaign_id: str | None = None)
     except (OSError, json.JSONDecodeError):
         return []
 
-    raw_members = data.get("members") if isinstance(data, dict) else None
-    if not isinstance(raw_members, list):
+    manifest = party_manifest_from_dict(data)
+    if manifest is None:
         return []
 
     members: list[PartyMember] = []
     seen: set[str] = set()
-    for index, raw_member in enumerate(raw_members, start=1):
-        if not isinstance(raw_member, dict):
-            continue
-
+    for index, raw_member in enumerate(manifest.members, start=1):
         fallback_id = f"player-{index}"
-        player_id = normalize_party_member_id(str(raw_member.get("id", fallback_id)), fallback_id)
+        player_id = normalize_party_member_id(raw_member.id or fallback_id, fallback_id)
         if player_id in seen:
             continue
         seen.add(player_id)
 
-        image_path = party_image_path(str(raw_member.get("image", "")), campaign_id)
+        image_path = party_image_path(raw_member.image or "", campaign_id)
         members.append(
             PartyMember(
                 id=player_id,
-                name=str(raw_member.get("name", humanize_asset_name(player_id))).strip()[:40] or humanize_asset_name(player_id),
+                name=raw_member.name.strip()[:40] or humanize_asset_name(player_id),
                 owner=player_id,
                 avatarUrl=campaign_file_url("party", image_path, campaign_id) if image_path is not None else None,
-                abilityScores=ability_scores_from_dict(raw_member.get("abilityScores")),
-                maxHp=positive_int(raw_member.get("maxHp")),
-                sheet=party_member_sheet_from_dict(raw_member.get("sheet")),
+                abilityScores=raw_member.abilityScores,
+                maxHp=raw_member.maxHp,
+                sheet=raw_member.sheet,
             )
         )
     return members
@@ -1127,10 +1225,10 @@ def humanize_asset_name(asset_name: str) -> str:
 
 
 def list_assets() -> list[Asset]:
-    return list_assets_from_dir("asset", SHARED_ASSET_DIR)
+    return list_assets_from_dir(TokenKind.ASSET, SHARED_ASSET_DIR)
 
 
-def list_assets_from_dir(kind: AssetKind, directory: Path) -> list[Asset]:
+def list_assets_from_dir(kind: TokenKind, directory: Path) -> list[Asset]:
     assets: list[Asset] = []
     for path in list_image_files(directory):
         asset_id = sanitize_asset_id(path.stem)
@@ -1144,13 +1242,15 @@ def get_asset(asset_kind: str, asset_id: str) -> Asset | None:
     normalized_kind = asset_kind.strip().lower()
     normalized_id = sanitize_asset_id(asset_id)
     for asset in list_assets():
-        if asset.kind == normalized_kind and asset.id == normalized_id:
+        if enum_key(asset.kind) == normalized_kind and asset.id == normalized_id:
             return asset
     return None
 
 
 def asset_to_dict(asset: Asset) -> dict[str, Any]:
-    return asdict(asset)
+    data = asdict(asset)
+    data["kind"] = enum_key(asset.kind)
+    return data
 
 
 def normalize_owner(owner: str, campaign_id: str | None = None) -> str:
@@ -1163,7 +1263,7 @@ def normalize_owner(owner: str, campaign_id: str | None = None) -> str:
 def next_dynamic_token_number(tokens: list[Token]) -> int:
     highest = 0
     for token in tokens:
-        if token.kind == "character":
+        if token.kind == TokenKind.CHARACTER:
             continue
         try:
             highest = max(highest, int(token.id.rsplit("-", 1)[1]))

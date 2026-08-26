@@ -6,8 +6,12 @@ from enum import Enum, auto
 from dnd_board.character_sheet import (
     CharacterClassLevel,
     ClassType,
+    DiceType,
     ResourceTracker,
     RestType,
+    RollAction,
+    RollModifierType,
+    RollResolutionMode,
     SheetFeature,
     TimeEconomy,
     enum_key,
@@ -38,6 +42,11 @@ class FighterResourceType(Enum):
     SECOND_WIND = auto()
     ACTION_SURGE = auto()
     INDOMITABLE = auto()
+
+
+class FighterRollActionType(Enum):
+    SECOND_WIND_HEAL = auto()
+    TACTICAL_MIND = auto()
 
 
 class FighterSubclassType(Enum):
@@ -276,6 +285,29 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
     if progression is None:
         return []
 
+    second_wind_roll_actions = [
+        RollAction(
+            id=FighterRollActionType.SECOND_WIND_HEAL,
+            name=FighterResourceType.SECOND_WIND,
+            diceCount=1,
+            diceType=DiceType.D10,
+            modifier=RollModifierType.CLASS_LEVEL,
+            resolution=RollResolutionMode.HEAL_SELF,
+            consumesResource=FighterResourceType.SECOND_WIND,
+        )
+    ]
+    if progression.level >= 2:
+        second_wind_roll_actions.append(
+            RollAction(
+                id=FighterRollActionType.TACTICAL_MIND,
+                name=FighterRollActionType.TACTICAL_MIND,
+                diceCount=1,
+                diceType=DiceType.D10,
+                resolution=RollResolutionMode.NONE,
+                consumesResource=FighterResourceType.SECOND_WIND,
+            )
+        )
+
     resources = [
         ResourceTracker(
             id=enum_key(FighterResourceType.SECOND_WIND),
@@ -285,6 +317,7 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
             reset=RestType.SHORT_REST,
             activation=TimeEconomy.BONUS_ACTION,
             description="Regain 1d10 plus Fighter level hit points, or spend a use for Tactical Mind.",
+            rollActions=second_wind_roll_actions,
         )
     ]
     if progression.action_surge_uses > 0:
@@ -319,6 +352,7 @@ def fighter_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
     character_class = fighter_class(classes)
     if progression is None or character_class is None:
         return []
+    from dnd_board.rules.feats import fighting_style_features
 
     features: list[SheetFeature] = []
     for level in range(1, progression.level + 1):
@@ -326,6 +360,7 @@ def fighter_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
         features.extend(feature_for_type(feature_type, level_progression, character_class) for feature_type in level_progression.features)
 
     features.append(feature_for_type(FighterFeatureType.WEAPON_MASTERY, progression, character_class))
+    features.extend(fighting_style_features(classes))
     features.extend(champion_features(character_class, progression.level))
     return dedupe_features(features)
 

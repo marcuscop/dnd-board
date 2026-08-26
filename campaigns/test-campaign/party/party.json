@@ -1,82 +1,195 @@
 {
-  "members": [
-    {
-      "id": "player-1",
-      "name": "Marina",
-      "image": "ex1.png",
-      "maxHp": 31,
-      "abilityScores": {
-        "strength": 16,
-        "dexterity": 14,
-        "constitution": 15,
-        "intelligence": 10,
-        "wisdom": 12,
-        "charisma": 8
-      },
-      "sheet": {
-        "race": "Human",
-        "background": "Soldier",
-        "alignment": "Neutral Good",
-        "armorClass": 18,
-        "speed": 30,
-        "classes": [
-          {
-            "name": "FIGHTER",
-            "level": 3,
-            "subclass": "Champion",
-            "fightingStyle": "DEFENSE"
+  "$type": "PartyManifest",
+  "fields": {
+    "members": {
+      "$type": "list",
+      "items": [
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": { "$type": "str", "value": "player-1" },
+            "name": { "$type": "str", "value": "Marina" },
+            "image": { "$type": "str", "value": "ex1.png" },
+            "maxHp": { "$type": "int", "value": 31 },
+            "abilityScores": {
+              "$type": "AbilityScores",
+              "fields": {
+                "strength": { "$type": "int", "value": 16 },
+                "dexterity": { "$type": "int", "value": 14 },
+                "constitution": { "$type": "int", "value": 15 },
+                "intelligence": { "$type": "int", "value": 10 },
+                "wisdom": { "$type": "int", "value": 12 },
+                "charisma": { "$type": "int", "value": 8 }
+              }
+            },
+            "sheet": {
+              "$type": "PartyMemberSheet",
+              "fields": {
+                "race": { "$type": "str", "value": "Human" },
+                "background": { "$type": "str", "value": "Soldier" },
+                "alignment": { "$type": "str", "value": "Neutral Good" },
+                "armorClass": { "$type": "int", "value": 18 },
+                "speed": { "$type": "int", "value": 30 },
+                "classes": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "CharacterClassLevel",
+                      "fields": {
+                        "name": { "$type": "ClassType", "value": "FIGHTER" },
+                        "level": { "$type": "int", "value": 7 },
+                        "subclass": { "$type": "FighterSubclassType", "value": "CHAMPION" },
+                        "fightingStyles": {
+                          "$type": "list",
+                          "items": [
+                            { "$type": "FightingStyleType", "value": "DEFENSE" },
+                            { "$type": "FightingStyleType", "value": "INTERCEPTION" }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "skills": {
+                  "$type": "dict[ProficiencyLevel]",
+                  "value": {
+                    "athletics": { "$type": "ProficiencyLevel", "value": "PROFICIENT" },
+                    "intimidation": { "$type": "ProficiencyLevel", "value": "PROFICIENT" },
+                    "perception": { "$type": "ProficiencyLevel", "value": "PROFICIENT" },
+                    "survival": { "$type": "ProficiencyLevel", "value": "PROFICIENT" }
+                  }
+                },
+                "savingThrowProficiencies": {
+                  "$type": "list",
+                  "items": [
+                    { "$type": "AbilityType", "value": "STRENGTH" },
+                    { "$type": "AbilityType", "value": "CONSTITUTION" }
+                  ]
+                },
+                "proficiencies": {
+                  "$type": "list",
+                  "items": [
+                    { "$type": "str", "value": "All armor" },
+                    { "$type": "str", "value": "Shields" },
+                    { "$type": "str", "value": "Simple weapons" },
+                    { "$type": "str", "value": "Martial weapons" },
+                    { "$type": "str", "value": "Dice set" },
+                    { "$type": "str", "value": "Vehicles" }
+                  ]
+                },
+                "attacks": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "AttackAction",
+                      "fields": {
+                        "id": { "$type": "str", "value": "longsword" },
+                        "name": { "$type": "str", "value": "Longsword" },
+                        "ability": { "$type": "AbilityType", "value": "STRENGTH" },
+                        "damageDiceCount": { "$type": "int", "value": 1 },
+                        "damageDiceType": { "$type": "DiceType", "value": "D8" },
+                        "damageType": { "$type": "DamageType", "value": "SLASHING" },
+                        "properties": {
+                          "$type": "list",
+                          "items": [{ "$type": "str", "value": "Versatile 1d10" }]
+                        }
+                      }
+                    },
+                    {
+                      "$type": "AttackAction",
+                      "fields": {
+                        "id": { "$type": "str", "value": "longbow" },
+                        "name": { "$type": "str", "value": "Longbow" },
+                        "ability": { "$type": "AbilityType", "value": "DEXTERITY" },
+                        "damageDiceCount": { "$type": "int", "value": 1 },
+                        "damageDiceType": { "$type": "DiceType", "value": "D8" },
+                        "damageType": { "$type": "DamageType", "value": "PIERCING" },
+                        "properties": {
+                          "$type": "list",
+                          "items": [
+                            { "$type": "str", "value": "Ammunition" },
+                            { "$type": "str", "value": "Heavy" },
+                            { "$type": "str", "value": "Two-handed" }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "equipment": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": { "$type": "str", "value": "chain-mail" },
+                        "name": { "$type": "str", "value": "Chain Mail" },
+                        "equipped": { "$type": "bool", "value": true },
+                        "quantity": { "$type": "int", "value": 1 },
+                        "weight": { "$type": "float", "value": 55.0 }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": { "$type": "str", "value": "shield" },
+                        "name": { "$type": "str", "value": "Shield" },
+                        "equipped": { "$type": "bool", "value": true },
+                        "quantity": { "$type": "int", "value": 1 },
+                        "weight": { "$type": "float", "value": 6.0 }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": { "$type": "str", "value": "longsword" },
+                        "name": { "$type": "str", "value": "Longsword" },
+                        "equipped": { "$type": "bool", "value": true },
+                        "quantity": { "$type": "int", "value": 1 },
+                        "weight": { "$type": "float", "value": 3.0 }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": { "$type": "str", "value": "longbow" },
+                        "name": { "$type": "str", "value": "Longbow" },
+                        "equipped": { "$type": "bool", "value": false },
+                        "quantity": { "$type": "int", "value": 1 },
+                        "weight": { "$type": "float", "value": 2.0 }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
-        ],
-        "skills": {
-          "athletics": "PROFICIENT",
-          "intimidation": "PROFICIENT",
-          "perception": "PROFICIENT",
-          "survival": "PROFICIENT"
         },
-        "savingThrowProficiencies": ["STRENGTH", "CONSTITUTION"],
-        "proficiencies": ["All armor", "Shields", "Simple weapons", "Martial weapons", "Dice set", "Vehicles"],
-        "attacks": [
-          {
-            "id": "longsword",
-            "name": "Longsword",
-            "ability": "STRENGTH",
-            "damageDiceCount": 1,
-            "damageDiceType": "D8",
-            "damageType": "SLASHING",
-            "properties": ["Versatile 1d10"]
-          },
-          {
-            "id": "longbow",
-            "name": "Longbow",
-            "ability": "DEXTERITY",
-            "damageDiceCount": 1,
-            "damageDiceType": "D8",
-            "damageType": "PIERCING",
-            "properties": ["Ammunition", "Heavy", "Two-handed"]
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": { "$type": "str", "value": "player-2" },
+            "name": { "$type": "str", "value": "Edward" },
+            "image": { "$type": "str", "value": "ex2.png" }
           }
-        ],
-        "equipment": [
-          { "id": "chain-mail", "name": "Chain Mail", "equipped": true, "quantity": 1, "weight": 55 },
-          { "id": "shield", "name": "Shield", "equipped": true, "quantity": 1, "weight": 6 },
-          { "id": "longsword", "name": "Longsword", "equipped": true, "quantity": 1, "weight": 3 },
-          { "id": "longbow", "name": "Longbow", "equipped": false, "quantity": 1, "weight": 2 }
-        ]
-      }
-    },
-    {
-      "id": "player-2",
-      "name": "Edward",
-      "image": "ex2.png"
-    },
-    {
-      "id": "player-3",
-      "name": "Hal",
-      "image": "ex3.png"
-    },
-    {
-      "id": "player-4",
-      "name": "Valarie",
-      "image": "ex4.png"
+        },
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": { "$type": "str", "value": "player-3" },
+            "name": { "$type": "str", "value": "Hal" },
+            "image": { "$type": "str", "value": "ex3.png" }
+          }
+        },
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": { "$type": "str", "value": "player-4" },
+            "name": { "$type": "str", "value": "Valarie" },
+            "image": { "$type": "str", "value": "ex4.png" }
+          }
+        }
+      ]
     }
-  ]
+  }
 }

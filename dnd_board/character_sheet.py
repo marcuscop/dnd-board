@@ -1,13 +1,36 @@
 from __future__ import annotations
 
 import random
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum, auto
 from time import time_ns
-from typing import Any, Literal
+from types import UnionType
+from typing import Any, Union, get_args, get_origin, get_type_hints
 
-TokenKind = Literal["character", "asset"]
-RollKind = Literal["attack", "damage"]
+
+class TokenKind(Enum):
+    CHARACTER = auto()
+    ASSET = auto()
+
+
+class RollResolutionMode(Enum):
+    NONE = auto()
+    ATTACK_VS_ARMOR_CLASS = auto()
+    APPLY_DAMAGE = auto()
+    HEAL_SELF = auto()
+
+
+class RollModifierType(Enum):
+    NONE = auto()
+    CLASS_LEVEL = auto()
+    PROFICIENCY_BONUS = auto()
+
+
+class SheetSectionType(Enum):
+    ATTACKS = auto()
+    RESOURCES = auto()
+    FEATURES = auto()
+    ABILITIES = auto()
 
 
 class UIStringFormatter:
@@ -84,10 +107,21 @@ class ClassType(Enum):
 
 class FightingStyleType(Enum):
     ARCHERY = auto()
+    BLIND_FIGHTING = auto()
     DEFENSE = auto()
     DUELING = auto()
     GREAT_WEAPON_FIGHTING = auto()
+    INTERCEPTION = auto()
+    PROTECTION = auto()
+    SUPERIOR_TECHNIQUE = auto()
+    THROWN_WEAPON_FIGHTING = auto()
     TWO_WEAPON_FIGHTING = auto()
+    UNARMED_FIGHTING = auto()
+
+
+def api_field(method: Any) -> property:
+    method.__api_field__ = True
+    return property(method)
 
 
 @dataclass
@@ -121,6 +155,33 @@ class AttackAction:
     activation: TimeEconomy = TimeEconomy.ACTION
     properties: list[str] | None = None
 
+    @api_field
+    def damageDie(self) -> str:
+        return dice_formula(self.damageDiceCount, self.damageDiceType)
+
+
+@dataclass
+class RollAction:
+    id: Enum
+    name: Enum
+    diceCount: int
+    diceType: DiceType
+    modifier: RollModifierType = RollModifierType.NONE
+    staticModifier: int = 0
+    resolution: RollResolutionMode = RollResolutionMode.NONE
+    consumesResource: Enum | None = None
+
+    @api_field
+    def dice(self) -> str:
+        return dice_formula(self.diceCount, self.diceType)
+
+
+@dataclass
+class RollSource:
+    section: SheetSectionType
+    sourceId: str
+    actionId: str
+
 
 @dataclass
 class CharacterClassLevel:
@@ -128,6 +189,7 @@ class CharacterClassLevel:
     level: int
     subclass: Enum | None = None
     fightingStyle: FightingStyleType | None = None
+    fightingStyles: list[FightingStyleType] | None = None
 
 
 @dataclass
@@ -155,6 +217,18 @@ class ResourceTracker:
     reset: RestType
     activation: TimeEconomy
     description: str
+    rollActions: list[RollAction] | None = None
+
+
+@dataclass
+class SheetAbility:
+    id: str
+    name: str
+    source: str
+    activation: TimeEconomy
+    description: str
+    resourceId: str | None = None
+    rollActions: list[RollAction] | None = None
 
 
 @dataclass
@@ -164,6 +238,7 @@ class SheetFeature:
     source: str
     activation: TimeEconomy
     description: str
+    rollActions: list[RollAction] | None = None
 
 
 @dataclass
@@ -197,6 +272,21 @@ class PartyMemberSheet:
 
 
 @dataclass
+class PartyMemberConfig:
+    id: str
+    name: str
+    image: str | None = None
+    maxHp: int | None = None
+    abilityScores: AbilityScores | None = None
+    sheet: PartyMemberSheet | None = None
+
+
+@dataclass
+class PartyManifest:
+    members: list[PartyMemberConfig]
+
+
+@dataclass
 class CharacterClass:
     name: ClassType
     level: int
@@ -226,6 +316,7 @@ class CharacterSheet:
     skills: list[SkillBonus]
     passiveChecks: dict[str, int]
     resources: list[ResourceTracker]
+    abilities: list[SheetAbility]
     features: list[SheetFeature]
     proficiencies: list[str]
     conditions: list[str]
@@ -239,15 +330,26 @@ class RollPayload:
     sheetId: str
     tokenId: str
     roller: str
-    kind: RollKind
+    source: RollSource
+    sourceLabel: str
+    resolution: RollResolutionMode
     label: str
     iconUrl: str | None
-    action: AttackAction
     dice: list[int]
+    diceType: DiceType
     die: str
     modifier: int
     total: int
     createdAt: int
+    resourceSpent: RollResourceSpend | None = None
+
+
+@dataclass
+class RollResourceSpend:
+    resourceId: str
+    resourceName: str
+    remainingUses: int
+    maxUses: int
 
 
 @dataclass
@@ -303,6 +405,11 @@ SKILL_ABILITIES = {
     "persuasion": AbilityType.CHARISMA,
 }
 
+TYPE_KEY = "$type"
+FIELDS_KEY = "fields"
+ITEMS_KEY = "items"
+VALUE_KEY = "value"
+
 
 def build_character_sheet(
     *,
@@ -319,7 +426,7 @@ def build_character_sheet(
     max_hp = party_member.maxHp if party_member and party_member.maxHp is not None else generated_max_hp(token_id, ability_scores)
     dexterity_modifier = ability_modifier(ability_scores.dexterity)
     sheet_config = party_member.sheet if party_member else None
-    classes = sheet_config.classes if sheet_config and sheet_config.classes else [CharacterClassLevel(name=ClassType.ADVENTURER if kind == "character" else ClassType.CREATURE, level=1)]
+    classes = sheet_config.classes if sheet_config and sheet_config.classes else [CharacterClassLevel(name=ClassType.ADVENTURER if kind == TokenKind.CHARACTER else ClassType.CREATURE, level=1)]
     total_level = sum(character_class.level for character_class in classes) or 1
     primary_class = classes[0]
     proficiency_bonus = sheet_config.proficiencyBonus if sheet_config and sheet_config.proficiencyBonus is not None else proficiency_bonus_for_level(total_level)
@@ -327,9 +434,13 @@ def build_character_sheet(
     skill_proficiencies = sheet_config.skills if sheet_config and sheet_config.skills else {}
     save_proficiencies = set(sheet_config.savingThrowProficiencies if sheet_config and sheet_config.savingThrowProficiencies else default_save_proficiencies(classes))
     resources = apply_resource_overrides(sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes), resource_overrides)
+    feat_abilities = default_feat_abilities(classes)
+    abilities = [*resource_roll_abilities(resources), *feat_abilities]
     features = default_features(classes)
     if sheet_config:
         features = [*(sheet_config.traits or []), *features, *(sheet_config.features or []), *(sheet_config.feats or [])]
+    armor_class = sheet_config.armorClass if sheet_config and sheet_config.armorClass is not None else 12 + min(3, dexterity_modifier)
+    armor_class += default_armor_class_bonus(classes)
 
     return CharacterSheet(
         id=token_id,
@@ -347,13 +458,14 @@ def build_character_sheet(
         hp=HitPoints(current=clamp_int(current_hp, 0, max_hp) if current_hp is not None else max_hp, max=max_hp, temporary=0),
         abilityScores=ability_scores,
         abilityModifiers=ability_modifiers,
-        armorClass=sheet_config.armorClass if sheet_config and sheet_config.armorClass is not None else 12 + min(3, dexterity_modifier),
+        armorClass=armor_class,
         initiativeBonus=dexterity_modifier,
         speed=sheet_config.speed if sheet_config and sheet_config.speed is not None else 30,
         savingThrows=build_saving_throws(ability_modifiers, save_proficiencies, proficiency_bonus),
         skills=build_skills(ability_modifiers, skill_proficiencies, proficiency_bonus),
         passiveChecks=build_passive_checks(ability_modifiers, skill_proficiencies, proficiency_bonus),
         resources=resources,
+        abilities=abilities,
         features=features,
         proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
         conditions=[],
@@ -362,51 +474,105 @@ def build_character_sheet(
     )
 
 
-def build_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction, roll_kind: RollKind) -> RollPayload:
+def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
     ability_score = getattr(sheet.abilityScores, enum_key(action.ability))
     modifier = ability_modifier(ability_score) + action.toHitBonus
     created_at = time_ns()
-    if roll_kind == "attack":
-        dice = [random.randint(1, 20)]
-        die = "d20"
-        label = "Attack Roll"
-        icon_url = None
-        if action.proficient:
-            modifier += sheet.proficiencyBonus
-    else:
-        count = action.damageDiceCount
-        sides = action.damageDiceType.value
-        dice = [random.randint(1, sides) for _ in range(count)]
-        die = damage_die_formula(action)
-        label = "Damage Roll"
-        icon_url = None
-        modifier += action.damageBonus
+    if action.proficient:
+        modifier += sheet.proficiencyBonus
 
+    dice = [random.randint(1, 20)]
     return RollPayload(
         id=f"roll-{created_at}",
         sheetId=sheet.id,
         tokenId=sheet.tokenId,
         roller=roller,
-        kind=roll_kind,
-        label=label,
-        iconUrl=icon_url,
-        action=action,
+        source=RollSource(section=SheetSectionType.ATTACKS, sourceId=action.id, actionId=enum_key(RollResolutionMode.ATTACK_VS_ARMOR_CLASS)),
+        sourceLabel=action.name,
+        resolution=RollResolutionMode.ATTACK_VS_ARMOR_CLASS,
+        label="Attack Roll",
+        iconUrl=None,
         dice=dice,
-        die=die,
+        diceType=DiceType.D20,
+        die=enum_key(DiceType.D20),
         modifier=modifier,
         total=sum(dice) + modifier,
         createdAt=created_at,
     )
 
 
+def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
+    ability_score = getattr(sheet.abilityScores, enum_key(action.ability))
+    modifier = ability_modifier(ability_score) + action.toHitBonus + action.damageBonus
+    count = action.damageDiceCount
+    sides = action.damageDiceType.value
+    dice = [random.randint(1, sides) for _ in range(count)]
+    created_at = time_ns()
+    return RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=roller,
+        source=RollSource(section=SheetSectionType.ATTACKS, sourceId=action.id, actionId=enum_key(RollResolutionMode.APPLY_DAMAGE)),
+        sourceLabel=action.name,
+        resolution=RollResolutionMode.APPLY_DAMAGE,
+        label="Damage Roll",
+        iconUrl=None,
+        dice=dice,
+        diceType=action.damageDiceType,
+        die=damage_die_formula(action),
+        modifier=modifier,
+        total=sum(dice) + modifier,
+        createdAt=created_at,
+    )
+
+
+def build_roll_action_payload(sheet: CharacterSheet, roller: str, source: RollSource, action: RollAction) -> RollPayload:
+    dice = [random.randint(1, action.diceType.value) for _ in range(action.diceCount)]
+    modifier = roll_action_modifier(sheet, action)
+    created_at = time_ns()
+    return RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=roller,
+        source=source,
+        sourceLabel=enum_label(action.name),
+        resolution=action.resolution,
+        label=enum_label(action.name),
+        iconUrl=None,
+        dice=dice,
+        diceType=action.diceType,
+        die=dice_formula(action.diceCount, action.diceType),
+        modifier=modifier,
+        total=sum(dice) + modifier,
+        createdAt=created_at,
+    )
+
+
+def roll_action_modifier(sheet: CharacterSheet, action: RollAction) -> int:
+    if action.modifier == RollModifierType.CLASS_LEVEL:
+        return sheet.characterClass.level + action.staticModifier
+    if action.modifier == RollModifierType.PROFICIENCY_BONUS:
+        return sheet.proficiencyBonus + action.staticModifier
+    return action.staticModifier
+
+
 def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> RollResolution:
-    if roll.kind == "attack":
+    if roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
         outcome = "hits" if roll.total >= target.armorClass else "misses"
         target_hp = target.hp
-    else:
+    elif roll.resolution == RollResolutionMode.APPLY_DAMAGE:
         next_hp = max(0, target.hp.current - max(0, roll.total))
         target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=target.hp.temporary)
         outcome = f"deals {roll.total} damage"
+    elif roll.resolution == RollResolutionMode.HEAL_SELF:
+        next_hp = min(target.hp.max, target.hp.current + max(0, roll.total))
+        target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=target.hp.temporary)
+        outcome = f"heals {roll.total} hit points"
+    else:
+        target_hp = target.hp
+        outcome = f"rolls {roll.total}"
 
     return RollResolution(
         id=f"resolution-{time_ns()}",
@@ -496,7 +662,7 @@ def default_attacks(kind: TokenKind) -> list[AttackAction]:
     return [
         AttackAction(
             id="main-hand",
-            name="Main Hand" if kind == "character" else "Strike",
+            name="Main Hand" if kind == TokenKind.CHARACTER else "Strike",
             ability=AbilityType.STRENGTH,
             damageDiceCount=1,
             damageDiceType=DiceType.D8,
@@ -511,6 +677,24 @@ def default_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
     return fighter_resources(classes)
 
 
+def resource_roll_abilities(resources: list[ResourceTracker]) -> list[SheetAbility]:
+    abilities: list[SheetAbility] = []
+    for resource in resources:
+        for action in resource.rollActions or []:
+            abilities.append(
+                SheetAbility(
+                    id=enum_key(action.id),
+                    name=enum_label(action.name),
+                    source=resource.name,
+                    activation=resource.activation,
+                    description=dice_formula(action.diceCount, action.diceType),
+                    resourceId=resource.id,
+                    rollActions=[action],
+                )
+            )
+    return abilities
+
+
 def apply_resource_overrides(resources: list[ResourceTracker], overrides: dict[str, int]) -> list[ResourceTracker]:
     return [
         ResourceTracker(
@@ -521,6 +705,7 @@ def apply_resource_overrides(resources: list[ResourceTracker], overrides: dict[s
             reset=resource.reset,
             activation=resource.activation,
             description=resource.description,
+            rollActions=resource.rollActions,
         )
         for resource in resources
     ]
@@ -532,253 +717,201 @@ def default_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
     return fighter_features(classes)
 
 
-def party_member_sheet_from_dict(value: Any) -> PartyMemberSheet | None:
-    if not isinstance(value, dict):
+def default_feat_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbility]:
+    from dnd_board.rules.feats import feat_abilities
+
+    return feat_abilities(classes)
+
+
+def default_armor_class_bonus(classes: list[CharacterClassLevel]) -> int:
+    from dnd_board.rules.feats import armor_class_bonus
+
+    return armor_class_bonus(classes)
+
+
+def party_manifest_from_dict(value: Any) -> PartyManifest | None:
+    loaded = typed_json_to_value(value, PartyManifest)
+    return loaded if isinstance(loaded, PartyManifest) else None
+
+
+def typed_json_to_value(node: Any, expected_type: Any = Any) -> Any:
+    if not isinstance(node, dict) or TYPE_KEY not in node:
         return None
 
-    return PartyMemberSheet(
-        race=optional_text(value.get("race"), 40),
-        background=optional_text(value.get("background"), 40),
-        alignment=optional_text(value.get("alignment"), 40),
-        classes=classes_from_list(value.get("classes")),
-        armorClass=positive_int(value.get("armorClass")),
-        speed=positive_int(value.get("speed")),
-        proficiencyBonus=positive_int(value.get("proficiencyBonus")),
-        skills=skill_proficiencies_from_dict(value.get("skills")),
-        savingThrowProficiencies=ability_list_from_values(value.get("savingThrowProficiencies")),
-        proficiencies=text_list(value.get("proficiencies")),
-        feats=features_from_list(value.get("feats")),
-        traits=features_from_list(value.get("traits")),
-        features=features_from_list(value.get("features")),
-        resources=resources_from_list(value.get("resources")),
-        attacks=attacks_from_list(value.get("attacks")),
-        equipment=equipment_from_list(value.get("equipment")),
-    )
-
-
-def classes_from_list(value: Any) -> list[CharacterClassLevel] | None:
-    if not isinstance(value, list):
+    expected_type = non_null_type(expected_type)
+    type_name = str(node.get(TYPE_KEY))
+    if type_name == "None":
         return None
+    if type_name == "list":
+        expected_item_type = Any
+        if get_origin(expected_type) is list:
+            expected_args = get_args(expected_type)
+            expected_item_type = expected_args[0] if expected_args else Any
+        items = node.get(ITEMS_KEY)
+        if not isinstance(items, list):
+            return None
+        return [typed_json_to_value(item, expected_item_type) for item in items]
+    if type_name.startswith("dict"):
+        expected_value_type = Any
+        if get_origin(expected_type) is dict:
+            expected_args = get_args(expected_type)
+            expected_value_type = expected_args[1] if len(expected_args) > 1 else Any
+        raw_items = node.get(VALUE_KEY)
+        if not isinstance(raw_items, dict):
+            return None
+        return {str(key): typed_json_to_value(item, expected_value_type) for key, item in raw_items.items()}
+    if type_name in {"str", "int", "float", "bool"}:
+        value = typed_primitive_value(type_name, node.get(VALUE_KEY))
+        return value if value_matches_type(value, expected_type) else None
 
-    classes: list[CharacterClassLevel] = []
-    for raw_class in value:
-        if not isinstance(raw_class, dict):
-            continue
-        class_type = enum_value(ClassType, raw_class.get("name"))
-        level = positive_int(raw_class.get("level"))
-        if class_type is None or level is None:
-            continue
-        classes.append(
-            CharacterClassLevel(
-                name=class_type,
-                level=level,
-                subclass=subclass_from_dict(class_type, raw_class.get("subclass")),
-                fightingStyle=enum_value(FightingStyleType, raw_class.get("fightingStyle")),
-            )
-        )
-    return classes or None
-
-
-def subclass_from_dict(class_type: ClassType, value: Any) -> Enum | None:
-    if class_type == ClassType.FIGHTER:
-        from dnd_board.rules.fighter import FighterSubclassType
-
-        return enum_value(FighterSubclassType, value)
+    registry = typed_json_registry()
+    model_type = registry.get(type_name)
+    if model_type is None:
+        return None
+    if isinstance(model_type, type) and issubclass(model_type, Enum):
+        value = enum_value(model_type, node.get(VALUE_KEY))
+        return value if value_matches_type(value, expected_type) else None
+    if isinstance(model_type, type) and is_dataclass(model_type):
+        value = typed_dataclass_from_json(model_type, node)
+        return value if value_matches_type(value, expected_type) else None
     return None
 
 
-def skill_proficiencies_from_dict(value: Any) -> dict[str, ProficiencyLevel] | None:
-    if not isinstance(value, dict):
+def non_null_type(expected_type: Any) -> Any:
+    origin = get_origin(expected_type)
+    if origin not in {Union, UnionType}:
+        return expected_type
+    options = [option for option in get_args(expected_type) if option is not type(None)]
+    return options[0] if len(options) == 1 else expected_type
+
+
+def value_matches_type(value: Any, expected_type: Any) -> bool:
+    if value is None:
+        return False
+    if expected_type is Any:
+        return True
+
+    origin = get_origin(expected_type)
+    if origin in {Union, UnionType}:
+        return any(value_matches_type(value, option) for option in get_args(expected_type) if option is not type(None))
+    if origin is list:
+        return isinstance(value, list)
+    if origin is dict:
+        return isinstance(value, dict)
+    if not isinstance(expected_type, type):
+        return True
+    if expected_type is bool:
+        return isinstance(value, bool)
+    if expected_type is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected_type is float:
+        return isinstance(value, float)
+    return isinstance(value, expected_type)
+
+
+def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> Any | None:
+    raw_fields = node.get(FIELDS_KEY)
+    if not isinstance(raw_fields, dict):
         return None
 
-    proficiencies: dict[str, ProficiencyLevel] = {}
-    for skill_name in SKILL_ABILITIES:
-        proficiency = enum_value(ProficiencyLevel, value.get(skill_name))
-        if proficiency is not None and proficiency != ProficiencyLevel.NONE:
-            proficiencies[skill_name] = proficiency
-    return proficiencies or None
-
-
-def ability_list_from_values(value: Any) -> list[AbilityType] | None:
-    if not isinstance(value, list):
-        return None
-    abilities = [ability for raw_ability in value if (ability := enum_value(AbilityType, raw_ability)) is not None]
-    return abilities or None
-
-
-def attacks_from_list(value: Any) -> list[AttackAction] | None:
-    if not isinstance(value, list):
-        return None
-
-    attacks: list[AttackAction] = []
-    for raw_attack in value:
-        if not isinstance(raw_attack, dict):
+    type_hints = get_type_hints(model_type)
+    kwargs: dict[str, Any] = {}
+    for field in fields(model_type):
+        if field.name not in raw_fields:
             continue
-        attack_id = sanitize_identifier(str(raw_attack.get("id", "")))
-        ability = enum_value(AbilityType, raw_attack.get("ability"))
-        if not attack_id or ability is None:
-            continue
-        dice_count, dice_type = damage_dice_from_dict(raw_attack)
-        attacks.append(
-            AttackAction(
-                id=attack_id,
-                name=optional_text(raw_attack.get("name"), 60) or UIStringFormatter.clean_name(attack_id),
-                ability=ability,
-                damageDiceCount=dice_count,
-                damageDiceType=dice_type,
-                proficient=bool(raw_attack.get("proficient", True)),
-                damageType=enum_value(DamageType, raw_attack.get("damageType")) or DamageType.SLASHING,
-                toHitBonus=safe_int(raw_attack.get("toHitBonus"), 0),
-                damageBonus=safe_int(raw_attack.get("damageBonus"), 0),
-                activation=enum_value(TimeEconomy, raw_attack.get("activation")) or TimeEconomy.ACTION,
-                properties=text_list(raw_attack.get("properties")),
-            )
-        )
-    return attacks or None
-
-
-def damage_dice_from_dict(value: dict[str, Any]) -> tuple[int, DiceType]:
-    explicit_type = enum_value(DiceType, value.get("damageDiceType"))
-    explicit_count = positive_int(value.get("damageDiceCount"))
-    if explicit_type is not None:
-        return explicit_count or 1, explicit_type
-
-    raw_formula = value.get("damageDie")
-    if raw_formula is not None:
-        parsed = parse_damage_die(str(raw_formula))
-        if parsed is not None:
-            return parsed
-
-    return 1, DiceType.D8
-
-
-def parse_damage_die(value: str) -> tuple[int, DiceType] | None:
-    try:
-        count_text, sides_text = value.lower().split("d", 1)
-        count = int(count_text or "1")
-        dice_type = DiceType(int(sides_text))
-    except (ValueError, TypeError):
-        return None
-    return (count, dice_type) if 1 <= count <= 20 else None
-
-
-def resources_from_list(value: Any) -> list[ResourceTracker] | None:
-    if not isinstance(value, list):
-        return None
-
-    resources: list[ResourceTracker] = []
-    for raw_resource in value:
-        if not isinstance(raw_resource, dict):
-            continue
-        resource_id = sanitize_identifier(str(raw_resource.get("id", "")))
-        max_uses = positive_int(raw_resource.get("maxUses"))
-        if not resource_id or max_uses is None:
-            continue
-        resources.append(
-            ResourceTracker(
-                id=resource_id,
-                name=optional_text(raw_resource.get("name"), 60) or UIStringFormatter.clean_name(resource_id),
-                currentUses=clamp_int(safe_int(raw_resource.get("currentUses"), max_uses), 0, max_uses),
-                maxUses=max_uses,
-                reset=enum_value(RestType, raw_resource.get("reset")) or RestType.SHORT_REST,
-                activation=enum_value(TimeEconomy, raw_resource.get("activation")) or TimeEconomy.SPECIAL,
-                description=optional_text(raw_resource.get("description"), 240) or "",
-            )
-        )
-    return resources or None
-
-
-def features_from_list(value: Any) -> list[SheetFeature] | None:
-    if not isinstance(value, list):
-        return None
-
-    features: list[SheetFeature] = []
-    for raw_feature in value:
-        if not isinstance(raw_feature, dict):
-            continue
-        feature_id = sanitize_identifier(str(raw_feature.get("id", "")))
-        if not feature_id:
-            continue
-        features.append(
-            SheetFeature(
-                id=feature_id,
-                name=optional_text(raw_feature.get("name"), 80) or UIStringFormatter.clean_name(feature_id),
-                source=optional_text(raw_feature.get("source"), 40) or "",
-                activation=enum_value(TimeEconomy, raw_feature.get("activation")) or TimeEconomy.PASSIVE,
-                description=optional_text(raw_feature.get("description"), 320) or "",
-            )
-        )
-    return features or None
-
-
-def equipment_from_list(value: Any) -> list[EquipmentItem] | None:
-    if not isinstance(value, list):
-        return None
-    items: list[EquipmentItem] = []
-    for raw_item in value:
-        if not isinstance(raw_item, dict):
-            continue
-        item_id = sanitize_identifier(str(raw_item.get("id", "")))
-        if not item_id:
-            continue
-        items.append(
-            EquipmentItem(
-                id=item_id,
-                name=optional_text(raw_item.get("name"), 80) or UIStringFormatter.clean_name(item_id),
-                equipped=bool(raw_item.get("equipped", False)),
-                quantity=positive_int(raw_item.get("quantity")) or 1,
-                weight=to_float(raw_item.get("weight", 0)),
-                notes=optional_text(raw_item.get("notes"), 160) or "",
-            )
-        )
-    return items or None
-
-
-def ability_scores_from_dict(value: Any) -> AbilityScores | None:
-    if not isinstance(value, dict):
-        return None
+        raw_value = raw_fields[field.name]
+        converted = typed_json_to_value(raw_value, type_hints.get(field.name, field.type))
+        if converted is not None:
+            kwargs[field.name] = converted
 
     try:
-        return AbilityScores(
-            strength=clamped_ability_score(value.get("strength")),
-            dexterity=clamped_ability_score(value.get("dexterity")),
-            constitution=clamped_ability_score(value.get("constitution")),
-            intelligence=clamped_ability_score(value.get("intelligence")),
-            wisdom=clamped_ability_score(value.get("wisdom")),
-            charisma=clamped_ability_score(value.get("charisma")),
-        )
+        return model_type(**kwargs)
     except (TypeError, ValueError):
         return None
 
 
+def typed_primitive_value(type_name: str, value: Any) -> Any:
+    if type_name == "str" and isinstance(value, str):
+        return value
+    if type_name == "int" and isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if type_name == "float" and isinstance(value, float):
+        return value
+    if type_name == "bool" and isinstance(value, bool):
+        return value
+    return None
+
+
+def typed_json_registry() -> dict[str, type[Any]]:
+    from dnd_board.rules.fighter import FighterSubclassType
+
+    return {
+        type_.__name__: type_
+        for type_ in [
+            AbilityScores,
+            AbilityType,
+            AttackAction,
+            CharacterClassLevel,
+            ClassType,
+            DamageType,
+            DiceType,
+            EquipmentItem,
+            FightingStyleType,
+            FighterSubclassType,
+            PartyManifest,
+            PartyMemberConfig,
+            PartyMemberSheet,
+            ProficiencyLevel,
+            RestType,
+            RollAction,
+            RollModifierType,
+            RollResolutionMode,
+            ResourceTracker,
+            SheetFeature,
+            SheetAbility,
+            TimeEconomy,
+        ]
+    }
+
+
+def typed_json_from_value(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {TYPE_KEY: "None", VALUE_KEY: None}
+    if isinstance(value, Enum):
+        return {TYPE_KEY: value.__class__.__name__, VALUE_KEY: value.name}
+    if isinstance(value, list):
+        return {TYPE_KEY: "list", ITEMS_KEY: [typed_json_from_value(item) for item in value]}
+    if isinstance(value, dict):
+        return {
+            TYPE_KEY: "dict",
+            VALUE_KEY: {str(key): typed_json_from_value(item) for key, item in value.items()},
+        }
+    if isinstance(value, str):
+        return {TYPE_KEY: "str", VALUE_KEY: value}
+    if isinstance(value, bool):
+        return {TYPE_KEY: "bool", VALUE_KEY: value}
+    if isinstance(value, int):
+        return {TYPE_KEY: "int", VALUE_KEY: value}
+    if isinstance(value, float):
+        return {TYPE_KEY: "float", VALUE_KEY: value}
+    if is_dataclass(value):
+        return {
+            TYPE_KEY: value.__class__.__name__,
+            FIELDS_KEY: {
+                field.name: typed_json_from_value(getattr(value, field.name))
+                for field in fields(value)
+                if getattr(value, field.name) is not None
+            },
+        }
+    raise TypeError(f"Unsupported typed JSON value: {value.__class__.__name__}")
+
+
 def sheet_to_dict(sheet: CharacterSheet) -> dict[str, Any]:
-    data = serialize_dataclass(sheet)
-    data["characterClass"]["name"] = enum_label(sheet.characterClass.name)
-    for index, character_class in enumerate(sheet.classes):
-        data["classes"][index]["name"] = enum_label(character_class.name)
-        if character_class.subclass is not None:
-            data["classes"][index]["subclass"] = enum_label(character_class.subclass)
-        if character_class.fightingStyle is not None:
-            data["classes"][index]["fightingStyle"] = enum_label(character_class.fightingStyle)
-    for index, resource in enumerate(sheet.resources):
-        data["resources"][index]["activationLabel"] = enum_label(resource.activation)
-        data["resources"][index]["resetLabel"] = enum_label(resource.reset)
-    for index, feature in enumerate(sheet.features):
-        data["features"][index]["activationLabel"] = enum_label(feature.activation)
-    for index, attack in enumerate(sheet.attacks):
-        data["attacks"][index]["abilityLabel"] = enum_label(attack.ability)
-        data["attacks"][index]["damageTypeLabel"] = enum_label(attack.damageType)
-        data["attacks"][index]["activationLabel"] = enum_label(attack.activation)
-        data["attacks"][index]["damageDie"] = damage_die_formula(attack)
-    if data.get("avatarUrl") is None:
-        data.pop("avatarUrl")
-    return data
+    return serialize_dataclass(sheet)
 
 
 def roll_payload_to_dict(payload: RollPayload) -> dict[str, Any]:
-    data = serialize_dataclass(payload)
-    data["action"]["damageDie"] = damage_die_formula(payload.action)
-    return data
+    return serialize_dataclass(payload)
 
 
 def roll_resolution_to_dict(resolution: RollResolution) -> dict[str, Any]:
@@ -786,15 +919,46 @@ def roll_resolution_to_dict(resolution: RollResolution) -> dict[str, Any]:
 
 
 def serialize_dataclass(value: Any) -> Any:
+    return serialize_value(value)
+
+
+def serialize_value(value: Any) -> Any:
     if isinstance(value, Enum):
         return enum_key(value)
     if isinstance(value, list):
-        return [serialize_dataclass(item) for item in value]
+        return [serialize_value(item) for item in value]
     if isinstance(value, dict):
-        return {key: serialize_dataclass(item) for key, item in value.items()}
+        return {key: serialize_value(item) for key, item in value.items()}
     if hasattr(value, "__dataclass_fields__"):
-        return {key: serialize_dataclass(item) for key, item in asdict(value).items()}
+        data: dict[str, Any] = {}
+        for field in fields(value):
+            field_value = getattr(value, field.name)
+            if field_value is None:
+                continue
+            data[field.name] = serialize_value(field_value)
+            field_label = serialize_label_value(field_value)
+            if field_label is not None:
+                data[f"{field.name}Label"] = field_label
+        for key, computed_value in computed_api_values(value).items():
+            data[key] = serialize_value(computed_value)
+        return data
     return value
+
+
+def serialize_label_value(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return enum_label(value)
+    if isinstance(value, list) and value and all(isinstance(item, Enum) for item in value):
+        return [enum_label(item) for item in value]
+    return None
+
+
+def computed_api_values(value: Any) -> dict[str, Any]:
+    return {
+        name: getattr(value, name)
+        for name, attribute in vars(value.__class__).items()
+        if isinstance(attribute, property) and attribute.fget is not None and getattr(attribute.fget, "__api_field__", False)
+    }
 
 
 def enum_value(enum_type: type[Enum], value: Any) -> Any:
@@ -816,7 +980,11 @@ def enum_label(member: Enum) -> str:
 
 
 def damage_die_formula(attack: AttackAction) -> str:
-    return f"{attack.damageDiceCount}d{attack.damageDiceType.value}"
+    return dice_formula(attack.damageDiceCount, attack.damageDiceType)
+
+
+def dice_formula(count: int, dice_type: DiceType) -> str:
+    return f"{count}d{dice_type.value}"
 
 
 def clamped_ability_score(value: Any) -> int:

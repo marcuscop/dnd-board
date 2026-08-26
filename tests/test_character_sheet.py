@@ -4,8 +4,13 @@ from dnd_board.character_sheet import (
     ClassType,
     FightingStyleType,
     PartyMember,
+    PartyManifest,
+    PartyMemberConfig,
     PartyMemberSheet,
+    TokenKind,
     build_character_sheet,
+    typed_json_from_value,
+    party_manifest_from_dict,
 )
 from dnd_board.rules.fighter import FighterSubclassType
 
@@ -66,10 +71,127 @@ def test_level_20_fighter_scaled_feature_text_uses_final_counts() -> None:
     assert "4 times" in features["threeExtraAttacks"].description
 
 
-def fighter_sheet(level: int, subclass: FighterSubclassType | None = None):
+def test_fighting_style_defense_adds_armor_class_and_feature() -> None:
+    sheet = fighter_sheet(1, fighting_style=FightingStyleType.DEFENSE)
+    features = {feature.id: feature for feature in sheet.features}
+
+    assert sheet.armorClass == 14
+    assert features["defense"].source == "Fighting Style"
+    assert "+1 bonus to Armor Class" in features["defense"].description
+
+
+def test_fighting_style_interception_adds_rollable_ability() -> None:
+    sheet = fighter_sheet(1, fighting_style=FightingStyleType.INTERCEPTION)
+    abilities = {ability.id: ability for ability in sheet.abilities}
+
+    assert "interception" in abilities
+    assert abilities["interception"].activation == abilities["interception"].activation.REACTION
+    assert abilities["interception"].rollActions
+    assert abilities["interception"].rollActions[0].modifier.name == "PROFICIENCY_BONUS"
+
+
+def test_fighter_can_have_multiple_fighting_styles() -> None:
+    sheet = build_character_sheet(
+        token_id="fighter",
+        kind=TokenKind.CHARACTER,
+        name="Fighter",
+        owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(
+            id="fighter",
+            name="Fighter",
+            owner="player-1",
+            avatarUrl=None,
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=12, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[
+                    CharacterClassLevel(
+                        name=ClassType.FIGHTER,
+                        level=7,
+                        subclass=FighterSubclassType.CHAMPION,
+                        fightingStyles=[FightingStyleType.DEFENSE, FightingStyleType.INTERCEPTION],
+                    )
+                ]
+            ),
+        ),
+        current_hp=None,
+        resource_overrides={},
+    )
+    features = {feature.id: feature for feature in sheet.features}
+    abilities = {ability.id: ability for ability in sheet.abilities}
+
+    assert sheet.armorClass == 14
+    assert {"defense", "interception"} <= features.keys()
+    assert "interception" in abilities
+
+
+def test_typed_party_manifest_round_trips_config_objects() -> None:
+    manifest = PartyManifest(
+        members=[
+            PartyMemberConfig(
+                id="player-1",
+                name="Marina",
+                maxHp=31,
+                abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+                sheet=PartyMemberSheet(
+                    classes=[
+                        CharacterClassLevel(
+                            name=ClassType.FIGHTER,
+                            level=7,
+                            subclass=FighterSubclassType.CHAMPION,
+                            fightingStyles=[FightingStyleType.DEFENSE, FightingStyleType.INTERCEPTION],
+                        )
+                    ]
+                ),
+            )
+        ]
+    )
+
+    loaded = party_manifest_from_dict(typed_json_from_value(manifest))
+
+    assert loaded is not None
+    assert loaded.members[0].sheet is not None
+    assert loaded.members[0].sheet.classes is not None
+    assert loaded.members[0].sheet.classes[0].name == ClassType.FIGHTER
+    assert loaded.members[0].sheet.classes[0].subclass == FighterSubclassType.CHAMPION
+    assert loaded.members[0].sheet.classes[0].fightingStyles == [FightingStyleType.DEFENSE, FightingStyleType.INTERCEPTION]
+
+
+def test_untyped_party_member_sheet_is_not_loaded() -> None:
+    assert party_manifest_from_dict({"members": []}) is None
+
+
+def test_typed_party_manifest_rejects_mismatched_field_type() -> None:
+    loaded = party_manifest_from_dict(
+        {
+            "$type": "PartyManifest",
+            "fields": {
+                "members": {
+                    "$type": "list",
+                    "items": [
+                        {
+                            "$type": "PartyMemberConfig",
+                            "fields": {
+                                "id": {"$type": "str", "value": "player-1"},
+                                "name": {"$type": "str", "value": "Marina"},
+                                "maxHp": {"$type": "str", "value": "31"},
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    assert loaded is not None
+    assert loaded.members[0].maxHp is None
+
+
+def fighter_sheet(level: int, subclass: FighterSubclassType | None = None, fighting_style: FightingStyleType = FightingStyleType.DEFENSE):
     return build_character_sheet(
         token_id="fighter",
-        kind="character",
+        kind=TokenKind.CHARACTER,
         name="Fighter",
         owner="player-1",
         avatar_url=None,
@@ -86,7 +208,7 @@ def fighter_sheet(level: int, subclass: FighterSubclassType | None = None):
                         name=ClassType.FIGHTER,
                         level=level,
                         subclass=subclass,
-                        fightingStyle=FightingStyleType.DEFENSE,
+                        fightingStyle=fighting_style,
                     )
                 ]
             ),

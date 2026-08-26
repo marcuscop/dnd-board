@@ -1,14 +1,26 @@
 {
-  "members": [
-    {
-      "id": "player-1",
-      "name": "Marina",
-      "image": "ex1.png"
-    },
-    {
-      "id": "player-2",
-      "name": "Edward",
-      "image": "ex2.png"
+  "$type": "PartyManifest",
+  "fields": {
+    "members": {
+      "$type": "list",
+      "items": [
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": { "$type": "str", "value": "player-1" },
+            "name": { "$type": "str", "value": "Marina" },
+            "image": { "$type": "str", "value": "ex1.png" }
+          }
+        },
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": { "$type": "str", "value": "player-2" },
+            "name": { "$type": "str", "value": "Edward" },
+            "image": { "$type": "str", "value": "ex2.png" }
+          }
+        }
+      ]
     }
-  ]
+  }
 }

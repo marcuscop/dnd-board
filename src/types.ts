@@ -1,4 +1,27 @@
-export type TokenKind = "character" | "asset";
+export enum TokenKind {
+  CHARACTER = "character",
+  ASSET = "asset"
+}
+
+export enum RollResolutionMode {
+  NONE = "none",
+  ATTACK_VS_ARMOR_CLASS = "attackVsArmorClass",
+  APPLY_DAMAGE = "applyDamage",
+  HEAL_SELF = "healSelf"
+}
+
+export enum RollModifierType {
+  NONE = "none",
+  CLASS_LEVEL = "classLevel",
+  PROFICIENCY_BONUS = "proficiencyBonus"
+}
+
+export enum SheetSectionType {
+  ATTACKS = "attacks",
+  RESOURCES = "resources",
+  FEATURES = "features",
+  ABILITIES = "abilities"
+}
 
 export type Token = {
   id: string;
@@ -41,7 +64,7 @@ export type Board = {
 
 export type Asset = {
   id: string;
-  kind: "asset";
+  kind: TokenKind.ASSET;
   name: string;
   avatarUrl: string;
 };
@@ -83,6 +106,19 @@ export type AttackAction = {
   properties: string[];
 };
 
+export type RollAction = {
+  id: string;
+  name: string;
+  nameLabel: string;
+  diceCount: number;
+  diceType: DiceType;
+  dice: string;
+  modifier: RollModifierType;
+  staticModifier: number;
+  resolution: RollResolutionMode;
+  consumesResource?: string;
+};
+
 export type AbilityScores = {
   strength: number;
   dexterity: number;
@@ -101,13 +137,19 @@ export type CharacterSheet = {
   avatarUrl?: string;
   characterClass: {
     name: string;
+    nameLabel: string;
     level: number;
   };
   classes: {
     name: string;
+    nameLabel: string;
     level: number;
+    subclassLabel?: string;
     subclass?: string;
+    fightingStyleLabel?: string;
     fightingStyle?: string;
+    fightingStyles?: string[];
+    fightingStylesLabel?: string[];
   }[];
   race: string;
   background: string;
@@ -136,6 +178,16 @@ export type CharacterSheet = {
     passive: number;
   }[];
   passiveChecks: Record<string, number>;
+  abilities: {
+    id: string;
+    name: string;
+    source: string;
+    activation: TimeEconomy;
+    activationLabel: string;
+    description: string;
+    resourceId?: string;
+    rollActions?: RollAction[];
+  }[];
   resources: {
     id: string;
     name: string;
@@ -146,6 +198,7 @@ export type CharacterSheet = {
     activation: TimeEconomy;
     activationLabel: string;
     description: string;
+    rollActions?: RollAction[];
   }[];
   features: {
     id: string;
@@ -154,6 +207,7 @@ export type CharacterSheet = {
     activation: TimeEconomy;
     activationLabel: string;
     description: string;
+    rollActions?: RollAction[];
   }[];
   proficiencies: string[];
   conditions: string[];
@@ -173,15 +227,28 @@ export type RollPayload = {
   sheetId: string;
   tokenId: string;
   roller: string;
-  kind: "attack" | "damage";
+  source: {
+    section: SheetSectionType;
+    sectionLabel: string;
+    sourceId: string;
+    actionId: string;
+  };
+  sourceLabel: string;
+  resolution: RollResolutionMode;
   label: string;
   iconUrl?: string;
-  action: AttackAction;
   dice: number[];
+  diceType: DiceType;
   die: string;
   modifier: number;
   total: number;
   createdAt: number;
+  resourceSpent?: {
+    resourceId: string;
+    resourceName: string;
+    remainingUses: number;
+    maxUses: number;
+  };
 };
 
 export type RollResolution = {

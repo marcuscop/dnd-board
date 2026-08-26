@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from dnd_board import server
+from dnd_board.character_sheet import AbilityScores, PartyManifest, PartyMemberConfig, typed_json_from_value
 
 
 def setup_function() -> None:
@@ -637,7 +638,7 @@ def test_only_dm_can_load_registry_asset() -> None:
 
     asyncio.run(server.load_asset_token(room, player, "asset", "aboleth"))
 
-    assert all(token.kind != "asset" for token in room.tokens.values())
+    assert all(token.kind != server.TokenKind.ASSET for token in room.tokens.values())
     assert player_socket.messages == []
 
 
@@ -654,13 +655,13 @@ def test_dm_can_load_shared_asset_tokens() -> None:
     npc = room.tokens["asset-1"]
     monster = room.tokens["asset-2"]
     second_monster = room.tokens["asset-3"]
-    assert npc.kind == "asset"
+    assert npc.kind == server.TokenKind.ASSET
     assert npc.owner == "dm"
     assert npc.avatarUrl == "/shared/assets/npc1.png"
-    assert monster.kind == "asset"
+    assert monster.kind == server.TokenKind.ASSET
     assert monster.owner == "dm"
     assert monster.avatarUrl.startswith("/shared/assets/aboleth.")
-    assert second_monster.kind == "asset"
+    assert second_monster.kind == server.TokenKind.ASSET
     assert second_monster.owner == "dm"
     assert second_monster.avatarUrl == "/shared/assets/black-greatwyrm.png"
     assert [message["type"] for message in dm_socket.messages[-3:]] == ["token_updated", "token_updated", "token_updated"]
@@ -669,7 +670,7 @@ def test_dm_can_load_shared_asset_tokens() -> None:
 def test_shared_files_are_available_as_global_assets() -> None:
     assets = server.list_assets()
 
-    aboleth = next(asset for asset in assets if asset.kind == "asset" and asset.id == "aboleth")
+    aboleth = next(asset for asset in assets if asset.kind == server.TokenKind.ASSET and asset.id == "aboleth")
     assert aboleth.avatarUrl == "/shared/assets/aboleth.png"
 
 
@@ -970,7 +971,7 @@ def test_sheet_endpoint_returns_party_sheets_for_player() -> None:
     marina = body["sheets"][0]
     assert marina["name"] == "Marina"
     assert marina["hp"]["current"] == marina["hp"]["max"]
-    assert marina["characterClass"] == {"name": "Fighter", "level": 3}
+    assert marina["characterClass"] == {"name": "fighter", "nameLabel": "Fighter", "level": 7}
     assert marina["race"] == "Human"
     assert marina["resources"][0]["id"] == "secondWind"
     assert any(resource["id"] == "actionSurge" for resource in marina["resources"])
@@ -1010,9 +1011,16 @@ def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
     assert own_roll.status_code == 200
     own_roll_body = own_roll.json()["roll"]
     assert own_roll_body["sheetId"] == "player-1"
-    assert own_roll_body["kind"] == "attack"
+    assert own_roll_body["resolution"] == "attackVsArmorClass"
+    assert own_roll_body["source"] == {
+        "section": "attacks",
+        "sectionLabel": "Attacks",
+        "sourceId": "longsword",
+        "actionId": "attackVsArmorClass",
+    }
+    assert own_roll_body["sourceLabel"] == "Longsword"
     assert own_roll_body["label"] == "Attack Roll"
-    assert own_roll_body["iconUrl"] is None
+    assert "iconUrl" not in own_roll_body
     assert own_roll_body["dice"] == [12]
     assert own_roll_body["die"] == "d20"
     assert own_roll_body["total"] == 12 + own_roll_body["modifier"]
@@ -1034,7 +1042,7 @@ def test_player_can_update_owned_sheet_resource() -> None:
     assert action_surge["currentUses"] == 0
 
 
-def test_sheet_roll_queue_keeps_one_pending_roll_per_character_and_resolves(monkeypatch) -> None:
+def test_sheet_roll_queue_keeps_one_pending_roll_per_source_and_resolves(monkeypatch) -> None:
     client = TestClient(server.app)
     monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
     room = server.get_or_create_room("sheet-roll-queue-test")
@@ -1050,14 +1058,54 @@ def test_sheet_roll_queue_keeps_one_pending_roll_per_character_and_resolves(monk
 
     assert attack.status_code == 200
     assert damage.status_code == 200
-    assert damage.json()["roll"]["kind"] == "damage"
+    assert damage.json()["roll"]["resolution"] == "applyDamage"
     assert damage.json()["roll"]["label"] == "Damage Roll"
-    assert damage.json()["roll"]["iconUrl"] is None
-    assert [roll["id"] for roll in pending] == [damage.json()["roll"]["id"]]
+    assert "iconUrl" not in damage.json()["roll"]
+    assert {roll["id"] for roll in pending} == {attack.json()["roll"]["id"], damage.json()["roll"]["id"]}
     assert resolution.status_code == 200
     assert resolution.json()["resolution"]["roll"]["id"] == damage.json()["roll"]["id"]
-    assert client.get("/api/rooms/sheet-roll-queue-test/sheet?playerKey=dm").json()["pendingRolls"] == []
+    assert [roll["id"] for roll in client.get("/api/rooms/sheet-roll-queue-test/sheet?playerKey=dm").json()["pendingRolls"]] == [attack.json()["roll"]["id"]]
     assert dm_socket.messages[-1]["type"] == "roll_resolved"
+
+
+def test_tactical_mind_roll_consumes_second_wind_and_has_own_pending_slot(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 7)
+    room = server.get_or_create_room("tactical-mind-roll-test")
+
+    attack = client.post("/api/rooms/tactical-mind-roll-test/sheet/player-1/rolls/attack?playerKey=player-1")
+    tactical_mind = client.post("/api/rooms/tactical-mind-roll-test/sheet/player-1/abilities/tacticalMind/rolls/tacticalMind?playerKey=player-1")
+    sheet = client.get("/api/rooms/tactical-mind-roll-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    pending = client.get("/api/rooms/tactical-mind-roll-test/sheet?playerKey=dm").json()["pendingRolls"]
+    second_wind = next(resource for resource in sheet["resources"] if resource["id"] == "secondWind")
+
+    assert attack.status_code == 200
+    assert tactical_mind.status_code == 200
+    roll = tactical_mind.json()["roll"]
+    assert roll["label"] == "Tactical Mind"
+    assert roll["sourceLabel"] == "Tactical Mind"
+    assert roll["resolution"] == "none"
+    assert roll["die"] == "1d10"
+    assert roll["diceType"] == "d10"
+    assert roll["dice"] == [7]
+    assert roll["resourceSpent"] == {
+        "resourceId": "secondWind",
+        "resourceName": "Second Wind",
+        "remainingUses": 2,
+        "maxUses": 3,
+    }
+    assert second_wind["currentUses"] == 2
+    assert {pending_roll["id"] for pending_roll in pending} == {attack.json()["roll"]["id"], roll["id"]}
+
+
+def test_fighter_sheet_exposes_tactical_mind_roll_action() -> None:
+    client = TestClient(server.app)
+
+    sheet = client.get("/api/rooms/tactical-mind-action-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    tactical_mind = next(ability for ability in sheet["abilities"] if ability["id"] == "tacticalMind")
+
+    assert tactical_mind["resourceId"] == "secondWind"
+    assert any(action["id"] == "tacticalMind" and action["nameLabel"] == "Tactical Mind" for action in tactical_mind["rollActions"])
 
 
 def test_damage_roll_resolution_reduces_target_hp(monkeypatch) -> None:
@@ -1082,23 +1130,18 @@ def test_sheet_endpoint_uses_party_manifest_stats(tmp_path, monkeypatch) -> None
     (campaign / "campaign.json").write_text('{"id":"stat-campaign","name":"Stat Campaign"}', encoding="utf-8")
     (party / "party.json").write_text(
         json.dumps(
-            {
-                "members": [
-                    {
-                        "id": "player-1",
-                        "name": "Configured Hero",
-                        "maxHp": 31,
-                        "abilityScores": {
-                            "strength": 16,
-                            "dexterity": 14,
-                            "constitution": 13,
-                            "intelligence": 12,
-                            "wisdom": 10,
-                            "charisma": 8,
-                        },
-                    }
-                ]
-            }
+            typed_json_from_value(
+                PartyManifest(
+                    members=[
+                        PartyMemberConfig(
+                            id="player-1",
+                            name="Configured Hero",
+                            maxHp=31,
+                            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=13, intelligence=12, wisdom=10, charisma=8),
+                        )
+                    ]
+                )
+            )
         ),
         encoding="utf-8",
     )

@@ -378,7 +378,7 @@ canvas.is-dragging,
 }
 
 .full-sheet-title {
-  grid-template-columns: 42px minmax(260px, max-content) minmax(210px, auto);
+  grid-template-columns: 42px minmax(260px, max-content);
   justify-content: start;
 }
 
@@ -387,14 +387,6 @@ canvas.is-dragging,
   align-items: center;
   gap: 12px;
   min-width: 0;
-}
-
-.full-sheet-roll-slot {
-  min-width: 210px;
-}
-
-.full-sheet-roll-slot:empty {
-  min-height: 1px;
 }
 
 .back-button {
@@ -691,6 +683,10 @@ canvas.is-dragging,
   background: rgba(31, 18, 9, 0.82);
 }
 
+.attack-actions .inline-rolls {
+  grid-column: 1 / -1;
+}
+
 .attack-actions span {
   min-width: 0;
   overflow: hidden;
@@ -700,7 +696,27 @@ canvas.is-dragging,
 }
 
 .card-roll-slot {
+  display: grid;
+  gap: 6px;
   min-width: 0;
+}
+
+.inline-roll-area {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.roll-action-buttons,
+.inline-rolls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inline-rolls .roll-card {
+  min-width: 210px;
+  max-width: 100%;
 }
 
 .empty-roll-slot {
@@ -778,10 +794,15 @@ canvas.is-dragging,
   inset: 0;
   display: grid;
   place-items: center;
+  color: #000;
   font-size: 0.8rem;
   line-height: 1;
   pointer-events: none;
   transform: translateY(-2%);
+}
+
+.roll-result-number {
+  color: #000;
 }
 
 .roll-main {
