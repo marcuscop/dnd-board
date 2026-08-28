@@ -33,4 +33,25 @@ test("sheet view opens a character and creates roll cards", async ({ page }) => 
 
   await page.getByRole("button", { name: "Attack Roll" }).first().click();
   await expect(page.locator(".roll-card", { hasText: "Attack Roll" }).filter({ hasText: "Longsword" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Short Rest" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Long Rest" })).toHaveCount(0);
+});
+
+test("DM can rest all character sheets from the sheet overview", async ({ page }) => {
+  await page.goto("/test-campaign/player=dm/sheet");
+
+  await expect(page.getByRole("button", { name: "Short Rest" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Long Rest" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Open Marina" }).click();
+  await expect(page.getByRole("button", { name: "Short Rest" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Long Rest" })).toHaveCount(0);
+
+  await page.getByRole("heading", { name: "Abilities" }).locator("..").getByRole("button", { name: "-" }).first().click();
+  await expect.poll(async () => page.getByText("2/3").count()).toBeGreaterThanOrEqual(1);
+
+  await page.getByRole("button", { name: "Back to sheets" }).click();
+  await page.getByRole("button", { name: "Short Rest" }).click();
+  await page.getByRole("button", { name: "Open Marina" }).click();
+  await expect.poll(async () => page.getByText("3/3").count()).toBeGreaterThanOrEqual(1);
 });

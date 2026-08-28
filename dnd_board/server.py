@@ -27,6 +27,7 @@ from dnd_board.character_sheet import (
     RollResourceSpend,
     RollResolution,
     RollSource,
+    RestType,
     SheetSectionType,
     TokenKind,
     build_attack_roll_payload,
@@ -286,6 +287,24 @@ async def update_sheet_resource(room_id: str, sheet_id: str, resource_id: str, p
     room.resource_uses.setdefault(sheet.tokenId, {})[resource.id] = clamp_int(int(currentUses), 0, resource.maxUses)
     updated = get_visible_sheet(room, player, sheet.id)
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else sheet_to_dict(sheet)}
+
+
+@app.post("/api/rooms/{room_id}/sheet/rest")
+async def rest_room_sheets(room_id: str, playerKey: str, rest: str) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-rest", name="DM", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    if not is_dm(player):
+        raise HTTPException(status_code=403, detail="Only the DM can rest sheets")
+
+    rest_type = parse_rest_type(rest)
+    if rest_type is None:
+        raise HTTPException(status_code=400, detail="Invalid rest type")
+
+    for sheet in visible_sheets(room, player):
+        if sheet.kind == TokenKind.CHARACTER:
+            reset_sheet_resources(room, sheet, rest_type)
+    return sheet_state_message(room, player)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/equipment/{item_id}/slot")
@@ -998,6 +1017,34 @@ def valid_equipment_slots(item) -> set[EquipmentSlot]:
     if item.itemType == EquipmentType.WEAPON:
         return {EquipmentSlot.CARRIED, EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND, EquipmentSlot.TWO_HANDS}
     return {EquipmentSlot.CARRIED}
+
+
+def parse_rest_type(rest: str) -> RestType | None:
+    normalized = sanitize_asset_id(rest)
+    if normalized in {"short", "short-rest", "shortrest"}:
+        return RestType.SHORT_REST
+    if normalized in {"long", "long-rest", "longrest"}:
+        return RestType.LONG_REST
+    return None
+
+
+def reset_sheet_resources(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
+    refreshed_resources = {
+        resource.id: resource.maxUses
+        for resource in sheet.resources
+        if resource_resets_on_rest(resource.reset, rest_type)
+    }
+    if not refreshed_resources:
+        return
+    room.resource_uses.setdefault(sheet.tokenId, {}).update(refreshed_resources)
+
+
+def resource_resets_on_rest(resource_reset: RestType, rest_type: RestType) -> bool:
+    if resource_reset == RestType.NONE:
+        return False
+    if rest_type == RestType.LONG_REST:
+        return resource_reset in {RestType.SHORT_REST, RestType.LONG_REST}
+    return resource_reset == RestType.SHORT_REST
 
 
 def spend_resource_use(room: Room, sheet: CharacterSheet, resource_id: str, payload: RollPayload) -> None:

@@ -374,7 +374,7 @@ canvas.is-dragging,
 }
 
 .sheet-header {
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr auto;
 }
 
 .full-sheet-title {
@@ -387,6 +387,12 @@ canvas.is-dragging,
   align-items: center;
   gap: 12px;
   min-width: 0;
+}
+
+.rest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .back-button {

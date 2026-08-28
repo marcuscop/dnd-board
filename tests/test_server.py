@@ -1095,6 +1095,98 @@ def test_player_can_update_owned_sheet_resource() -> None:
     assert action_surge["currentUses"] == 0
 
 
+def test_only_dm_can_rest_sheet_resources() -> None:
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/rest-permission-test/sheet/rest?playerKey=player-1&rest=short")
+
+    assert response.status_code == 403
+
+
+def test_short_rest_resets_only_short_rest_resources(tmp_path, monkeypatch) -> None:
+    campaign = tmp_path / "short-rest-test"
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text('{"id":"short-rest-test","name":"Short Rest Test"}', encoding="utf-8")
+    (party / "party.json").write_text(
+        json.dumps(
+            typed_json_from_value(
+                PartyManifest(
+                    members=[
+                        PartyMemberConfig(
+                            id="player-1",
+                            name="Rest Fighter",
+                            maxHp=31,
+                            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=9)]),
+                        ),
+                        PartyMemberConfig(
+                            id="player-2",
+                            name="Second Rest Fighter",
+                            maxHp=31,
+                            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=9)]),
+                        ),
+                    ]
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("short-rest-test")
+    for token_id in ("player-1", "player-2"):
+        sheet = server.token_to_sheet(room.tokens[token_id], room.id)
+        room.resource_uses[sheet.tokenId] = {resource.id: 0 for resource in sheet.resources}
+
+    response = client.post("/api/rooms/short-rest-test/sheet/rest?playerKey=dm&rest=short")
+    sheets = {sheet["id"]: sheet for sheet in response.json()["sheets"]}
+    resources = {resource["id"]: resource for resource in sheets["player-1"]["resources"]}
+    second_resources = {resource["id"]: resource for resource in sheets["player-2"]["resources"]}
+
+    assert response.status_code == 200
+    assert resources["secondWind"]["currentUses"] == resources["secondWind"]["maxUses"]
+    assert resources["actionSurge"]["currentUses"] == resources["actionSurge"]["maxUses"]
+    assert resources["indomitable"]["currentUses"] == 0
+    assert second_resources["secondWind"]["currentUses"] == second_resources["secondWind"]["maxUses"]
+    assert second_resources["actionSurge"]["currentUses"] == second_resources["actionSurge"]["maxUses"]
+    assert second_resources["indomitable"]["currentUses"] == 0
+
+
+def test_long_rest_resets_short_and_long_rest_resources(tmp_path, monkeypatch) -> None:
+    campaign = tmp_path / "long-rest-test"
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text('{"id":"long-rest-test","name":"Long Rest Test"}', encoding="utf-8")
+    (party / "party.json").write_text(
+        json.dumps(
+            typed_json_from_value(
+                PartyManifest(
+                    members=[
+                        PartyMemberConfig(
+                            id="player-1",
+                            name="Rest Fighter",
+                            maxHp=31,
+                            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=9)]),
+                        )
+                    ]
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("long-rest-test")
+    sheet = server.token_to_sheet(room.tokens["player-1"], room.id)
+    room.resource_uses[sheet.tokenId] = {resource.id: 0 for resource in sheet.resources}
+
+    response = client.post("/api/rooms/long-rest-test/sheet/rest?playerKey=dm&rest=long")
+    resources = {resource["id"]: resource for resource in response.json()["sheets"][0]["resources"]}
+
+    assert response.status_code == 200
+    assert all(resource["currentUses"] == resource["maxUses"] for resource in resources.values())
+
+
 def test_sheet_roll_queue_keeps_one_pending_roll_per_source_and_resolves(monkeypatch) -> None:
     client = TestClient(server.app)
     monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)

@@ -669,6 +669,24 @@ export function App() {
     [playerKey]
   );
 
+  const restSheets = useCallback(
+    async (rest: "short" | "long") => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/rest?playerKey=${encodeURIComponent(playerKey)}&rest=${encodeURIComponent(rest)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; rollHistory: RollLogEntry[] };
+      setSheets(body.sheets);
+      setRolls(body.pendingRolls);
+      setRollHistory(body.rollHistory);
+    },
+    [playerKey]
+  );
+
   const updateEquipmentSlot = useCallback(
     async (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => {
       const response = await fetch(
@@ -697,11 +715,12 @@ export function App() {
         onRollAbilityCheck={rollAbilityCheck}
         onRollResourceAction={rollResourceAction}
         onRollSavingThrow={rollSavingThrow}
+        onRestSheets={restSheets}
         onUpdateEquipmentSlot={updateEquipmentSlot}
         onUpdateResource={updateResource}
-          playerKey={playerKey}
-          rollHistory={rollHistory}
-          rolls={rolls}
+        playerKey={playerKey}
+        rollHistory={rollHistory}
+        rolls={rolls}
         sheets={sheets}
         sheetStatus={sheetStatus}
         tokens={tokens}
@@ -880,6 +899,7 @@ type SheetViewProps = {
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, abilityId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
+  onRestSheets: (rest: "short" | "long") => void;
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   playerKey: string;
@@ -890,7 +910,7 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onUpdateEquipmentSlot, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRestSheets, onUpdateEquipmentSlot, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -926,6 +946,12 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityC
             {connection} · You are {formatPlayerName(playerKey, tokens)}
           </p>
         </div>
+        {!expandedSheet && isDm && (
+          <div className="rest-actions">
+            <button onClick={() => onRestSheets("short")}>Short Rest</button>
+            <button onClick={() => onRestSheets("long")}>Long Rest</button>
+          </div>
+        )}
       </header>
 
       {expandedSheet ? (

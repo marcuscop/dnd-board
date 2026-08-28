@@ -38,7 +38,7 @@
                       "fields": {
                         "name": { "$type": "ClassType", "value": "FIGHTER" },
                         "level": { "$type": "int", "value": 7 },
-                        "subclass": { "$type": "FighterSubclassType", "value": "BRUTE" },
+                        "subclass": { "$type": "FighterSubclassType", "value": "SHARPSHOOTER" },
                         "fightingStyles": {
                           "$type": "list",
                           "items": [
