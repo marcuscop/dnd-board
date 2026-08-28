@@ -6,7 +6,7 @@ on:
 
 jobs:
   backend:
-    name: Backend Tests
+    name: Backend tests
     runs-on: ubuntu-latest
 
     steps:
@@ -34,10 +34,10 @@ jobs:
         run: poetry install --with dev --no-interaction
 
       - name: Run tests
-        run: poetry run pytest
+        run: poetry run pytest -vv --durations=25
 
   frontend:
-    name: Frontend Build
+    name: Frontend tests
     runs-on: ubuntu-latest
 
     steps:
