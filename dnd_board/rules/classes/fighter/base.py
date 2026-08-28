@@ -52,15 +52,12 @@ class FighterRollActionType(Enum):
 class FighterSubclassType(Enum):
     CHAMPION = auto()
     BATTLE_MASTER = auto()
-
-
-class ChampionFeatureType(Enum):
-    IMPROVED_CRITICAL = auto()
-    REMARKABLE_ATHLETE = auto()
-    ADDITIONAL_FIGHTING_STYLE = auto()
-    HEROIC_WARRIOR = auto()
-    SUPERIOR_CRITICAL = auto()
-    SURVIVOR = auto()
+    BANNERET = auto()
+    CAVALIER = auto()
+    SAMURAI = auto()
+    BRUTE = auto()
+    SCOUT = auto()
+    SHARPSHOOTER = auto()
 
 
 @dataclass(frozen=True)
@@ -365,10 +362,9 @@ def fighter_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
 
     features.append(feature_for_type(FighterFeatureType.WEAPON_MASTERY, progression, character_class))
     features.extend(fighting_style_features(classes))
-    features.extend(champion_features(character_class, progression.level))
-    from dnd_board.rules.battle_master import battle_master_features
+    from dnd_board.rules.classes.fighter.archetypes import fighter_subclass_features
 
-    features.extend(battle_master_features(character_class, progression.level))
+    features.extend(fighter_subclass_features(character_class.subclass, progression.level))
     return dedupe_features(features)
 
 
@@ -397,58 +393,6 @@ def feature_for_type(feature_type: FighterFeatureType, progression: FighterProgr
         source=enum_label(ClassType.FIGHTER),
         activation=feature_activation(feature_type),
         description=descriptions[feature_type],
-    )
-
-
-def champion_features(character_class: CharacterClassLevel, fighter_level_value: int) -> list[SheetFeature]:
-    if character_class.subclass != FighterSubclassType.CHAMPION:
-        return []
-
-    features = [
-        champion_feature(
-            ChampionFeatureType.IMPROVED_CRITICAL,
-            "Weapon and Unarmed Strike attacks score a Critical Hit on a d20 roll of 19 or 20.",
-            3,
-        ),
-        champion_feature(
-            ChampionFeatureType.REMARKABLE_ATHLETE,
-            "Advantage on Initiative rolls and Strength (Athletics) checks; after scoring a Critical Hit, move up to half Speed without provoking Opportunity Attacks.",
-            3,
-        ),
-        champion_feature(
-            ChampionFeatureType.ADDITIONAL_FIGHTING_STYLE,
-            "Gain another Fighting Style feat.",
-            7,
-        ),
-        champion_feature(
-            ChampionFeatureType.HEROIC_WARRIOR,
-            "During combat, gain Heroic Inspiration when starting your turn without it.",
-            10,
-        ),
-        champion_feature(
-            ChampionFeatureType.SUPERIOR_CRITICAL,
-            "Weapon and Unarmed Strike attacks score a Critical Hit on a d20 roll of 18-20.",
-            15,
-        ),
-        champion_feature(
-            ChampionFeatureType.SURVIVOR,
-            "Gain death save resilience and regain hit points at the start of your turn while Bloodied and above 0 HP.",
-            18,
-        ),
-    ]
-    return [feature for minimum_level, feature in features if fighter_level_value >= minimum_level]
-
-
-def champion_feature(feature_type: ChampionFeatureType, description: str, minimum_level: int) -> tuple[int, SheetFeature]:
-    return (
-        minimum_level,
-        SheetFeature(
-            id=enum_key(feature_type),
-            name=enum_label(feature_type),
-            source=enum_label(FighterSubclassType.CHAMPION),
-            activation=TimeEconomy.PASSIVE,
-            description=description,
-        ),
     )
 
 

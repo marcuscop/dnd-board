@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from dnd_board import server
+from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -1196,7 +1197,38 @@ def test_fighter_sheet_exposes_tactical_mind_roll_action() -> None:
     assert any(action["id"] == "tacticalMind" and action["nameLabel"] == "Tactical Mind" for action in tactical_mind["rollActions"])
 
 
-def test_superior_technique_roll_consumes_superiority_die(monkeypatch) -> None:
+def test_superior_technique_roll_consumes_superiority_die(tmp_path, monkeypatch) -> None:
+    campaign = tmp_path / "superior-technique-roll-test"
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text('{"id":"superior-technique-roll-test","name":"Superior Technique Test"}', encoding="utf-8")
+    (party / "party.json").write_text(
+        json.dumps(
+            typed_json_from_value(
+                PartyManifest(
+                    members=[
+                        PartyMemberConfig(
+                            id="player-1",
+                            name="Superior Technique Fighter",
+                            maxHp=31,
+                            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+                            sheet=PartyMemberSheet(
+                                classes=[
+                                    CharacterClassLevel(
+                                        name=ClassType.FIGHTER,
+                                        level=7,
+                                        fightingStyle=FightingStyleType.SUPERIOR_TECHNIQUE,
+                                    )
+                                ]
+                            ),
+                        )
+                    ]
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
     monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 5)
 
@@ -1218,6 +1250,47 @@ def test_superior_technique_roll_consumes_superiority_die(monkeypatch) -> None:
         "maxUses": 1,
     }
     assert superiority_die["currentUses"] == 0
+
+
+def test_cavalier_warding_maneuver_roll_consumes_resource(tmp_path, monkeypatch) -> None:
+    campaign = tmp_path / "cavalier-campaign"
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text('{"id":"cavalier-campaign","name":"Cavalier Campaign"}', encoding="utf-8")
+    (party / "party.json").write_text(
+        json.dumps(
+            typed_json_from_value(
+                PartyManifest(
+                    members=[
+                        PartyMemberConfig(
+                            id="player-1",
+                            name="Cavalier",
+                            maxHp=31,
+                            abilityScores=AbilityScores(strength=16, dexterity=12, constitution=14, intelligence=10, wisdom=10, charisma=10),
+                            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=7, subclass=FighterSubclassType.CAVALIER)]),
+                        )
+                    ]
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 6)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/cavalier-campaign/sheet/player-1/abilities/wardingManeuver/rolls/wardingManeuver?playerKey=player-1")
+    sheet = client.get("/api/rooms/cavalier-campaign/sheet/player-1?playerKey=player-1").json()["sheet"]
+    warding_maneuver = next(resource for resource in sheet["resources"] if resource["id"] == "wardingManeuver")
+
+    assert response.status_code == 200
+    roll = response.json()["roll"]
+    assert roll["label"] == "Warding Maneuver"
+    assert roll["sourceLabel"] == "Cavalier"
+    assert roll["die"] == "1d8"
+    assert roll["dice"] == [6]
+    assert roll["resourceSpent"]["remainingUses"] == 1
+    assert warding_maneuver["currentUses"] == 1
 
 
 def test_damage_roll_resolution_reduces_target_hp(monkeypatch) -> None:

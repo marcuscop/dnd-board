@@ -274,6 +274,7 @@ class RollAction:
     consumesResource: Enum | None = None
     description: str | None = None
     activation: TimeEconomy | None = None
+    source: str | None = None
 
     @api_field
     def dice(self) -> str:
@@ -562,9 +563,10 @@ def build_character_sheet(
     ability_modifiers = ability_modifier_map(ability_scores)
     skill_proficiencies = sheet_config.skills if sheet_config and sheet_config.skills else {}
     save_proficiencies = set(sheet_config.savingThrowProficiencies if sheet_config and sheet_config.savingThrowProficiencies else default_save_proficiencies(classes))
-    resources = apply_resource_overrides(sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes), resource_overrides)
+    resources = apply_resource_overrides(sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes, ability_scores), resource_overrides)
     feat_abilities = default_feat_abilities(classes)
-    abilities = [*resource_roll_abilities(resources), *feat_abilities]
+    subclass_abilities = default_subclass_abilities(classes)
+    abilities = [*resource_roll_abilities(resources), *feat_abilities, *subclass_abilities]
     features = default_features(classes)
     if sheet_config:
         features = [*(sheet_config.traits or []), *features, *(sheet_config.features or []), *(sheet_config.feats or [])]
@@ -919,12 +921,13 @@ def default_attacks(kind: TokenKind) -> list[AttackAction]:
     ]
 
 
-def default_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracker]:
-    from dnd_board.rules.battle_master import combat_superiority_resource
-    from dnd_board.rules.fighter import fighter_resources
+def default_resources(classes: list[CharacterClassLevel], ability_scores: AbilityScores | None = None) -> list[ResourceTracker]:
+    from dnd_board.rules.classes.fighter.archetypes import fighter_subclass_resources
+    from dnd_board.rules.classes.fighter.base import fighter_resources
     from dnd_board.rules.feats import feat_resources
+    from dnd_board.rules.shared.combat_superiority import combat_superiority_resource
 
-    resources = [*fighter_resources(classes), *feat_resources(classes)]
+    resources = [*fighter_resources(classes), *fighter_subclass_resources(classes, ability_scores), *feat_resources(classes)]
     superiority_dice = combat_superiority_resource(classes)
     if superiority_dice is not None:
         resources.append(superiority_dice)
@@ -939,7 +942,7 @@ def resource_roll_abilities(resources: list[ResourceTracker]) -> list[SheetAbili
                 SheetAbility(
                     id=enum_key(action.id),
                     name=enum_label(action.name),
-                    source=resource.source or resource.name,
+                    source=action.source or resource.source or resource.name,
                     activation=action.activation or resource.activation,
                     description=action.description or dice_formula(action.diceCount, action.diceType),
                     resourceId=resource.id,
@@ -986,7 +989,7 @@ def apply_equipment_slot_overrides(equipment: list[EquipmentItem], overrides: di
 
 
 def default_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
-    from dnd_board.rules.fighter import fighter_features
+    from dnd_board.rules.classes.fighter.base import fighter_features
 
     return fighter_features(classes)
 
@@ -995,6 +998,12 @@ def default_feat_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbil
     from dnd_board.rules.feats import feat_abilities
 
     return feat_abilities(classes)
+
+
+def default_subclass_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbility]:
+    from dnd_board.rules.classes.fighter.archetypes import fighter_subclass_abilities
+
+    return fighter_subclass_abilities(classes)
 
 
 def default_armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:
@@ -1141,8 +1150,9 @@ def typed_primitive_value(type_name: str, value: Any) -> Any:
 
 
 def typed_json_registry() -> dict[str, type[Any]]:
-    from dnd_board.rules.fighter import FighterSubclassType
-    from dnd_board.rules.battle_master import BattleMasterResourceType
+    from dnd_board.rules.classes.fighter.archetypes import FighterSubclassResourceType, FighterSubclassRollActionType
+    from dnd_board.rules.classes.fighter.base import FighterSubclassType
+    from dnd_board.rules.shared.combat_superiority import BattleMasterResourceType, ScoutSuperiorityActionType
 
     return {
         type_.__name__: type_
@@ -1158,6 +1168,8 @@ def typed_json_registry() -> dict[str, type[Any]]:
             AttackRangeType,
             BattleMasterManeuverType,
             BattleMasterResourceType,
+            FighterSubclassResourceType,
+            FighterSubclassRollActionType,
             CharacterClassLevel,
             ClassType,
             DamageType,
@@ -1181,6 +1193,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             ResourceTracker,
             SheetFeature,
             SheetAbility,
+            ScoutSuperiorityActionType,
             TimeEconomy,
             WeaponProperty,
             WeaponCategory,

@@ -38,7 +38,7 @@
                       "fields": {
                         "name": { "$type": "ClassType", "value": "FIGHTER" },
                         "level": { "$type": "int", "value": 7 },
-                        "subclass": { "$type": "FighterSubclassType", "value": "CHAMPION" },
+                        "subclass": { "$type": "FighterSubclassType", "value": "BRUTE" },
                         "fightingStyles": {
                           "$type": "list",
                           "items": [
@@ -50,7 +50,6 @@
                             { "$type": "FightingStyleType", "value": "GREAT_WEAPON_FIGHTING" },
                             { "$type": "FightingStyleType", "value": "MARINER" },
                             { "$type": "FightingStyleType", "value": "PROTECTION" },
-                            { "$type": "FightingStyleType", "value": "SUPERIOR_TECHNIQUE" },
                             { "$type": "FightingStyleType", "value": "THROWN_WEAPON_FIGHTING" },
                             { "$type": "FightingStyleType", "value": "TUNNEL_FIGHTER" },
                             { "$type": "FightingStyleType", "value": "INTERCEPTION" },

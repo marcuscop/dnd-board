@@ -29,9 +29,10 @@ from dnd_board.character_sheet import (
     typed_json_from_value,
     party_manifest_from_dict,
 )
-from dnd_board.rules.fighter import FighterSubclassType
+from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.feats import FIGHTING_STYLE_FEATS, FeatEffectType
-from dnd_board.rules.battle_master import BATTLE_MASTER_MANEUVERS
+from dnd_board.rules.classes.fighter.archetypes import FighterSubclassRollActionType
+from dnd_board.rules.classes.fighter.battle_master import BATTLE_MASTER_MANEUVERS
 
 
 def test_fighter_progression_resources_level_1_to_20() -> None:
@@ -596,6 +597,60 @@ def test_battle_master_superiority_dice_scale_by_fighter_level() -> None:
         assert resource.maxUses == expected_count
         assert resource.rollActions
         assert resource.rollActions[0].diceType == expected_die
+
+
+def test_simple_fighter_archetypes_expose_level_gated_features() -> None:
+    cases = {
+        FighterSubclassType.BANNERET: {"rallyingCry", "royalEnvoy", "inspiringSurge", "bulwark"},
+        FighterSubclassType.CAVALIER: {"bonusProficiency", "bornToTheSaddle", "unwaveringMark", "wardingManeuver", "holdTheLine", "ferociousCharger", "vigilantDefender"},
+        FighterSubclassType.SAMURAI: {"bonusProficiency", "fightingSpirit", "elegantCourtier", "tirelessSpirit", "rapidStrike", "strengthBeforeDeath"},
+        FighterSubclassType.BRUTE: {"bruteForce", "brutishDurability", "additionalFightingStyle", "devastatingCritical", "survivor"},
+        FighterSubclassType.SCOUT: {"bonusProficiencies", "combatSuperiority", "naturalExplorer", "improvedCombatSuperiority", "relentless"},
+        FighterSubclassType.SHARPSHOOTER: {"steadyAim", "carefulEyes", "closeQuartersShooting", "rapidStrike", "snapShot"},
+    }
+
+    for subclass, expected_features in cases.items():
+        features = {feature.id: feature for feature in fighter_sheet(20, subclass=subclass).features}
+
+        assert expected_features <= features.keys()
+
+
+def test_cavalier_samurai_and_sharpshooter_resources_are_tracked() -> None:
+    cavalier = {resource.id: resource for resource in fighter_sheet(7, subclass=FighterSubclassType.CAVALIER).resources}
+    samurai = {resource.id: resource for resource in fighter_sheet(18, subclass=FighterSubclassType.SAMURAI).resources}
+    sharpshooter = {resource.id: resource for resource in fighter_sheet(3, subclass=FighterSubclassType.SHARPSHOOTER).resources}
+
+    assert cavalier["unwaveringMark"].maxUses == 3
+    assert cavalier["wardingManeuver"].maxUses == 2
+    assert cavalier["wardingManeuver"].rollActions
+    assert cavalier["wardingManeuver"].rollActions[0].diceType == DiceType.D8
+    assert samurai["fightingSpirit"].maxUses == 3
+    assert samurai["strengthBeforeDeath"].maxUses == 1
+    assert sharpshooter["steadyAim"].maxUses == 3
+    assert sharpshooter["steadyAim"].reset.name == "SHORT_REST"
+
+
+def test_scout_superiority_actions_use_scaled_dice() -> None:
+    sheet = fighter_sheet(10, subclass=FighterSubclassType.SCOUT)
+    resource = next(resource for resource in sheet.resources if resource.id == "superiorityDice")
+    abilities = {ability.id: ability for ability in sheet.abilities}
+
+    assert resource.maxUses == 5
+    assert {action.id.name for action in resource.rollActions or []} == {"SURVIVAL_SUPERIORITY", "SCOUT_PRECISION_ATTACK", "SCOUTS_EVASION"}
+    assert all(action.diceType == DiceType.D10 for action in resource.rollActions or [])
+    assert abilities["survivalSuperiority"].source == "Scout"
+    assert abilities["scoutsEvasion"].activation.name == "REACTION"
+
+
+def test_brute_rollable_riders_scale_by_level() -> None:
+    level_3 = {ability.id: ability for ability in fighter_sheet(3, subclass=FighterSubclassType.BRUTE).abilities}
+    level_20 = {ability.id: ability for ability in fighter_sheet(20, subclass=FighterSubclassType.BRUTE).abilities}
+
+    assert level_3["bruteForce"].rollActions
+    assert level_3["bruteForce"].rollActions[0].id == FighterSubclassRollActionType.BRUTE_FORCE
+    assert level_3["bruteForce"].rollActions[0].diceType == DiceType.D4
+    assert level_20["bruteForce"].rollActions[0].diceType == DiceType.D10
+    assert level_20["brutishDurability"].rollActions[0].diceType == DiceType.D6
 
 
 def test_fighter_can_have_multiple_fighting_styles() -> None:
