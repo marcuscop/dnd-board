@@ -612,6 +612,32 @@ export function App() {
     [playerKey]
   );
 
+  const rollAbilityCheck = useCallback(
+    async (sheet: CharacterSheet, ability: string) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/rolls/ability-check?playerKey=${encodeURIComponent(playerKey)}&ability=${encodeURIComponent(ability)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+      }
+    },
+    [playerKey]
+  );
+
+  const rollSavingThrow = useCallback(
+    async (sheet: CharacterSheet, ability: string) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/rolls/saving-throw?playerKey=${encodeURIComponent(playerKey)}&ability=${encodeURIComponent(ability)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+      }
+    },
+    [playerKey]
+  );
+
   const rollResourceAction = useCallback(
     async (sheet: CharacterSheet, abilityId: string, actionId: string) => {
       const response = await fetch(
@@ -668,7 +694,9 @@ export function App() {
         onExpand={setExpandedSheetId}
         onRollDamage={rollDamage}
         onRollAttack={rollAttack}
+        onRollAbilityCheck={rollAbilityCheck}
         onRollResourceAction={rollResourceAction}
+        onRollSavingThrow={rollSavingThrow}
         onUpdateEquipmentSlot={updateEquipmentSlot}
         onUpdateResource={updateResource}
           playerKey={playerKey}
@@ -847,9 +875,11 @@ type SheetViewProps = {
   expandedSheetId: string | null;
   isDm: boolean;
   onExpand: (sheetId: string | null) => void;
+  onRollAbilityCheck: (sheet: CharacterSheet, ability: string) => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, abilityId: string, actionId: string) => void;
+  onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   playerKey: string;
@@ -860,7 +890,7 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, onRollDamage, onRollResourceAction, onUpdateEquipmentSlot, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onUpdateEquipmentSlot, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -909,9 +939,11 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAttack, 
             setDropTargetSheetId(null);
           }}
           onDragRollStart={setDraggingRollId}
+          onRollAbilityCheck={onRollAbilityCheck}
           onRollAttack={onRollAttack}
           onRollDamage={onRollDamage}
           onRollResourceAction={onRollResourceAction}
+          onRollSavingThrow={onRollSavingThrow}
           onUpdateEquipmentSlot={onUpdateEquipmentSlot}
           onUpdateResource={onUpdateResource}
           onClose={() => onExpand(null)}
@@ -1123,6 +1155,8 @@ function RollCard({
   onDragEnd: () => void;
   onDragStart: () => void;
 }) {
+  const rollParentLabel = roll.sourceLabel && roll.sourceLabel !== roll.label ? roll.sourceLabel : roll.source.sectionLabel;
+
   return (
     <li
       className={["roll-card", draggable ? "draggable" : "", compact ? "compact" : ""].filter(Boolean).join(" ")}
@@ -1139,8 +1173,8 @@ function RollCard({
         <strong>{roll.total}</strong>
       </span>
       <span className="roll-main">
-        <strong>{roll.sourceLabel}</strong>
-        <small>{roll.label}</small>
+        <strong>{roll.label}</strong>
+        <small>{rollParentLabel}</small>
       </span>
       {!compact && <span className="roll-total roll-result-number">{rollMathText(roll)}</span>}
     </li>
@@ -1351,9 +1385,11 @@ function FullSheet({
   onDragRollEnd,
   onDragRollStart,
   onClose,
+  onRollAbilityCheck,
   onRollAttack,
   onRollDamage,
   onRollResourceAction,
+  onRollSavingThrow,
   onUpdateEquipmentSlot,
   onUpdateResource
 }: {
@@ -1364,9 +1400,11 @@ function FullSheet({
   onDragRollEnd: () => void;
   onDragRollStart: (rollId: string) => void;
   onClose: () => void;
+  onRollAbilityCheck: (sheet: CharacterSheet, ability: string) => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
+  onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
 }) {
@@ -1397,6 +1435,18 @@ function FullSheet({
             <span>{shortAbilityName(ability)}</span>
             <strong>{score}</strong>
             <small>{formatSigned(Math.floor((score - 10) / 2))}</small>
+            <div className="ability-roll-actions">
+              <button disabled={!canRoll} onClick={() => onRollAbilityCheck(sheet, ability)}>
+                Roll Check
+              </button>
+            </div>
+            <InlineRolls
+              pendingRolls={pendingRolls.filter((roll) => rollMatchesSourceAction(roll, SheetSectionType.ABILITY_SCORES, ability, "check"))}
+              roller={sheet}
+              rollDraggable={rollDraggable}
+              onDragRollEnd={onDragRollEnd}
+              onDragRollStart={onDragRollStart}
+            />
           </div>
         ))}
       </div>
@@ -1413,11 +1463,23 @@ function FullSheet({
       <div className="sheet-columns">
         <section className="sheet-panel">
           <h2>Saving Throws</h2>
-          <div className="compact-list">
+          <div className="saving-throw-list">
             {sheet.savingThrows.map((save) => (
-              <span key={save.ability}>
-                {cleanName(save.ability)} {save.proficient ? "*" : ""} <strong>{formatSigned(save.modifier)}</strong>
-              </span>
+              <div className="saving-throw-row" key={save.ability}>
+                <span>
+                  {cleanName(save.ability)} {save.proficient ? "*" : ""} <strong>{formatSigned(save.modifier)}</strong>
+                </span>
+                <button disabled={!canRoll} onClick={() => onRollSavingThrow(sheet, save.ability)}>
+                  Roll Save
+                </button>
+                <InlineRolls
+                  pendingRolls={pendingRolls.filter((roll) => rollMatchesSourceAction(roll, SheetSectionType.ABILITY_SCORES, save.ability, "save"))}
+                  roller={sheet}
+                  rollDraggable={rollDraggable}
+                  onDragRollEnd={onDragRollEnd}
+                  onDragRollStart={onDragRollStart}
+                />
+              </div>
             ))}
           </div>
         </section>

@@ -1054,6 +1054,35 @@ def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
     assert player_socket.messages[0] == dm_socket.messages[0]
 
 
+def test_player_can_roll_ability_check_and_saving_throw(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 11)
+
+    check = client.post("/api/rooms/ability-roll-test/sheet/player-1/rolls/ability-check?playerKey=player-1&ability=strength")
+    save = client.post("/api/rooms/ability-roll-test/sheet/player-1/rolls/saving-throw?playerKey=player-1&ability=strength")
+
+    assert check.status_code == 200
+    check_roll = check.json()["roll"]
+    assert check_roll["label"] == "Strength Check"
+    assert check_roll["sourceLabel"] == "Strength"
+    assert check_roll["source"] == {
+        "section": "abilityScores",
+        "sectionLabel": "Ability Scores",
+        "sourceId": "strength",
+        "actionId": "check",
+    }
+    assert check_roll["modifierBreakdown"] == [{"source": "Strength", "value": 3, "description": ""}]
+    assert check_roll["total"] == 14
+
+    assert save.status_code == 200
+    save_roll = save.json()["roll"]
+    assert save_roll["label"] == "Strength Save"
+    assert save_roll["sourceLabel"] == "Strength"
+    assert save_roll["source"]["actionId"] == "save"
+    assert save_roll["modifierBreakdown"] == [{"source": "Strength", "value": 3, "description": ""}, {"source": "Proficiency", "value": 3, "description": ""}]
+    assert save_roll["total"] == 17
+
+
 def test_player_can_update_owned_sheet_resource() -> None:
     client = TestClient(server.app)
 
@@ -1142,7 +1171,7 @@ def test_tactical_mind_roll_consumes_second_wind_and_has_own_pending_slot(monkey
     assert tactical_mind.status_code == 200
     roll = tactical_mind.json()["roll"]
     assert roll["label"] == "Tactical Mind"
-    assert roll["sourceLabel"] == "Tactical Mind"
+    assert roll["sourceLabel"] == "Fighter"
     assert roll["resolution"] == "none"
     assert roll["die"] == "1d10"
     assert roll["diceType"] == "d10"
@@ -1165,6 +1194,30 @@ def test_fighter_sheet_exposes_tactical_mind_roll_action() -> None:
 
     assert tactical_mind["resourceId"] == "secondWind"
     assert any(action["id"] == "tacticalMind" and action["nameLabel"] == "Tactical Mind" for action in tactical_mind["rollActions"])
+
+
+def test_superior_technique_roll_consumes_superiority_die(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 5)
+
+    response = client.post("/api/rooms/superior-technique-roll-test/sheet/player-1/abilities/ambush/rolls/ambush?playerKey=player-1")
+    sheet = client.get("/api/rooms/superior-technique-roll-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    superiority_die = next(resource for resource in sheet["resources"] if resource["id"] == "superiorityDice")
+
+    assert response.status_code == 200
+    roll = response.json()["roll"]
+    assert roll["label"] == "Ambush"
+    assert roll["sourceLabel"] == "Battle Master"
+    assert roll["die"] == "1d6"
+    assert roll["diceType"] == "d6"
+    assert roll["dice"] == [5]
+    assert roll["resourceSpent"] == {
+        "resourceId": "superiorityDice",
+        "resourceName": "Superiority Dice",
+        "remainingUses": 0,
+        "maxUses": 1,
+    }
+    assert superiority_die["currentUses"] == 0
 
 
 def test_damage_roll_resolution_reduces_target_hp(monkeypatch) -> None:

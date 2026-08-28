@@ -36,6 +36,12 @@ class SheetSectionType(Enum):
     RESOURCES = auto()
     FEATURES = auto()
     ABILITIES = auto()
+    ABILITY_SCORES = auto()
+
+
+class AbilityRollType(Enum):
+    CHECK = auto()
+    SAVE = auto()
 
 
 class UIStringFormatter:
@@ -184,6 +190,32 @@ class FightingStyleType(Enum):
     UNARMED_FIGHTING = auto()
 
 
+class BattleMasterManeuverType(Enum):
+    AMBUSH = auto()
+    BAIT_AND_SWITCH = auto()
+    BRACE = auto()
+    COMMANDERS_STRIKE = auto()
+    COMMANDING_PRESENCE = auto()
+    DISARMING_ATTACK = auto()
+    DISTRACTING_STRIKE = auto()
+    EVASIVE_FOOTWORK = auto()
+    FEINTING_ATTACK = auto()
+    GOADING_ATTACK = auto()
+    GRAPPLING_STRIKE = auto()
+    LUNGING_ATTACK = auto()
+    MANEUVERING_ATTACK = auto()
+    MENACING_ATTACK = auto()
+    PARRY = auto()
+    PRECISION_ATTACK = auto()
+    PUSHING_ATTACK = auto()
+    QUICK_TOSS = auto()
+    RALLY = auto()
+    RIPOSTE = auto()
+    SWEEPING_ATTACK = auto()
+    TACTICAL_ASSESSMENT = auto()
+    TRIP_ATTACK = auto()
+
+
 def api_field(method: Any) -> property:
     method.__api_field__ = True
     return property(method)
@@ -240,6 +272,8 @@ class RollAction:
     staticModifier: int = 0
     resolution: RollResolutionMode = RollResolutionMode.NONE
     consumesResource: Enum | None = None
+    description: str | None = None
+    activation: TimeEconomy | None = None
 
     @api_field
     def dice(self) -> str:
@@ -267,6 +301,7 @@ class CharacterClassLevel:
     subclass: Enum | None = None
     fightingStyle: FightingStyleType | None = None
     fightingStyles: list[FightingStyleType] | None = None
+    maneuvers: list[BattleMasterManeuverType] | None = None
 
 
 @dataclass
@@ -295,6 +330,7 @@ class ResourceTracker:
     activation: TimeEconomy
     description: str
     rollActions: list[RollAction] | None = None
+    source: str | None = None
 
 
 @dataclass
@@ -642,7 +678,72 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
     )
 
 
-def build_roll_action_payload(sheet: CharacterSheet, roller: str, source: RollSource, action: RollAction) -> RollPayload:
+def build_ability_check_roll_payload(sheet: CharacterSheet, roller: str, ability: AbilityType) -> RollPayload:
+    ability_score = getattr(sheet.abilityScores, enum_key(ability))
+    modifier_breakdown = [RollModifierBreakdown(source=enum_label(ability), value=ability_modifier(ability_score))]
+    return build_d20_roll_payload(
+        sheet=sheet,
+        roller=roller,
+        source=RollSource(section=SheetSectionType.ABILITY_SCORES, sourceId=enum_key(ability), actionId=enum_key(AbilityRollType.CHECK)),
+        source_label=enum_label(ability),
+        label=f"{enum_label(ability)} Check",
+        modifier_breakdown=modifier_breakdown,
+    )
+
+
+def build_saving_throw_roll_payload(sheet: CharacterSheet, roller: str, ability: AbilityType) -> RollPayload:
+    save = next((saving_throw for saving_throw in sheet.savingThrows if saving_throw.ability == ability), None)
+    ability_score = getattr(sheet.abilityScores, enum_key(ability))
+    ability_modifier_value = ability_modifier(ability_score)
+    if save is None:
+        modifier_breakdown = [RollModifierBreakdown(source=enum_label(ability), value=ability_modifier_value)]
+    else:
+        modifier_breakdown = [RollModifierBreakdown(source=enum_label(ability), value=ability_modifier_value)]
+        if save.proficient:
+            modifier_breakdown.append(RollModifierBreakdown(source="Proficiency", value=sheet.proficiencyBonus))
+    return build_d20_roll_payload(
+        sheet=sheet,
+        roller=roller,
+        source=RollSource(section=SheetSectionType.ABILITY_SCORES, sourceId=enum_key(ability), actionId=enum_key(AbilityRollType.SAVE)),
+        source_label=enum_label(ability),
+        label=f"{enum_label(ability)} Save",
+        modifier_breakdown=modifier_breakdown,
+    )
+
+
+def build_d20_roll_payload(
+    *,
+    sheet: CharacterSheet,
+    roller: str,
+    source: RollSource,
+    source_label: str,
+    label: str,
+    modifier_breakdown: list[RollModifierBreakdown],
+) -> RollPayload:
+    modifier = sum(part.value for part in modifier_breakdown)
+    dice = [random.randint(1, 20)]
+    created_at = time_ns()
+    return RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=roller,
+        source=source,
+        sourceLabel=source_label,
+        resolution=RollResolutionMode.NONE,
+        label=label,
+        iconUrl=None,
+        dice=dice,
+        diceType=DiceType.D20,
+        die=enum_key(DiceType.D20),
+        modifier=modifier,
+        modifierBreakdown=modifier_breakdown,
+        total=sum(dice) + modifier,
+        createdAt=created_at,
+    )
+
+
+def build_roll_action_payload(sheet: CharacterSheet, roller: str, source: RollSource, action: RollAction, source_label: str | None = None) -> RollPayload:
     dice = [random.randint(1, action.diceType.value) for _ in range(action.diceCount)]
     modifier = roll_action_modifier(sheet, action)
     modifier_breakdown = []
@@ -655,7 +756,7 @@ def build_roll_action_payload(sheet: CharacterSheet, roller: str, source: RollSo
         tokenId=sheet.tokenId,
         roller=roller,
         source=source,
-        sourceLabel=enum_label(action.name),
+        sourceLabel=source_label or enum_label(action.name),
         resolution=action.resolution,
         label=enum_label(action.name),
         iconUrl=None,
@@ -819,10 +920,15 @@ def default_attacks(kind: TokenKind) -> list[AttackAction]:
 
 
 def default_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracker]:
+    from dnd_board.rules.battle_master import combat_superiority_resource
     from dnd_board.rules.fighter import fighter_resources
     from dnd_board.rules.feats import feat_resources
 
-    return [*fighter_resources(classes), *feat_resources(classes)]
+    resources = [*fighter_resources(classes), *feat_resources(classes)]
+    superiority_dice = combat_superiority_resource(classes)
+    if superiority_dice is not None:
+        resources.append(superiority_dice)
+    return resources
 
 
 def resource_roll_abilities(resources: list[ResourceTracker]) -> list[SheetAbility]:
@@ -833,9 +939,9 @@ def resource_roll_abilities(resources: list[ResourceTracker]) -> list[SheetAbili
                 SheetAbility(
                     id=enum_key(action.id),
                     name=enum_label(action.name),
-                    source=resource.name,
-                    activation=resource.activation,
-                    description=dice_formula(action.diceCount, action.diceType),
+                    source=resource.source or resource.name,
+                    activation=action.activation or resource.activation,
+                    description=action.description or dice_formula(action.diceCount, action.diceType),
                     resourceId=resource.id,
                     rollActions=[action],
                 )
@@ -854,6 +960,7 @@ def apply_resource_overrides(resources: list[ResourceTracker], overrides: dict[s
             activation=resource.activation,
             description=resource.description,
             rollActions=resource.rollActions,
+            source=resource.source,
         )
         for resource in resources
     ]
@@ -1035,11 +1142,13 @@ def typed_primitive_value(type_name: str, value: Any) -> Any:
 
 def typed_json_registry() -> dict[str, type[Any]]:
     from dnd_board.rules.fighter import FighterSubclassType
+    from dnd_board.rules.battle_master import BattleMasterResourceType
 
     return {
         type_.__name__: type_
         for type_ in [
             AbilityScores,
+            AbilityRollType,
             AbilityType,
             ArmorCategory,
             AttackAction,
@@ -1047,6 +1156,8 @@ def typed_json_registry() -> dict[str, type[Any]]:
             AttackDamageAbilityModifierMode,
             AttackKind,
             AttackRangeType,
+            BattleMasterManeuverType,
+            BattleMasterResourceType,
             CharacterClassLevel,
             ClassType,
             DamageType,

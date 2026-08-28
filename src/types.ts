@@ -25,7 +25,8 @@ export enum SheetSectionType {
   ATTACKS = "attacks",
   RESOURCES = "resources",
   FEATURES = "features",
-  ABILITIES = "abilities"
+  ABILITIES = "abilities",
+  ABILITY_SCORES = "abilityScores"
 }
 
 export type Token = {
@@ -142,6 +143,8 @@ export type RollAction = {
   staticModifier: number;
   resolution: RollResolutionMode;
   consumesResource?: string;
+  description?: string;
+  activation?: TimeEconomy;
 };
 
 export type AbilityScores = {
@@ -224,6 +227,7 @@ export type CharacterSheet = {
     activationLabel: string;
     description: string;
     rollActions?: RollAction[];
+    source?: string;
   }[];
   features: {
     id: string;

@@ -7,6 +7,7 @@ from dnd_board.character_sheet import (
     AttackActionType,
     AttackDamageAbilityModifierMode,
     AttackKind,
+    BattleMasterManeuverType,
     CharacterClassLevel,
     ClassType,
     DamageType,
@@ -30,6 +31,7 @@ from dnd_board.character_sheet import (
 )
 from dnd_board.rules.fighter import FighterSubclassType
 from dnd_board.rules.feats import FIGHTING_STYLE_FEATS, FeatEffectType
+from dnd_board.rules.battle_master import BATTLE_MASTER_MANEUVERS
 
 
 def test_fighter_progression_resources_level_1_to_20() -> None:
@@ -468,12 +470,132 @@ def test_configured_armor_class_is_static_base_for_conditional_style_bonuses() -
     assert empty_hands_sheet.armorClass == 19
 
 
-def test_fighting_style_superior_technique_is_description_only_until_battle_master_exists() -> None:
+def test_fighting_style_superior_technique_adds_short_rest_superiority_die() -> None:
     sheet = fighter_sheet(1, fighting_style=FightingStyleType.SUPERIOR_TECHNIQUE)
     effect_types = {effect.effectType for effect in FIGHTING_STYLE_FEATS[FightingStyleType.SUPERIOR_TECHNIQUE].effects}
+    resources = {resource.id: resource for resource in sheet.resources}
+    abilities = {ability.id: ability for ability in sheet.abilities}
 
-    assert effect_types == {FeatEffectType.DESCRIPTION_ONLY}
-    assert not any(resource.id == "superiorTechniqueDie" for resource in sheet.resources)
+    assert effect_types == {FeatEffectType.RESOURCE}
+    assert "superiorityDice" in resources
+    resource = resources["superiorityDice"]
+    assert resource.currentUses == 1
+    assert resource.maxUses == 1
+    assert resource.reset.name == "SHORT_REST"
+    assert len(resource.rollActions or []) == len(BATTLE_MASTER_MANEUVERS)
+    assert all(action.diceType == DiceType.D6 for action in resource.rollActions or [])
+    assert all(action.consumesResource.name == "SUPERIORITY_DICE" for action in resource.rollActions or [])
+    assert {"ambush", "tripAttack"} <= abilities.keys()
+    assert abilities["ambush"].resourceId == "superiorityDice"
+    assert abilities["ambush"].source == "Battle Master"
+    assert abilities["brace"].activation.name == "REACTION"
+    assert abilities["rally"].activation.name == "BONUS_ACTION"
+
+
+def test_fighting_style_superior_technique_can_select_one_maneuver() -> None:
+    sheet = build_character_sheet(
+        token_id="fighter",
+        kind=TokenKind.CHARACTER,
+        name="Fighter",
+        owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(
+            id="fighter",
+            name="Fighter",
+            owner="player-1",
+            avatarUrl=None,
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=12, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[
+                    CharacterClassLevel(
+                        name=ClassType.FIGHTER,
+                        level=1,
+                        fightingStyle=FightingStyleType.SUPERIOR_TECHNIQUE,
+                        maneuvers=[BattleMasterManeuverType.TRIP_ATTACK],
+                    )
+                ],
+            ),
+        ),
+        current_hp=None,
+        resource_overrides={},
+    )
+    resources = {resource.id: resource for resource in sheet.resources}
+    abilities = {ability.id: ability for ability in sheet.abilities}
+
+    assert resources["superiorityDice"].maxUses == 1
+    assert resources["superiorityDice"].rollActions
+    assert [action.id for action in resources["superiorityDice"].rollActions] == [BattleMasterManeuverType.TRIP_ATTACK]
+    assert "tripAttack" in abilities
+    assert "ambush" not in abilities
+
+
+def test_resource_roll_abilities_use_parent_rule_source() -> None:
+    sheet = fighter_sheet(2, fighting_style=FightingStyleType.INTERCEPTION)
+    abilities = {ability.id: ability for ability in sheet.abilities}
+
+    assert abilities["secondWindHeal"].source == "Fighter"
+    assert abilities["tacticalMind"].source == "Fighter"
+    assert abilities["interception"].source == "Fighting Style"
+
+
+def test_battle_master_superior_technique_adds_one_scaled_superiority_die() -> None:
+    sheet = build_character_sheet(
+        token_id="fighter",
+        kind=TokenKind.CHARACTER,
+        name="Fighter",
+        owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(
+            id="fighter",
+            name="Fighter",
+            owner="player-1",
+            avatarUrl=None,
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=12, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[
+                    CharacterClassLevel(
+                        name=ClassType.FIGHTER,
+                        level=10,
+                        subclass=FighterSubclassType.BATTLE_MASTER,
+                        fightingStyle=FightingStyleType.SUPERIOR_TECHNIQUE,
+                        maneuvers=[BattleMasterManeuverType.PRECISION_ATTACK],
+                    )
+                ],
+            ),
+        ),
+        current_hp=None,
+        resource_overrides={},
+    )
+    resources = {resource.id: resource for resource in sheet.resources}
+    features = {feature.id: feature for feature in sheet.features}
+    abilities = {ability.id: ability for ability in sheet.abilities}
+
+    assert resources["superiorityDice"].maxUses == 6
+    assert resources["superiorityDice"].rollActions
+    assert resources["superiorityDice"].rollActions[0].diceType == DiceType.D10
+    assert "precisionAttack" in abilities
+    assert "tripAttack" not in abilities
+    assert {"combatSuperiority", "studentOfWar", "knowYourEnemy", "improvedCombatSuperiority"} <= features.keys()
+
+
+def test_battle_master_superiority_dice_scale_by_fighter_level() -> None:
+    cases = {
+        3: (4, DiceType.D8),
+        7: (5, DiceType.D8),
+        10: (5, DiceType.D10),
+        15: (6, DiceType.D10),
+        18: (6, DiceType.D12),
+    }
+
+    for level, (expected_count, expected_die) in cases.items():
+        sheet = fighter_sheet(level, subclass=FighterSubclassType.BATTLE_MASTER)
+        resource = next(resource for resource in sheet.resources if resource.id == "superiorityDice")
+
+        assert resource.maxUses == expected_count
+        assert resource.rollActions
+        assert resource.rollActions[0].diceType == expected_die
 
 
 def test_fighter_can_have_multiple_fighting_styles() -> None:

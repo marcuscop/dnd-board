@@ -16,6 +16,7 @@ from pillow_heif import register_heif_opener
 
 from dnd_board.character_sheet import (
     AbilityScores,
+    AbilityType,
     CharacterSheet,
     EquipmentSlot,
     PartyMember,
@@ -29,8 +30,10 @@ from dnd_board.character_sheet import (
     SheetSectionType,
     TokenKind,
     build_attack_roll_payload,
+    build_ability_check_roll_payload,
     build_character_sheet,
     build_damage_roll_payload,
+    build_saving_throw_roll_payload,
     build_roll_action_payload,
     enum_value,
     enum_key,
@@ -243,6 +246,16 @@ async def roll_sheet_attack(room_id: str, sheet_id: str, playerKey: str, attackI
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/damage")
 async def roll_sheet_damage(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand") -> dict[str, Any]:
     return await create_damage_roll(room_id, sheet_id, playerKey, attackId)
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/ability-check")
+async def roll_sheet_ability_check(room_id: str, sheet_id: str, playerKey: str, ability: str) -> dict[str, Any]:
+    return await create_ability_check_roll(room_id, sheet_id, playerKey, ability)
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/saving-throw")
+async def roll_sheet_saving_throw(room_id: str, sheet_id: str, playerKey: str, ability: str) -> dict[str, Any]:
+    return await create_saving_throw_roll(room_id, sheet_id, playerKey, ability)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/resources/{resource_id}/rolls/{action_id}")
@@ -853,6 +866,27 @@ async def create_damage_roll(room_id: str, sheet_id: str, player_key: str, attac
     return await store_roll(room, payload)
 
 
+async def create_ability_check_roll(room_id: str, sheet_id: str, player_key: str, ability_key: str) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    ability = parse_ability(ability_key)
+    payload = build_ability_check_roll_payload(sheet, player.player_key, ability)
+    return await store_roll(room, payload)
+
+
+async def create_saving_throw_roll(room_id: str, sheet_id: str, player_key: str, ability_key: str) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    ability = parse_ability(ability_key)
+    payload = build_saving_throw_roll_payload(sheet, player.player_key, ability)
+    return await store_roll(room, payload)
+
+
+def parse_ability(ability_key: str) -> AbilityType:
+    ability = enum_value(AbilityType, ability_key)
+    if ability is None:
+        raise HTTPException(status_code=404, detail="Ability not found")
+    return ability
+
+
 async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, resource_id: str, action_id: str) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     sanitized_resource_id = sanitize_asset_id(resource_id)
@@ -867,7 +901,7 @@ async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, res
         raise HTTPException(status_code=404, detail="Roll action not found")
 
     source = RollSource(section=SheetSectionType.RESOURCES, sourceId=resource.id, actionId=enum_key(action.id))
-    payload = build_roll_action_payload(sheet, player.player_key, source, action)
+    payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=resource.name)
     if action.consumesResource is not None:
         spend_resource_use(room, sheet, enum_key(action.consumesResource), payload)
     return await store_roll(room, payload)
@@ -887,7 +921,7 @@ async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, abil
         raise HTTPException(status_code=404, detail="Roll action not found")
 
     source = RollSource(section=SheetSectionType.ABILITIES, sourceId=ability.id, actionId=enum_key(action.id))
-    payload = build_roll_action_payload(sheet, player.player_key, source, action)
+    payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=ability.source)
     if action.consumesResource is not None:
         spend_resource_use(room, sheet, enum_key(action.consumesResource), payload)
     return await store_roll(room, payload)

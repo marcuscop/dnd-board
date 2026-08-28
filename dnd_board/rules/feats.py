@@ -44,6 +44,7 @@ class FeatEffectType(Enum):
     ROLL_ABILITY = auto()
     SHEET_ABILITY = auto()
     DESCRIPTION_ONLY = auto()
+    RESOURCE = auto()
 
 
 class FeatAttackRollBonusScope(Enum):
@@ -180,8 +181,8 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         featType=FightingStyleType.SUPERIOR_TECHNIQUE,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
-        description="Learn one Battle Master maneuver and gain one d6 superiority die. Full tracking is skipped until Battle Master maneuvers are implemented.",
-        effects=(FeatEffect(effectType=FeatEffectType.DESCRIPTION_ONLY),),
+        description="Learn one Battle Master maneuver and gain one superiority die, which is a d6 unless added to Battle Master superiority dice from another source. The die fuels your maneuver and returns when you finish a short or long rest. Maneuver save DC is 8 + Proficiency Bonus + Strength or Dexterity modifier.",
+        effects=(FeatEffect(effectType=FeatEffectType.RESOURCE),),
     ),
     FightingStyleType.THROWN_WEAPON_FIGHTING: FeatDefinition(
         featType=FightingStyleType.THROWN_WEAPON_FIGHTING,

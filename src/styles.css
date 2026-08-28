@@ -530,27 +530,62 @@ canvas.is-dragging,
   gap: 8px;
 }
 
-.ability-grid div {
+.ability-grid > div {
   display: grid;
   place-items: center;
   gap: 6px;
-  min-height: 118px;
+  min-height: 172px;
   border: 1px solid rgba(216, 156, 70, 0.58);
   border-radius: 6px;
+  padding: 10px;
   background: rgba(31, 18, 9, 0.82);
 }
 
-.ability-grid span,
-.ability-grid small {
+.ability-grid > div > span,
+.ability-grid > div > small {
   color: #d8b778;
   font-size: 1.2rem;
   font-weight: 900;
 }
 
-.ability-grid strong {
+.ability-grid > div > strong {
   color: #f7dfaa;
   font-size: 2.8rem;
   line-height: 1;
+}
+
+.ability-roll-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.ability-roll-actions button {
+  min-width: 82px;
+  padding: 6px 8px;
+  font-size: 0.72rem;
+}
+
+.saving-throw-list {
+  display: grid;
+  gap: 8px;
+}
+
+.saving-throw-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.saving-throw-row > span {
+  min-width: 0;
+  color: #d8b778;
+}
+
+.saving-throw-row .inline-rolls {
+  grid-column: 1 / -1;
 }
 
 .attack-list {

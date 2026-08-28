@@ -51,6 +51,7 @@ class FighterRollActionType(Enum):
 
 class FighterSubclassType(Enum):
     CHAMPION = auto()
+    BATTLE_MASTER = auto()
 
 
 class ChampionFeatureType(Enum):
@@ -318,6 +319,7 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
             activation=TimeEconomy.BONUS_ACTION,
             description="Regain 1d10 plus Fighter level hit points, or spend a use for Tactical Mind.",
             rollActions=second_wind_roll_actions,
+            source=enum_label(ClassType.FIGHTER),
         )
     ]
     if progression.action_surge_uses > 0:
@@ -330,6 +332,7 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
                 reset=RestType.SHORT_REST,
                 activation=TimeEconomy.SPECIAL,
                 description="Take one additional non-Magic action on your turn.",
+                source=enum_label(ClassType.FIGHTER),
             )
         )
     if progression.indomitable_uses > 0:
@@ -342,6 +345,7 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
                 reset=RestType.LONG_REST,
                 activation=TimeEconomy.SPECIAL,
                 description="Reroll a failed saving throw with a bonus equal to Fighter level.",
+                source=enum_label(ClassType.FIGHTER),
             )
         )
     return resources
@@ -362,6 +366,9 @@ def fighter_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
     features.append(feature_for_type(FighterFeatureType.WEAPON_MASTERY, progression, character_class))
     features.extend(fighting_style_features(classes))
     features.extend(champion_features(character_class, progression.level))
+    from dnd_board.rules.battle_master import battle_master_features
+
+    features.extend(battle_master_features(character_class, progression.level))
     return dedupe_features(features)
 
 
