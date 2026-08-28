@@ -12,3 +12,4 @@ flux-api
 *.pyc
 *.pyo
 .DS_Store
+test-results/

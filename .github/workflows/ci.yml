@@ -11,10 +11,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -25,7 +25,7 @@ jobs:
           virtualenvs-in-project: true
 
       - name: Cache Poetry environment
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .venv
           key: poetry-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
@@ -42,16 +42,42 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache Poetry environment
+        uses: actions/cache@v5
+        with:
+          path: .venv
+          key: poetry-frontend-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install Python dependencies
+        run: poetry install --with dev --no-interaction
 
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Install browser dependencies
+        run: npx playwright install --with-deps chromium
+
       - name: Build frontend
         run: npm run build
+
+      - name: Run frontend tests
+        run: npm run test:e2e

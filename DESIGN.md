@@ -35,3 +35,4 @@ UIStringFormatter.clean_name(AbilityType.STRENGTH.name)
 - The DM has full control. Players control their own sheets and tokens.
 - The system helps track resources and math, but it does not strictly enforce tabletop rules.
 - The board remains independent from character movement rules; sheets are tools for play, not a rules cage.
+- Add or update focused backend and frontend tests for every gameplay or UI feature change.
