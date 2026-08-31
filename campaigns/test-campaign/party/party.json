@@ -99,15 +99,15 @@
                           "items": [
                             {
                               "$type": "BattleMasterManeuverType",
-                              "value": "MENACING_ATTACK"
-                            },
-                            {
-                              "$type": "BattleMasterManeuverType",
-                              "value": "TRIP_ATTACK"
+                              "value": "GRAPPLING_STRIKE"
                             },
                             {
                               "$type": "BattleMasterManeuverType",
                               "value": "PUSHING_ATTACK"
+                            },
+                            {
+                              "$type": "BattleMasterManeuverType",
+                              "value": "RALLY"
                             }
                           ]
                         }
@@ -196,27 +196,6 @@
                     {
                       "$type": "int",
                       "value": 8
-                    }
-                  ]
-                },
-                "conditions": {
-                  "$type": "list",
-                  "items": [
-                    {
-                      "$type": "ConditionType",
-                      "value": "STUNNED"
-                    },
-                    {
-                      "$type": "ConditionType",
-                      "value": "UNCONSCIOUS"
-                    },
-                    {
-                      "$type": "ConditionType",
-                      "value": "POISONED"
-                    },
-                    {
-                      "$type": "ConditionType",
-                      "value": "EXHAUSTION"
                     }
                   ]
                 },

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MutableRefObject } from "react";
-import { SheetSectionType, TokenKind } from "./types";
+import { RollResolutionMode, SheetSectionType, TokenKind } from "./types";
 import type { AbilityType, Asset, Board, CharacterSheet, ConditionType, EquipmentSlot, FogState, PlayerSummary, ProgressionChoice, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
 
 const DEFAULT_BOARD_WIDTH = 1200;
@@ -211,13 +211,7 @@ export function App() {
       if (message.type === "roll_resolved") {
         setRolls((current) => (message.resolution.responseRolls ?? []).reduce(upsertPendingRoll, current.filter((roll) => roll.id !== message.rollId)));
         setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
-        setSheets((current) =>
-          current.map((sheet) =>
-            sheet.id === message.resolution.targetSheetId
-              ? { ...sheet, hp: message.resolution.targetHp, conditions: message.resolution.targetConditions }
-              : sheet
-          )
-        );
+        setSheets((current) => applyResolvedRollToSheetState(current, message.resolution));
         return;
       }
 
@@ -677,6 +671,15 @@ export function App() {
         setSheetStatus("error");
         return;
       }
+      const body = (await response.json()) as { roll: RollPayload; resolution?: RollLogEntry["resolution"]; logEntry?: RollLogEntry };
+      if (body.resolution && body.logEntry) {
+        const resolution = body.resolution;
+        const logEntry = body.logEntry;
+        setSheets((current) => applyResolvedRollToSheetState(current, resolution));
+        setRolls((current) => current.filter((roll) => roll.id !== body.roll.id));
+        setRollHistory((current) => appendRollLogEntry(current, logEntry));
+        return;
+      }
       await loadSheets();
     },
     [loadSheets, playerKey]
@@ -702,6 +705,24 @@ export function App() {
     async (rest: "short" | "long") => {
       const response = await fetch(
         `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/rest?playerKey=${encodeURIComponent(playerKey)}&rest=${encodeURIComponent(rest)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; rollHistory: RollLogEntry[] };
+      setSheets(body.sheets);
+      setRolls(body.pendingRolls);
+      setRollHistory(body.rollHistory);
+    },
+    [playerKey]
+  );
+
+  const clearSheetRolls = useCallback(
+    async (sheet: CharacterSheet) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/rolls/clear?playerKey=${encodeURIComponent(playerKey)}`,
         { method: "POST" }
       );
       if (!response.ok) {
@@ -802,6 +823,7 @@ export function App() {
         onRollAbilityCheck={rollAbilityCheck}
         onRollResourceAction={rollResourceAction}
         onRollSavingThrow={rollSavingThrow}
+        onClearSheetRolls={clearSheetRolls}
         onRestSheets={restSheets}
         onUpdateProgressionChoice={updateProgressionChoice}
         onUpdateCondition={updateCondition}
@@ -984,6 +1006,7 @@ type SheetViewProps = {
   expandedSheetId: string | null;
   isDm: boolean;
   onExpand: (sheetId: string | null) => void;
+  onClearSheetRolls: (sheet: CharacterSheet) => void;
   onRollAbilityCheck: (sheet: CharacterSheet, ability: string) => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
@@ -1003,15 +1026,23 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
   const [draggingRollId, setDraggingRollId] = useState<string | null>(null);
   const [dropTargetSheetId, setDropTargetSheetId] = useState<string | null>(null);
+  const [clearedCardRollIds, setClearedCardRollIds] = useState<Set<string>>(() => new Set());
+  const draggingRoll = useMemo(() => rolls.find((roll) => roll.id === draggingRollId), [draggingRollId, rolls]);
+  const canDropRoll = isDm && isTargetableRoll(draggingRoll);
 
   const applyRollToSheet = useCallback(
     async (rollId: string, target: CharacterSheet) => {
+      if (!isTargetableRoll(rolls.find((roll) => roll.id === rollId))) {
+        setDraggingRollId(null);
+        setDropTargetSheetId(null);
+        return;
+      }
       try {
         const params = new URLSearchParams({ playerKey, targetSheetId: target.id });
         const response = await fetch(`/api/rooms/${encodeURIComponent(getInitialRoomId())}/rolls/${encodeURIComponent(rollId)}/resolve?${params}`, {
@@ -1027,7 +1058,15 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityC
         setDropTargetSheetId(null);
       }
     },
-    [playerKey]
+    [playerKey, rolls]
+  );
+  const clearRollsForSheet = useCallback(
+    (sheet: CharacterSheet) => {
+      const resolvedCardEntryIds = rollHistory.filter((entry) => entry.resolution && entry.roll.tokenId === sheet.tokenId).map((entry) => entry.id);
+      setClearedCardRollIds((current) => new Set([...current, ...resolvedCardEntryIds]));
+      onClearSheetRolls(sheet);
+    },
+    [onClearSheetRolls, rollHistory]
   );
 
   return (
@@ -1052,7 +1091,9 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityC
           sheet={expandedSheet}
           canRoll={canRollSheet(expandedSheet, playerKey, isDm)}
           pendingRolls={rolls.filter((roll) => roll.tokenId === expandedSheet.tokenId)}
+          resolvedRolls={cardResolvedRolls(expandedSheet, rollHistory, clearedCardRollIds)}
           rollDraggable={isDm}
+          onClearSheetRolls={clearRollsForSheet}
           onDragRollEnd={() => {
             setDraggingRollId(null);
             setDropTargetSheetId(null);
@@ -1076,14 +1117,17 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityC
           <SheetSection
             title="Party"
             sheets={partySheets}
-            canDrop={isDm && draggingRollId !== null}
+            canDrop={canDropRoll}
             dropTargetSheetId={dropTargetSheetId}
             onApplyRoll={applyRollToSheet}
+            onClearSheetRolls={clearRollsForSheet}
             onDropTarget={setDropTargetSheetId}
             onExpand={onExpand}
             onUpdateProgressionChoice={onUpdateProgressionChoice}
             onUpdateSheetLevel={onUpdateSheetLevel}
             rolls={rolls}
+            rollHistory={rollHistory}
+            clearedCardRollIds={clearedCardRollIds}
             playerKey={playerKey}
             isDm={isDm}
             draggingRollId={draggingRollId}
@@ -1097,14 +1141,17 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityC
             <SheetSection
               title="Other"
               sheets={otherSheets}
-              canDrop={isDm && draggingRollId !== null}
+              canDrop={canDropRoll}
               dropTargetSheetId={dropTargetSheetId}
               onApplyRoll={applyRollToSheet}
+              onClearSheetRolls={clearRollsForSheet}
               onDropTarget={setDropTargetSheetId}
               onExpand={onExpand}
               onUpdateProgressionChoice={onUpdateProgressionChoice}
               onUpdateSheetLevel={onUpdateSheetLevel}
               rolls={rolls}
+              rollHistory={rollHistory}
+              clearedCardRollIds={clearedCardRollIds}
               playerKey={playerKey}
               isDm={isDm}
               draggingRollId={draggingRollId}
@@ -1138,6 +1185,7 @@ function SheetSection({
   canDrop,
   dropTargetSheetId,
   onApplyRoll,
+  onClearSheetRolls,
   onDragRollEnd,
   onDragRollStart,
   onDropTarget,
@@ -1147,13 +1195,16 @@ function SheetSection({
   playerKey,
   isDm,
   draggingRollId,
-  rolls
+  rolls,
+  rollHistory,
+  clearedCardRollIds
 }: {
   title: string;
   sheets: CharacterSheet[];
   canDrop: boolean;
   dropTargetSheetId: string | null;
   onApplyRoll: (rollId: string, target: CharacterSheet) => void;
+  onClearSheetRolls: (sheet: CharacterSheet) => void;
   onDragRollEnd: () => void;
   onDragRollStart: (rollId: string) => void;
   onDropTarget: (sheetId: string | null) => void;
@@ -1164,6 +1215,8 @@ function SheetSection({
   isDm: boolean;
   draggingRollId: string | null;
   rolls: RollPayload[];
+  rollHistory: RollLogEntry[];
+  clearedCardRollIds: Set<string>;
 }) {
   if (sheets.length === 0) return null;
 
@@ -1178,7 +1231,9 @@ function SheetSection({
             canDrop={canDrop}
             draggingRollId={draggingRollId}
             isDropTarget={dropTargetSheetId === sheet.id}
+            canClearRolls={canRollSheet(sheet, playerKey, isDm)}
             onApplyRoll={onApplyRoll}
+            onClearSheetRolls={onClearSheetRolls}
             onDragRollEnd={onDragRollEnd}
             onDragRollStart={onDragRollStart}
             onDropTarget={onDropTarget}
@@ -1186,6 +1241,7 @@ function SheetSection({
             onUpdateProgressionChoice={onUpdateProgressionChoice}
             onUpdateSheetLevel={onUpdateSheetLevel}
             pendingRolls={rolls.filter((roll) => roll.tokenId === sheet.tokenId)}
+            resolvedRolls={cardResolvedRolls(sheet, rollHistory, clearedCardRollIds)}
             rollDraggable={isDm}
           />
         ))}
@@ -1196,10 +1252,12 @@ function SheetSection({
 
 function SheetCard({
   sheet,
+  canClearRolls,
   canDrop,
   draggingRollId,
   isDropTarget,
   onApplyRoll,
+  onClearSheetRolls,
   onDragRollEnd,
   onDragRollStart,
   onDropTarget,
@@ -1207,13 +1265,16 @@ function SheetCard({
   onUpdateProgressionChoice,
   onUpdateSheetLevel,
   pendingRolls,
+  resolvedRolls,
   rollDraggable
 }: {
   sheet: CharacterSheet;
+  canClearRolls: boolean;
   canDrop: boolean;
   draggingRollId: string | null;
   isDropTarget: boolean;
   onApplyRoll: (rollId: string, target: CharacterSheet) => void;
+  onClearSheetRolls: (sheet: CharacterSheet) => void;
   onDragRollEnd: () => void;
   onDragRollStart: (rollId: string) => void;
   onDropTarget: (sheetId: string | null) => void;
@@ -1221,8 +1282,11 @@ function SheetCard({
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   pendingRolls: RollPayload[];
+  resolvedRolls: RollLogEntry[];
   rollDraggable: boolean;
 }) {
+  const hasCardRolls = pendingRolls.length > 0 || resolvedRolls.length > 0;
+
   return (
     <article
       className={["sheet-card", canDrop ? "drop-ready" : "", isDropTarget ? "drop-target" : ""].filter(Boolean).join(" ")}
@@ -1263,18 +1327,36 @@ function SheetCard({
         {sheet.conditions.length > 0 && <div className="condition-list">{sheet.conditions.map((condition) => <span key={condition}>{cleanName(condition)}</span>)}</div>}
       </div>
       <div className="card-roll-slot">
-        {pendingRolls.length > 0 ? (
-          pendingRolls.map((pendingRoll) => (
-            <RollCard
-              key={pendingRoll.id}
-              roll={pendingRoll}
-              roller={sheet}
-              draggable={rollDraggable}
-              compact
-              onDragEnd={onDragRollEnd}
-              onDragStart={() => onDragRollStart(pendingRoll.id)}
-            />
-          ))
+        {hasCardRolls ? (
+          <>
+            {canClearRolls && (
+              <button className="clear-rolls-button" onClick={() => onClearSheetRolls(sheet)} type="button">
+                Clear Rolls
+              </button>
+            )}
+            {pendingRolls.map((pendingRoll) => (
+              <RollCard
+                key={pendingRoll.id}
+                roll={pendingRoll}
+                roller={sheet}
+                draggable={rollDraggable && isTargetableRoll(pendingRoll)}
+                compact
+                onDragEnd={onDragRollEnd}
+                onDragStart={() => onDragRollStart(pendingRoll.id)}
+              />
+            ))}
+            {resolvedRolls.map((entry) => (
+              <RollCard
+                key={entry.id}
+                roll={entry.roll}
+                roller={sheet}
+                draggable={false}
+                compact
+                onDragEnd={onDragRollEnd}
+                onDragStart={() => undefined}
+              />
+            ))}
+          </>
         ) : (
           <span className="empty-roll-slot">No roll</span>
         )}
@@ -1591,6 +1673,7 @@ function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: CharacterS
 function RollActionList({
   canRoll,
   pendingRolls,
+  resolvedRolls = [],
   roller,
   rollActions,
   rollDraggable,
@@ -1600,6 +1683,7 @@ function RollActionList({
 }: {
   canRoll: boolean;
   pendingRolls: RollPayload[];
+  resolvedRolls?: RollLogEntry[];
   roller: CharacterSheet;
   rollActions: RollAction[];
   rollDraggable: boolean;
@@ -1607,7 +1691,7 @@ function RollActionList({
   onDragRollStart: (rollId: string) => void;
   onRollAction: (actionId: string) => void;
 }) {
-  if (rollActions.length === 0 && pendingRolls.length === 0) return null;
+  if (rollActions.length === 0 && pendingRolls.length === 0 && resolvedRolls.length === 0) return null;
 
   return (
     <div className="inline-roll-area">
@@ -1622,6 +1706,7 @@ function RollActionList({
       )}
       <InlineRolls
         pendingRolls={pendingRolls}
+        resolvedRolls={resolvedRolls}
         roller={roller}
         rollDraggable={rollDraggable}
         onDragRollEnd={onDragRollEnd}
@@ -1638,6 +1723,7 @@ function SheetAbilityList({
   onRollResourceAction,
   onUpdateResource,
   pendingRolls,
+  resolvedRolls = [],
   rollDraggable,
   sheet
 }: {
@@ -1647,6 +1733,7 @@ function SheetAbilityList({
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   pendingRolls: RollPayload[];
+  resolvedRolls?: RollLogEntry[];
   rollDraggable: boolean;
   sheet: CharacterSheet;
 }) {
@@ -1659,6 +1746,7 @@ function SheetAbilityList({
         {sheet.abilities.map((ability) => {
           const resource = ability.resourceId ? sheet.resources.find((candidate) => candidate.id === ability.resourceId) : undefined;
           const matchingRolls = pendingRolls.filter((roll) => rollMatchesSource(roll, SheetSectionType.ABILITIES, ability.id));
+          const matchingResolvedRolls = resolvedRolls.filter((entry) => rollMatchesSource(entry.roll, SheetSectionType.ABILITIES, ability.id));
 
           return (
             <div className="resource-row" key={ability.id}>
@@ -1683,6 +1771,7 @@ function SheetAbilityList({
                 <RollActionList
                   canRoll={canRoll}
                   pendingRolls={matchingRolls}
+                  resolvedRolls={matchingResolvedRolls}
                   roller={sheet}
                   rollDraggable={rollDraggable}
                   rollActions={ability.rollActions ?? []}
@@ -1693,6 +1782,7 @@ function SheetAbilityList({
               ) : (
                 <InlineRolls
                   pendingRolls={matchingRolls}
+                  resolvedRolls={matchingResolvedRolls}
                   roller={sheet}
                   rollDraggable={rollDraggable}
                   onDragRollEnd={onDragRollEnd}
@@ -1735,18 +1825,20 @@ function ResourceStepper({
 
 function InlineRolls({
   pendingRolls,
+  resolvedRolls = [],
   roller,
   rollDraggable,
   onDragRollEnd,
   onDragRollStart
 }: {
   pendingRolls: RollPayload[];
+  resolvedRolls?: RollLogEntry[];
   roller: CharacterSheet;
   rollDraggable: boolean;
   onDragRollEnd: () => void;
   onDragRollStart: (rollId: string) => void;
 }) {
-  if (pendingRolls.length === 0) return null;
+  if (pendingRolls.length === 0 && resolvedRolls.length === 0) return null;
 
   return (
     <div className="inline-rolls">
@@ -1755,10 +1847,21 @@ function InlineRolls({
           key={pendingRoll.id}
           roll={pendingRoll}
           roller={roller}
-          draggable={rollDraggable}
+          draggable={rollDraggable && isTargetableRoll(pendingRoll)}
           compact
           onDragEnd={onDragRollEnd}
           onDragStart={() => onDragRollStart(pendingRoll.id)}
+        />
+      ))}
+      {resolvedRolls.map((entry) => (
+        <RollCard
+          key={entry.id}
+          roll={entry.roll}
+          roller={roller}
+          draggable={false}
+          compact
+          onDragEnd={onDragRollEnd}
+          onDragStart={() => undefined}
         />
       ))}
     </div>
@@ -1769,7 +1872,9 @@ function FullSheet({
   sheet,
   canRoll,
   isDm,
+  onClearSheetRolls,
   pendingRolls,
+  resolvedRolls,
   rollDraggable,
   onDragRollEnd,
   onDragRollStart,
@@ -1788,7 +1893,9 @@ function FullSheet({
   sheet: CharacterSheet;
   canRoll: boolean;
   isDm: boolean;
+  onClearSheetRolls: (sheet: CharacterSheet) => void;
   pendingRolls: RollPayload[];
+  resolvedRolls: RollLogEntry[];
   rollDraggable: boolean;
   onDragRollEnd: () => void;
   onDragRollStart: (rollId: string) => void;
@@ -1822,10 +1929,14 @@ function FullSheet({
               {metadata ? ` · ${metadata}` : ""}
             </p>
             {isDm && <LevelStepper sheet={sheet} onUpdateSheetLevel={onUpdateSheetLevel} />}
+            {canRoll && (pendingRolls.length > 0 || resolvedRolls.length > 0) && (
+              <button className="clear-rolls-button" onClick={() => onClearSheetRolls(sheet)} type="button">
+                Clear Rolls
+              </button>
+            )}
           </div>
         </div>
       </div>
-
       {canRoll && sheet.pendingChoices.length > 0 && (
         <ProgressionChoicePanel sheet={sheet} onUpdateProgressionChoice={onUpdateProgressionChoice} />
       )}
@@ -1897,11 +2008,22 @@ function FullSheet({
         </section>
 
         <ConditionPanel canRoll={canRoll} sheet={sheet} onUpdateCondition={onUpdateCondition} />
+        {hasDamageDefenses(sheet) && (
+          <section className="sheet-panel">
+            <h2>Defenses</h2>
+            <div className="compact-list">
+              {sheet.damageResistances.length > 0 && <span>Resist {sheet.damageResistancesLabel.join(", ")}</span>}
+              {sheet.damageVulnerabilities.length > 0 && <span>Vulnerable {sheet.damageVulnerabilitiesLabel.join(", ")}</span>}
+              {sheet.damageImmunities.length > 0 && <span>Immune {sheet.damageImmunitiesLabel.join(", ")}</span>}
+            </div>
+          </section>
+        )}
       </div>
 
       <SheetAbilityList
         canRoll={canRoll}
         pendingRolls={pendingRolls}
+        resolvedRolls={resolvedRolls}
         rollDraggable={rollDraggable}
         sheet={sheet}
         onDragRollEnd={onDragRollEnd}
@@ -2030,7 +2152,7 @@ function SheetSpellList({
         {sheet.spells.map((spell) => {
           const resource = spell.resourceId ? sheet.resources.find((candidate) => candidate.id === spell.resourceId) : undefined;
           const tags = [
-            spell.source,
+            spell.sourceLabel,
             spell.level === 0 ? "Cantrip" : `Level ${spell.level}`,
             spell.schoolLabel,
             spell.castingAbilityLabel,
@@ -2041,10 +2163,11 @@ function SheetSpellList({
           return (
             <article className="spell-row" key={spell.id}>
               <div>
-                <strong>{spell.name}</strong>
+                <strong>{spell.nameLabel}</strong>
                 <span>{tags.join(" · ")}</span>
                 <small>
-                  {spell.castingTime} · {spell.range} · {spell.duration} · {spell.componentsLabel.join(", ")}
+                  {spell.castingTimeLabel} · {spell.targeting.summary} · {spell.duration.summary} · {spell.componentsLabel.join(", ")}
+                  {spell.reset !== "none" ? ` · ${spell.resetLabel}` : ""}
                 </small>
               </div>
               {resource && (
@@ -2475,7 +2598,13 @@ function upsertPendingRoll(rolls: RollPayload[], roll: RollPayload) {
 }
 
 function appendRollLogEntry(entries: RollLogEntry[], entry: RollLogEntry) {
-  return [...entries, entry].slice(-ROLL_HISTORY_LIMIT);
+  return [...entries.filter((candidate) => candidate.id !== entry.id), entry].slice(-ROLL_HISTORY_LIMIT);
+}
+
+function applyResolvedRollToSheetState(sheets: CharacterSheet[], resolution: NonNullable<RollLogEntry["resolution"]>) {
+  return sheets.map((sheet) =>
+    sheet.id === resolution.targetSheetId ? { ...sheet, hp: resolution.targetHp, conditions: resolution.targetConditions } : sheet
+  );
 }
 
 function rollKey(roll: RollPayload) {
@@ -2488,6 +2617,36 @@ function rollMatchesSource(roll: RollPayload, section: SheetSectionType, sourceI
 
 function rollMatchesSourceAction(roll: RollPayload, section: SheetSectionType, sourceId: string, actionId: string) {
   return rollMatchesSource(roll, section, sourceId) && roll.source.actionId === actionId;
+}
+
+function cardResolvedRolls(sheet: CharacterSheet, rollHistory: RollLogEntry[], clearedCardRollIds: Set<string>) {
+  return rollHistory
+    .filter(
+      (entry) =>
+        entry.resolution &&
+        entry.roll.resolution === RollResolutionMode.HEAL_SELF &&
+        entry.roll.tokenId === sheet.tokenId &&
+        entry.resolution.targetSheetId === sheet.id &&
+        !clearedCardRollIds.has(entry.id)
+    )
+    .slice(-2)
+    .reverse();
+}
+
+function isTargetableRoll(roll: RollPayload | undefined) {
+  if (!roll) return false;
+  if (
+    roll.resolution === RollResolutionMode.ATTACK_VS_ARMOR_CLASS ||
+    roll.resolution === RollResolutionMode.APPLY_DAMAGE ||
+    roll.resolution === RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS
+  ) {
+    return true;
+  }
+  return (roll.conditionEffects ?? []).some((effect) => effect.mode === "targetSave" || effect.mode === "sourceCheck" || effect.mode === "direct");
+}
+
+function hasDamageDefenses(sheet: CharacterSheet) {
+  return sheet.damageResistances.length > 0 || sheet.damageVulnerabilities.length > 0 || sheet.damageImmunities.length > 0;
 }
 
 function getInitialRoute(): InitialRoute {

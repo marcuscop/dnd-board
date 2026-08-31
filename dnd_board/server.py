@@ -21,6 +21,7 @@ from dnd_board.character_sheet import (
     CharacterClassLevel,
     ClassType,
     ConditionApplicationMode,
+    ConditionDuration,
     ConditionType,
     DiceType,
     EquipmentSlot,
@@ -161,6 +162,7 @@ class Room:
     hit_points: dict[str, int]
     temporary_hit_points: dict[str, int]
     condition_overrides: dict[str, list[ConditionType]]
+    condition_durations: dict[str, dict[ConditionType, ConditionDuration]]
     resource_uses: dict[str, dict[str, int]]
     equipment_slots: dict[str, dict[str, EquipmentSlot]]
 
@@ -284,6 +286,21 @@ async def roll_sheet_ability_action(room_id: str, sheet_id: str, ability_id: str
     return await create_ability_roll(room_id, sheet_id, playerKey, ability_id, action_id)
 
 
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/clear")
+async def clear_sheet_rolls(room_id: str, sheet_id: str, playerKey: str) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-clear-rolls", name="Sheet Rolls", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    sheet = get_visible_sheet(room, player, sanitize_asset_id(sheet_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    if not can_control_sheet_roll(player, sheet):
+        raise HTTPException(status_code=403, detail="Cannot clear this sheet's rolls")
+
+    remove_pending_rolls_for_token(room, sheet.tokenId)
+    return sheet_state_message(room, player)
+
+
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/resources/{resource_id}")
 async def update_sheet_resource(room_id: str, sheet_id: str, resource_id: str, playerKey: str, currentUses: int) -> dict[str, Any]:
     sanitized_room_id = sanitize_room_id(room_id)
@@ -336,6 +353,7 @@ async def update_sheet_level(room_id: str, sheet_id: str, playerKey: str, delta:
     room.hit_points.pop(updated_member.id, None)
     room.temporary_hit_points.pop(updated_member.id, None)
     room.condition_overrides.pop(updated_member.id, None)
+    room.condition_durations.pop(updated_member.id, None)
     sheet = get_visible_sheet(room, player, updated_member.id)
     return {"roomId": room.id, "sheet": sheet_to_dict(sheet) if sheet else None}
 
@@ -405,6 +423,8 @@ async def rest_room_sheets(room_id: str, playerKey: str, rest: str) -> dict[str,
     for sheet in visible_sheets(room, player):
         if sheet.kind == TokenKind.CHARACTER:
             reset_sheet_resources(room, sheet, rest_type)
+            reset_sheet_conditions(room, sheet, rest_type)
+            reset_sheet_temporary_hit_points(room, sheet, rest_type)
     return sheet_state_message(room, player)
 
 
@@ -455,11 +475,14 @@ async def update_sheet_condition(room_id: str, sheet_id: str, condition: str, pl
         sanitize_asset_id(sheet_id),
         lambda member: set_member_conditions(member, next_conditions),
     )
-    if updated_member is None:
-        raise HTTPException(status_code=404, detail="Sheet not found")
 
-    room.condition_overrides[updated_member.id] = next_conditions
-    updated = get_visible_sheet(room, player, updated_member.id)
+    updated_sheet_id = updated_member.id if updated_member is not None else sheet.tokenId
+    room.condition_overrides[updated_sheet_id] = next_conditions
+    if active:
+        room.condition_durations.setdefault(updated_sheet_id, {})[condition_type] = ConditionDuration.MANUAL
+    else:
+        room.condition_durations.setdefault(updated_sheet_id, {}).pop(condition_type, None)
+    updated = get_visible_sheet(room, player, updated_sheet_id)
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else None}
 
 
@@ -835,6 +858,7 @@ async def delete_token(room: Room, player: Player, token_id: str) -> None:
     room.hit_points.pop(token_id, None)
     room.temporary_hit_points.pop(token_id, None)
     room.condition_overrides.pop(token_id, None)
+    room.condition_durations.pop(token_id, None)
     await broadcast(room, {"type": "token_deleted", "tokenId": token_id})
 
 
@@ -869,6 +893,7 @@ def get_or_create_room(room_id: str) -> Room:
         hit_points={},
         temporary_hit_points={},
         condition_overrides={},
+        condition_durations={},
         resource_uses=load_saved_resource_uses(room_id),
         equipment_slots={},
     )
@@ -1107,6 +1132,34 @@ def find_attack(sheet: CharacterSheet, attack_id: str):
 
 
 async def store_roll(room: Room, payload: RollPayload) -> dict[str, Any]:
+    if roll_resolves_immediately(payload):
+        target = source_sheet_for_roll(room, payload)
+        if target is None:
+            raise HTTPException(status_code=404, detail="Sheet not found")
+        resolution = resolve_roll_against_target(room, payload, target)
+        resolution_data = roll_resolution_to_dict(resolution)
+        log_entry = append_roll_log_entry(
+            room,
+            RollLogEntry(
+                id=f"log-{resolution.id}",
+                entryType=RollLogEntryType.ROLL_RESOLVED,
+                createdAt=resolution.createdAt,
+                roll=payload,
+                resolution=resolution,
+            ),
+        )
+        await broadcast(
+            room,
+            {
+                "type": "roll_resolved",
+                "rollId": payload.id,
+                "tokenId": payload.tokenId,
+                "resolution": resolution_data,
+                "logEntry": roll_log_entry_to_dict(log_entry),
+            },
+        )
+        return {"roomId": room.id, "roll": roll_payload_to_dict(payload), "resolution": resolution_data, "logEntry": roll_log_entry_to_dict(log_entry)}
+
     room.pending_rolls[roll_queue_key(payload)] = payload
     roll = roll_payload_to_dict(payload)
     log_entry = append_roll_log_entry(
@@ -1120,6 +1173,10 @@ async def store_roll(room: Room, payload: RollPayload) -> dict[str, Any]:
     )
     await broadcast(room, {"type": "roll_created", "roll": roll, "logEntry": roll_log_entry_to_dict(log_entry)})
     return {"roomId": room.id, "roll": roll, "logEntry": roll_log_entry_to_dict(log_entry)}
+
+
+def roll_resolves_immediately(roll: RollPayload) -> bool:
+    return roll.resolution == RollResolutionMode.HEAL_SELF
 
 
 def append_roll_log_entry(room: Room, entry: RollLogEntry) -> RollLogEntry:
@@ -1185,6 +1242,32 @@ def resource_resets_on_rest(resource_reset: RestType, rest_type: RestType) -> bo
     return resource_reset == RestType.SHORT_REST
 
 
+def reset_sheet_conditions(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
+    durations = room.condition_durations.get(sheet.tokenId, {})
+    expired = {condition for condition, duration in durations.items() if condition_clears_on_rest(duration, rest_type)}
+    if not expired:
+        return
+
+    next_conditions = [condition for condition in sheet.conditions if condition not in expired]
+    room.condition_overrides[sheet.tokenId] = next_conditions
+    for condition in expired:
+        durations.pop(condition, None)
+    update_party_member_config(room.id, sheet.id, lambda member: set_member_conditions(member, next_conditions))
+
+
+def condition_clears_on_rest(condition_duration: ConditionDuration, rest_type: RestType) -> bool:
+    if condition_duration == ConditionDuration.UNTIL_SHORT_REST:
+        return rest_type in {RestType.SHORT_REST, RestType.LONG_REST}
+    if condition_duration == ConditionDuration.UNTIL_LONG_REST:
+        return rest_type == RestType.LONG_REST
+    return False
+
+
+def reset_sheet_temporary_hit_points(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
+    if rest_type == RestType.LONG_REST:
+        room.temporary_hit_points.pop(sheet.tokenId, None)
+
+
 def spend_resource_use(room: Room, sheet: CharacterSheet, resource_id: str, payload: RollPayload) -> None:
     resource = next((candidate for candidate in sheet.resources if candidate.id == resource_id), None)
     if resource is None:
@@ -1235,7 +1318,7 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
     if roll.resolution in {RollResolutionMode.APPLY_DAMAGE, RollResolutionMode.HEAL_SELF, RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS}:
         room.hit_points[target.tokenId] = resolution.targetHp.current
         room.temporary_hit_points[target.tokenId] = resolution.targetHp.temporary
-    apply_resolved_conditions(room, target.id, resolution.targetConditions)
+    apply_resolved_conditions(room, target.id, resolution.targetConditions, roll)
     return resolution
 
 
@@ -1403,8 +1486,16 @@ def apply_response_roll_conditions(
     return next_conditions
 
 
-def apply_resolved_conditions(room: Room, sheet_id: str, conditions: list[ConditionType]) -> None:
+def apply_resolved_conditions(room: Room, sheet_id: str, conditions: list[ConditionType], roll: RollPayload) -> None:
     room.condition_overrides[sheet_id] = list(conditions)
+    active_conditions = set(conditions)
+    durations = room.condition_durations.setdefault(sheet_id, {})
+    for condition in list(durations):
+        if condition not in active_conditions:
+            durations.pop(condition, None)
+    for effect in roll.conditionEffects or []:
+        if effect.condition in active_conditions:
+            durations[effect.condition] = effect.duration
     update_party_member_config(room.id, sheet_id, lambda updated: set_member_conditions(updated, conditions))
 
 
@@ -1501,6 +1592,7 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.hit_points = {}
     room.temporary_hit_points = {}
     room.condition_overrides = {}
+    room.condition_durations = {}
     room.resource_uses = load_saved_resource_uses(room.id)
     room.equipment_slots = {}
     await broadcast_room_state(room)
@@ -1737,14 +1829,13 @@ def apply_member_hit_point_choice(member: PartyMemberConfig, choice: str) -> Non
 
 
 def apply_member_eldritch_knight_spells(member: PartyMemberConfig, values: list[str]) -> None:
-    from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell, eldritch_knight_spellcasting
+    from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell, is_eldritch_knight_spell_selection_valid
     from dnd_board.rules.classes.fighter.base import FighterSubclassType
 
     fighter = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.FIGHTER), None)
     if fighter is None or fighter.subclass != FighterSubclassType.ELDRITCH_KNIGHT or fighter.level < 3:
         raise HTTPException(status_code=400, detail="Eldritch Knight spellcasting is not available")
 
-    progression = eldritch_knight_spellcasting(fighter.level)
     selected_ids = unique_clean_values(values)
     spells = []
     for spell_id in selected_ids:
@@ -1753,10 +1844,8 @@ def apply_member_eldritch_knight_spells(member: PartyMemberConfig, values: list[
             raise HTTPException(status_code=400, detail="Invalid Eldritch Knight spell")
         spells.append(spell)
 
-    cantrips = [spell for spell in spells if spell.level == 0]
-    leveled_spells = [spell for spell in spells if spell.level > 0]
-    if len(cantrips) != progression.cantrips_known or len(leveled_spells) != progression.spells_known:
-        raise HTTPException(status_code=400, detail="Choose the required Eldritch Knight cantrips and leveled spells")
+    if not is_eldritch_knight_spell_selection_valid(fighter.level, spells):
+        raise HTTPException(status_code=400, detail="Choose legal Eldritch Knight cantrips and wizard spells")
 
     if member.sheet is None:
         member.sheet = PartyMemberSheet(classes=[fighter])
@@ -1943,7 +2032,7 @@ def apply_constitution_hp_delta(member: PartyMemberConfig, previous_score: int, 
 
 
 def prune_member_eldritch_knight_spells(member: PartyMemberConfig) -> None:
-    from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell, eldritch_knight_spellcasting, eldritch_knight_max_spell_level
+    from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell, pruned_eldritch_knight_spells
     from dnd_board.rules.classes.fighter.base import FighterSubclassType
 
     if member.sheet is None or not member.sheet.spells:
@@ -1954,15 +2043,11 @@ def prune_member_eldritch_knight_spells(member: PartyMemberConfig) -> None:
         member.sheet.spells = [spell for spell in member.sheet.spells if eldritch_knight_catalog_spell(spell.id) is None] or None
         return
 
-    progression = eldritch_knight_spellcasting(fighter.level)
-    max_spell_level = eldritch_knight_max_spell_level(fighter.level)
-    cantrips = [spell for spell in member.sheet.spells if spell.level == 0 and eldritch_knight_catalog_spell(spell.id) is not None]
-    leveled_spells = [spell for spell in member.sheet.spells if 0 < spell.level <= max_spell_level and eldritch_knight_catalog_spell(spell.id) is not None]
+    eldritch_knight_spells = [spell for spell in member.sheet.spells if eldritch_knight_catalog_spell(spell.id) is not None]
     other_spells = [spell for spell in member.sheet.spells if eldritch_knight_catalog_spell(spell.id) is None]
     member.sheet.spells = [
         *other_spells,
-        *cantrips[: progression.cantrips_known],
-        *leveled_spells[: progression.spells_known],
+        *pruned_eldritch_knight_spells(fighter.level, eldritch_knight_spells),
     ] or None
 
 

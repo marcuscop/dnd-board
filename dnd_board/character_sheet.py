@@ -69,6 +69,11 @@ class UIStringFormatter:
         return words[0] + "".join(word.capitalize() for word in words[1:])
 
 
+def api_field(method: Any) -> property:
+    method.__api_field__ = True
+    return property(method)
+
+
 class AbilityType(Enum):
     STRENGTH = auto()
     DEXTERITY = auto()
@@ -111,6 +116,150 @@ class SpellComponent(Enum):
     MATERIAL = auto()
 
 
+class SpellId(Enum):
+    ABSORB_ELEMENTS = "Absorb Elements"
+    BOOMING_BLADE = "Booming Blade"
+    BURNING_HANDS = "Burning Hands"
+    CHROMATIC_ORB = "Chromatic Orb"
+    COUNTERSPELL = "Counterspell"
+    DETECT_MAGIC = "Detect Magic"
+    FIND_FAMILIAR = "Find Familiar"
+    FIRE_BOLT = "Fire Bolt"
+    FIRE_SHIELD = "Fire Shield"
+    FIREBALL = "Fireball"
+    GREEN_FLAME_BLADE = "Green-Flame Blade"
+    ICE_STORM = "Ice Storm"
+    LIGHT = "Light"
+    LIGHTNING_BOLT = "Lightning Bolt"
+    MAGE_HAND = "Mage Hand"
+    MAGIC_MISSILE = "Magic Missile"
+    MINOR_ILLUSION = "Minor Illusion"
+    PRESTIDIGITATION = "Prestidigitation"
+    PROTECTION_FROM_EVIL_AND_GOOD = "Protection from Evil and Good"
+    RAY_OF_FROST = "Ray of Frost"
+    SCORCHING_RAY = "Scorching Ray"
+    SHATTER = "Shatter"
+    SHIELD = "Shield"
+    SHOCKING_GRASP = "Shocking Grasp"
+    SLEEP = "Sleep"
+    TELEKINESIS = "Telekinesis"
+    THUNDERWAVE = "Thunderwave"
+    WARDING_WIND = "Warding Wind"
+
+
+class SpellSource(Enum):
+    ELDRITCH_KNIGHT = "Eldritch Knight"
+    MONSTER_HUNTER = "Monster Hunter"
+    PSI_WARRIOR = "Psi Warrior"
+    WIZARD = "Wizard"
+
+
+class SpellCastingTime(Enum):
+    ACTION = "1 action"
+    REACTION = "1 reaction"
+    HOUR = "1 hour"
+    TEN_MINUTES = "10 minutes"
+
+
+class SpellRangeType(Enum):
+    SELF = auto()
+    TOUCH = auto()
+    DISTANCE = auto()
+
+
+class SpellAreaShape(Enum):
+    NONE = auto()
+    RADIUS = auto()
+    CONE = auto()
+    CUBE = auto()
+    LINE = auto()
+    CYLINDER = auto()
+
+
+class SpellDurationUnit(Enum):
+    INSTANTANEOUS = auto()
+    ROUND = auto()
+    MINUTE = auto()
+    HOUR = auto()
+
+
+@dataclass(frozen=True)
+class SpellNoArea:
+    shape: SpellAreaShape = SpellAreaShape.NONE
+
+
+@dataclass(frozen=True)
+class SpellRadiusArea:
+    radiusFeet: int
+    shape: SpellAreaShape = SpellAreaShape.RADIUS
+
+    @api_field
+    def diameterFeet(self) -> int:
+        return self.radiusFeet * 2
+
+
+@dataclass(frozen=True)
+class SpellConeArea:
+    lengthFeet: int
+    shape: SpellAreaShape = SpellAreaShape.CONE
+
+
+@dataclass(frozen=True)
+class SpellCubeArea:
+    sizeFeet: int
+    shape: SpellAreaShape = SpellAreaShape.CUBE
+
+
+@dataclass(frozen=True)
+class SpellLineArea:
+    lengthFeet: int
+    widthFeet: int
+    shape: SpellAreaShape = SpellAreaShape.LINE
+
+
+@dataclass(frozen=True)
+class SpellCylinderArea:
+    radiusFeet: int
+    heightFeet: int
+    shape: SpellAreaShape = SpellAreaShape.CYLINDER
+
+    @api_field
+    def diameterFeet(self) -> int:
+        return self.radiusFeet * 2
+
+
+SpellArea = SpellNoArea | SpellRadiusArea | SpellConeArea | SpellCubeArea | SpellLineArea | SpellCylinderArea
+
+
+@dataclass(frozen=True)
+class SpellTargeting:
+    rangeType: SpellRangeType
+    distanceFeet: int = 0
+    area: SpellArea = SpellNoArea()
+
+    @api_field
+    def summary(self) -> str:
+        range_label = spell_target_range_label(self)
+        area_label = spell_area_label(self.area)
+        return f"{range_label}, {area_label}" if area_label else range_label
+
+
+@dataclass(frozen=True)
+class SpellDuration:
+    unit: SpellDurationUnit
+    amount: int = 0
+    maximum: bool = False
+
+    @api_field
+    def summary(self) -> str:
+        if self.unit == SpellDurationUnit.INSTANTANEOUS:
+            return "Instantaneous"
+        unit = enum_label(self.unit).lower()
+        plural = "s" if self.amount != 1 else ""
+        prefix = "Up to " if self.maximum else ""
+        return f"{prefix}{self.amount} {unit}{plural}"
+
+
 class ConditionType(Enum):
     BLINDED = auto()
     CHARMED = auto()
@@ -134,6 +283,12 @@ class ConditionApplicationMode(Enum):
     SOURCE_CHECK = auto()
     DIRECT = auto()
     MANUAL = auto()
+
+
+class ConditionDuration(Enum):
+    MANUAL = auto()
+    UNTIL_SHORT_REST = auto()
+    UNTIL_LONG_REST = auto()
 
 
 class WeaponProperty(Enum):
@@ -292,11 +447,6 @@ class RuneType(Enum):
     STORM_RUNE = auto()
 
 
-def api_field(method: Any) -> property:
-    method.__api_field__ = True
-    return property(method)
-
-
 @dataclass
 class AbilityScores:
     strength: int
@@ -323,6 +473,7 @@ class ConditionEffect:
     saveDc: int | None = None
     sourceCheck: AbilityType | None = None
     contestChecks: list[AbilityType] | None = None
+    duration: ConditionDuration = ConditionDuration.MANUAL
     description: str = ""
 
 
@@ -470,20 +621,21 @@ class SheetFeature:
 
 @dataclass
 class SpellEntry:
-    id: str
-    name: str
-    source: str
+    id: SpellId
+    name: SpellId
+    source: SpellSource
     level: int
     school: SpellSchool
     castingAbility: AbilityType
-    castingTime: str
-    range: str
-    duration: str
+    castingTime: SpellCastingTime
+    targeting: SpellTargeting
+    duration: SpellDuration
     components: list[SpellComponent]
     description: str
     concentration: bool = False
     ritual: bool = False
     resourceId: str | None = None
+    reset: RestType = RestType.NONE
 
 
 @dataclass
@@ -521,6 +673,9 @@ class PartyMemberSheet:
     hitPointIncreases: list[int] | None = None
     abilityScoreImprovements: list[str] | None = None
     conditions: list[ConditionType] | None = None
+    damageResistances: list[DamageType] | None = None
+    damageVulnerabilities: list[DamageType] | None = None
+    damageImmunities: list[DamageType] | None = None
     attacks: list[AttackAction] | None = None
     equipment: list[EquipmentItem] | None = None
 
@@ -576,6 +731,9 @@ class CharacterSheet:
     spells: list[SpellEntry]
     proficiencies: list[str]
     conditions: list[ConditionType]
+    damageResistances: list[DamageType]
+    damageVulnerabilities: list[DamageType]
+    damageImmunities: list[DamageType]
     attacks: list[AttackAction]
     equipment: list[EquipmentItem]
 
@@ -752,6 +910,9 @@ def build_character_sheet(
         spells=spells,
         proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
         conditions=sheet_config.conditions if sheet_config and sheet_config.conditions else [],
+        damageResistances=sheet_config.damageResistances if sheet_config and sheet_config.damageResistances else [],
+        damageVulnerabilities=sheet_config.damageVulnerabilities if sheet_config and sheet_config.damageVulnerabilities else [],
+        damageImmunities=sheet_config.damageImmunities if sheet_config and sheet_config.damageImmunities else [],
         attacks=attacks,
         equipment=equipment,
     )
@@ -937,6 +1098,7 @@ def roll_condition_effects(sheet: CharacterSheet, action: RollAction) -> list[Co
             saveDc=condition_effect_save_dc(sheet, effect),
             sourceCheck=effect.sourceCheck,
             contestChecks=effect.contestChecks,
+            duration=effect.duration,
             description=effect.description,
         )
         for effect in action.conditionEffects
@@ -984,12 +1146,13 @@ def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> Ro
         outcome = "hits" if roll.total >= target.armorClass else "misses"
         target_hp = target.hp
     elif roll.resolution == RollResolutionMode.APPLY_DAMAGE:
-        remaining_damage = max(0, roll.total)
+        adjusted_damage = damage_after_defenses(max(0, roll.total), roll.damageType, target)
+        remaining_damage = adjusted_damage
         next_temporary = max(0, target.hp.temporary - remaining_damage)
         remaining_damage = max(0, remaining_damage - target.hp.temporary)
         next_hp = max(0, target.hp.current - remaining_damage)
         target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=next_temporary)
-        outcome = f"deals {roll.total} damage"
+        outcome = damage_outcome(roll.total, adjusted_damage, roll.damageType, target)
     elif roll.resolution == RollResolutionMode.HEAL_SELF:
         next_hp = min(target.hp.max, target.hp.current + max(0, roll.total))
         target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=target.hp.temporary)
@@ -1034,6 +1197,33 @@ def resolve_condition_effects(roll: RollPayload, target: CharacterSheet) -> list
         elif effect.mode == ConditionApplicationMode.MANUAL and effect.condition is not None:
             outcomes.append(f"{enum_label(effect.condition)} requires manual resolution")
     return outcomes
+
+
+def damage_after_defenses(damage: int, damage_type: DamageType | None, target: CharacterSheet) -> int:
+    if damage_type is None:
+        return damage
+    if damage_type in target.damageImmunities:
+        return 0
+    adjusted = damage
+    if damage_type in target.damageResistances:
+        adjusted //= 2
+    if damage_type in target.damageVulnerabilities:
+        adjusted *= 2
+    return adjusted
+
+
+def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageType | None, target: CharacterSheet) -> str:
+    if adjusted_damage == raw_damage or damage_type is None:
+        return f"deals {adjusted_damage} damage"
+    damage_label = enum_label(damage_type)
+    if damage_type in target.damageImmunities:
+        return f"deals 0 damage after {damage_label} immunity"
+    adjustments = []
+    if damage_type in target.damageResistances:
+        adjustments.append(f"{damage_label} resistance")
+    if damage_type in target.damageVulnerabilities:
+        adjustments.append(f"{damage_label} vulnerability")
+    return f"deals {adjusted_damage} damage after {', '.join(adjustments)}"
 
 
 def saving_throw_total(target: CharacterSheet, ability: AbilityType) -> int:
@@ -1329,6 +1519,8 @@ def typed_json_to_value(node: Any, expected_type: Any = Any) -> Any:
         return {str(key): typed_json_to_value(item, expected_value_type) for key, item in raw_items.items()}
     if type_name in {"str", "int", "float", "bool"}:
         value = typed_primitive_value(type_name, node.get(VALUE_KEY))
+        if isinstance(expected_type, type) and issubclass(expected_type, Enum):
+            return enum_value(expected_type, value)
         return value if value_matches_type(value, expected_type) else None
 
     registry = typed_json_registry()
@@ -1380,6 +1572,10 @@ def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> An
     raw_fields = node.get(FIELDS_KEY)
     if not isinstance(raw_fields, dict):
         return None
+    if model_type is SpellEntry:
+        raw_fields = migrated_spell_entry_fields(raw_fields)
+    if model_type is SpellTargeting:
+        raw_fields = migrated_spell_targeting_fields(raw_fields)
 
     type_hints = get_type_hints(model_type)
     kwargs: dict[str, Any] = {}
@@ -1395,6 +1591,99 @@ def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> An
         return model_type(**kwargs)
     except (TypeError, ValueError):
         return None
+
+
+def migrated_spell_entry_fields(raw_fields: dict[str, Any]) -> dict[str, Any]:
+    migrated = dict(raw_fields)
+    if "targeting" not in migrated and "range" in migrated:
+        migrated["targeting"] = typed_json_from_value(spell_targeting_from_legacy_range(legacy_typed_string(migrated["range"])))
+    if "duration" in migrated and legacy_typed_string(migrated["duration"]) is not None:
+        migrated["duration"] = typed_json_from_value(spell_duration_from_legacy_text(legacy_typed_string(migrated["duration"])))
+    return migrated
+
+
+def migrated_spell_targeting_fields(raw_fields: dict[str, Any]) -> dict[str, Any]:
+    migrated = dict(raw_fields)
+    if "area" not in migrated:
+        migrated["area"] = typed_json_from_value(
+            spell_area_from_legacy_fields(
+                legacy_typed_enum(SpellAreaShape, migrated.get("areaShape")),
+                legacy_typed_int(migrated.get("areaSizeFeet")),
+                legacy_typed_int(migrated.get("areaWidthFeet")),
+                legacy_typed_int(migrated.get("areaHeightFeet")),
+            )
+        )
+    for field_name in ["areaShape", "areaSizeFeet", "areaWidthFeet", "areaHeightFeet"]:
+        migrated.pop(field_name, None)
+    return migrated
+
+
+def legacy_typed_string(node: Any) -> str | None:
+    if not isinstance(node, dict) or node.get(TYPE_KEY) != "str":
+        return None
+    value = node.get(VALUE_KEY)
+    return value if isinstance(value, str) else None
+
+
+def legacy_typed_int(node: Any) -> int:
+    if not isinstance(node, dict) or node.get(TYPE_KEY) != "int":
+        return 0
+    value = node.get(VALUE_KEY)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def legacy_typed_enum(enum_type: type[Enum], node: Any) -> Any:
+    if not isinstance(node, dict):
+        return None
+    return enum_value(enum_type, node.get(VALUE_KEY))
+
+
+def spell_targeting_from_legacy_range(value: str | None) -> SpellTargeting:
+    if value is None:
+        return SpellTargeting(rangeType=SpellRangeType.SELF)
+    normalized = value.strip().lower()
+    if normalized == "self":
+        return SpellTargeting(rangeType=SpellRangeType.SELF)
+    if normalized == "touch":
+        return SpellTargeting(rangeType=SpellRangeType.TOUCH)
+    distance_text = normalized.split()[0]
+    try:
+        distance = int(distance_text)
+    except ValueError:
+        distance = 0
+    return SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=distance)
+
+
+def spell_area_from_legacy_fields(shape: SpellAreaShape | None, size_feet: int, width_feet: int, height_feet: int) -> SpellArea:
+    if shape == SpellAreaShape.RADIUS:
+        return SpellRadiusArea(radiusFeet=size_feet)
+    if shape == SpellAreaShape.CONE:
+        return SpellConeArea(lengthFeet=size_feet)
+    if shape == SpellAreaShape.CUBE:
+        return SpellCubeArea(sizeFeet=size_feet)
+    if shape == SpellAreaShape.LINE:
+        return SpellLineArea(lengthFeet=size_feet, widthFeet=width_feet)
+    if shape == SpellAreaShape.CYLINDER:
+        return SpellCylinderArea(radiusFeet=size_feet, heightFeet=height_feet)
+    return SpellNoArea()
+
+
+def spell_duration_from_legacy_text(value: str | None) -> SpellDuration:
+    if value is None:
+        return SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS)
+    normalized = value.strip().lower()
+    if normalized == "instantaneous":
+        return SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS)
+    maximum = normalized.startswith("up to ")
+    parts = normalized.removeprefix("up to ").split()
+    if len(parts) < 2:
+        return SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS)
+    try:
+        amount = int(parts[0])
+    except ValueError:
+        amount = 0
+    unit = enum_value(SpellDurationUnit, parts[1])
+    return SpellDuration(unit=unit or SpellDurationUnit.INSTANTANEOUS, amount=amount, maximum=maximum)
 
 
 def typed_primitive_value(type_name: str, value: Any) -> Any:
@@ -1438,6 +1727,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             DiceType,
             ConditionType,
             ConditionApplicationMode,
+            ConditionDuration,
             ConditionEffect,
             EquipmentSlot,
             EquipmentType,
@@ -1460,9 +1750,23 @@ def typed_json_registry() -> dict[str, type[Any]]:
             RollResolutionMode,
             ResourceTracker,
             RuneType,
+            SpellAreaShape,
+            SpellCastingTime,
             SpellComponent,
+            SpellConeArea,
+            SpellCubeArea,
+            SpellCylinderArea,
+            SpellDuration,
+            SpellDurationUnit,
             SpellEntry,
+            SpellId,
+            SpellLineArea,
+            SpellNoArea,
+            SpellRadiusArea,
+            SpellRangeType,
             SpellSchool,
+            SpellSource,
+            SpellTargeting,
             SheetFeature,
             SheetAbility,
             ScoutSuperiorityActionType,
@@ -1564,12 +1868,38 @@ def computed_api_values(value: Any) -> dict[str, Any]:
     }
 
 
+def spell_target_range_label(targeting: SpellTargeting) -> str:
+    if targeting.rangeType == SpellRangeType.SELF:
+        return "Self"
+    if targeting.rangeType == SpellRangeType.TOUCH:
+        return "Touch"
+    return f"{targeting.distanceFeet} ft"
+
+
+def spell_area_label(area: SpellArea) -> str:
+    if isinstance(area, SpellNoArea):
+        return ""
+    if isinstance(area, SpellRadiusArea):
+        return f"{area.radiusFeet} ft radius"
+    if isinstance(area, SpellConeArea):
+        return f"{area.lengthFeet} ft cone"
+    if isinstance(area, SpellCubeArea):
+        return f"{area.sizeFeet} ft cube"
+    if isinstance(area, SpellLineArea):
+        return f"{area.lengthFeet} ft line x {area.widthFeet} ft"
+    if isinstance(area, SpellCylinderArea):
+        return f"{area.radiusFeet} ft radius x {area.heightFeet} ft cylinder"
+    return ""
+
+
 def enum_value(enum_type: type[Enum], value: Any) -> Any:
     if value is None:
         return None
     normalized = str(value).strip().replace("-", "_").replace(" ", "_").upper()
     for member in enum_type:
-        if normalized in {member.name, enum_key(member).upper(), enum_label(member).replace(" ", "_").upper()}:
+        member_value = member.value if isinstance(member.value, str) else None
+        normalized_member_value = member_value.replace("-", "_").replace(" ", "_").upper() if member_value is not None else None
+        if normalized in {member.name, enum_key(member).upper(), enum_label(member).replace(" ", "_").upper(), normalized_member_value}:
             return member
     return None
 
@@ -1579,6 +1909,8 @@ def enum_key(member: Enum) -> str:
 
 
 def enum_label(member: Enum) -> str:
+    if isinstance(member.value, str):
+        return member.value
     return UIStringFormatter.clean_name(member.name)
 
 

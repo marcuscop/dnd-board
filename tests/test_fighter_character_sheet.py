@@ -24,14 +24,24 @@ from dnd_board.character_sheet import (
     RollResolutionMode,
     TokenKind,
     RuneType,
+    SpellCastingTime,
     SpellComponent,
+    SpellDuration,
+    SpellDurationUnit,
     SpellEntry,
+    SpellId,
+    SpellLineArea,
+    SpellRadiusArea,
+    SpellRangeType,
     SpellSchool,
+    SpellSource,
+    SpellTargeting,
     WeaponCategory,
     WeaponProperty,
     build_attack_roll_payload,
     build_character_sheet,
     build_damage_roll_payload,
+    enum_key,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.feats import FIGHTING_STYLE_FEATS, FeatEffectType
@@ -396,6 +406,16 @@ def test_fighting_style_unarmed_adds_d6_attack_when_wielding_weapon_or_shield() 
     attack = next(attack for attack in sheet.attacks if attack.attackType == AttackActionType.UNARMED_STRIKE)
 
     assert attack.damageDiceType == DiceType.D6
+
+
+def test_fighting_style_unarmed_grapple_rider_is_targetable_damage() -> None:
+    sheet = fighter_sheet(1, fighting_style=FightingStyleType.UNARMED_FIGHTING)
+    unarmed_fighting = next(ability for ability in sheet.abilities if ability.id == "unarmedFighting")
+    action = unarmed_fighting.rollActions[0]
+
+    assert action.diceType == DiceType.D4
+    assert action.resolution == RollResolutionMode.APPLY_DAMAGE
+    assert action.damageType == DamageType.BLUDGEONING
 
 
 def test_fighting_style_mariner_applies_without_heavy_armor_or_shield() -> None:
@@ -818,10 +838,12 @@ def test_monster_hunter_tracks_superiority_and_mysticism_spells() -> None:
     assert {action.id.name for action in superiority.rollActions or []} == {"HUNTERS_DAMAGE", "HUNTERS_WILL", "HUNTERS_EYE"}
     assert resources["protectionFromEvilAndGood"].maxUses == 1
     assert resources["protectionFromEvilAndGood"].reset.name == "LONG_REST"
-    assert spells["detectMagic"].ritual is True
-    assert spells["detectMagic"].castingAbility.name == "WISDOM"
-    assert spells["protectionFromEvilAndGood"].resourceId == "protectionFromEvilAndGood"
-    assert spells["protectionFromEvilAndGood"].concentration is True
+    assert spells[SpellId.DETECT_MAGIC].ritual is True
+    assert spells[SpellId.DETECT_MAGIC].source == SpellSource.MONSTER_HUNTER
+    assert spells[SpellId.DETECT_MAGIC].castingAbility.name == "WISDOM"
+    assert spells[SpellId.DETECT_MAGIC].castingTime == SpellCastingTime.TEN_MINUTES
+    assert spells[SpellId.PROTECTION_FROM_EVIL_AND_GOOD].resourceId == "protectionFromEvilAndGood"
+    assert spells[SpellId.PROTECTION_FROM_EVIL_AND_GOOD].concentration is True
 
 
 def test_arcane_archer_exposes_arcane_shots_with_damage_types() -> None:
@@ -887,8 +909,9 @@ def test_psi_warrior_tracks_psionic_dice_scaling_and_telekinesis() -> None:
     assert resources["psionicEnergyRecovery"].reset.name == "SHORT_REST"
     assert resources["telekineticMaster"].reset.name == "LONG_REST"
     assert "guardedMind" in abilities
-    assert spells["telekineticMaster"].name == "Telekinesis"
-    assert spells["telekineticMaster"].castingAbility == AbilityType.INTELLIGENCE
+    assert spells[SpellId.TELEKINESIS].name == SpellId.TELEKINESIS
+    assert spells[SpellId.TELEKINESIS].source == SpellSource.PSI_WARRIOR
+    assert spells[SpellId.TELEKINESIS].castingAbility == AbilityType.INTELLIGENCE
 
 
 def test_eldritch_knight_tracks_spell_slots_and_known_counts() -> None:
@@ -921,30 +944,63 @@ def test_eldritch_knight_spell_progression_exposes_curated_spell_choices() -> No
     assert "shatter" not in option_values
 
 
+def test_eldritch_knight_spell_progression_limits_flexible_school_choices() -> None:
+    from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_spell_options
+
+    level_3_options = {enum_key(spell.id) for spell in eldritch_knight_spell_options(3)}
+    level_3_after_flexible = {enum_key(spell.id) for spell in eldritch_knight_spell_options(3, ["findFamiliar"])}
+    level_8_after_flexible = {enum_key(spell.id) for spell in eldritch_knight_spell_options(8, ["findFamiliar"])}
+
+    assert "findFamiliar" in level_3_options
+    assert "sleep" in level_3_options
+    assert "shield" in level_3_after_flexible
+    assert "sleep" not in level_3_after_flexible
+    assert "sleep" in level_8_after_flexible
+
+
 def test_eldritch_knight_uses_configured_spells_with_intelligence() -> None:
     sheet = fighter_sheet(
         7,
         subclass=FighterSubclassType.ELDRITCH_KNIGHT,
         spells=[
             SpellEntry(
-                id="shield",
-                name="Shield",
-                source="Wizard",
+                id=SpellId.SHIELD,
+                name=SpellId.SHIELD,
+                source=SpellSource.WIZARD,
                 level=1,
                 school=SpellSchool.ABJURATION,
                 castingAbility=AbilityType.WISDOM,
-                castingTime="1 reaction",
-                range="Self",
-                duration="1 round",
+                castingTime=SpellCastingTime.REACTION,
+                targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
+                duration=SpellDuration(unit=SpellDurationUnit.ROUND, amount=1),
                 components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
                 description="Raise AC until the start of your next turn.",
             )
         ],
     )
 
-    assert sheet.spells[0].name == "Shield"
+    assert sheet.spells[0].name == SpellId.SHIELD
     assert sheet.spells[0].castingAbility == AbilityType.INTELLIGENCE
-    assert sheet.spells[0].source == "Wizard"
+    assert sheet.spells[0].source == SpellSource.WIZARD
+
+
+def test_spell_targeting_models_range_and_area_geometry() -> None:
+    from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell
+
+    fireball = eldritch_knight_catalog_spell("fireball")
+    lightning_bolt = eldritch_knight_catalog_spell("lightningBolt")
+
+    assert fireball.targeting.rangeType == SpellRangeType.DISTANCE
+    assert fireball.targeting.distanceFeet == 150
+    assert isinstance(fireball.targeting.area, SpellRadiusArea)
+    assert fireball.targeting.area.radiusFeet == 20
+    assert fireball.targeting.area.diameterFeet == 40
+    assert fireball.targeting.summary == "150 ft, 20 ft radius"
+    assert fireball.duration.unit == SpellDurationUnit.INSTANTANEOUS
+    assert lightning_bolt.targeting.rangeType == SpellRangeType.SELF
+    assert isinstance(lightning_bolt.targeting.area, SpellLineArea)
+    assert lightning_bolt.targeting.area.lengthFeet == 100
+    assert lightning_bolt.targeting.area.widthFeet == 5
 
 
 def test_fighter_level_progression_exposes_hit_point_and_asi_choices() -> None:

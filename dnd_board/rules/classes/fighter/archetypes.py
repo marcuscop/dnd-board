@@ -19,13 +19,26 @@ from dnd_board.character_sheet import (
     RuneType,
     SheetAbility,
     SheetFeature,
+    SpellCastingTime,
+    SpellConeArea,
     SpellComponent,
+    SpellCubeArea,
+    SpellCylinderArea,
+    SpellDuration,
+    SpellDurationUnit,
     SpellEntry,
+    SpellId,
+    SpellLineArea,
+    SpellRadiusArea,
+    SpellRangeType,
+    SpellTargeting,
     SpellSchool,
+    SpellSource,
     TimeEconomy,
     ability_modifier,
     enum_key,
     enum_label,
+    enum_value,
     proficiency_bonus_for_level,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
@@ -243,318 +256,345 @@ ELDRITCH_KNIGHT_SPELLCASTING: dict[int, EldritchKnightSpellcastingProgression] =
 }
 
 
-ELDRITCH_KNIGHT_SPELL_CATALOG: dict[str, SpellEntry] = {
-    "boomingBlade": SpellEntry(
-        id="boomingBlade",
-        name="Booming Blade",
-        source="Wizard",
+ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
+    SpellId.BOOMING_BLADE: SpellEntry(
+        id=SpellId.BOOMING_BLADE,
+        name=SpellId.BOOMING_BLADE,
+        source=SpellSource.WIZARD,
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Self",
-        duration="1 round",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
+        duration=SpellDuration(unit=SpellDurationUnit.ROUND, amount=1),
         components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         description="Make a melee weapon attack; on a hit, the target takes the weapon's normal effects and is sheathed in booming energy.",
     ),
-    "fireBolt": SpellEntry(
-        id="fireBolt",
-        name="Fire Bolt",
-        source="Wizard",
+    SpellId.FIRE_BOLT: SpellEntry(
+        id=SpellId.FIRE_BOLT,
+        name=SpellId.FIRE_BOLT,
+        source=SpellSource.WIZARD,
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="120 feet",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=120),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Make a ranged spell attack that deals fire damage on a hit.",
     ),
-    "greenFlameBlade": SpellEntry(
-        id="greenFlameBlade",
-        name="Green-Flame Blade",
-        source="Wizard",
+    SpellId.GREEN_FLAME_BLADE: SpellEntry(
+        id=SpellId.GREEN_FLAME_BLADE,
+        name=SpellId.GREEN_FLAME_BLADE,
+        source=SpellSource.WIZARD,
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Self",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         description="Make a melee weapon attack; green fire can leap from the target to another nearby creature.",
     ),
-    "light": SpellEntry(
-        id="light",
-        name="Light",
-        source="Wizard",
+    SpellId.LIGHT: SpellEntry(
+        id=SpellId.LIGHT,
+        name=SpellId.LIGHT,
+        source=SpellSource.WIZARD,
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Touch",
-        duration="1 hour",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.TOUCH),
+        duration=SpellDuration(unit=SpellDurationUnit.HOUR, amount=1),
         components=[SpellComponent.VERBAL, SpellComponent.MATERIAL],
         description="Make one touched object shed bright and dim light.",
     ),
-    "mageHand": SpellEntry(
-        id="mageHand",
-        name="Mage Hand",
-        source="Wizard",
+    SpellId.MAGE_HAND: SpellEntry(
+        id=SpellId.MAGE_HAND,
+        name=SpellId.MAGE_HAND,
+        source=SpellSource.WIZARD,
         level=0,
         school=SpellSchool.CONJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="30 feet",
-        duration="1 minute",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=30),
+        duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=1),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Create a spectral hand that can manipulate objects.",
     ),
-    "minorIllusion": SpellEntry(
-        id="minorIllusion",
-        name="Minor Illusion",
-        source="Wizard",
+    SpellId.MINOR_ILLUSION: SpellEntry(
+        id=SpellId.MINOR_ILLUSION,
+        name=SpellId.MINOR_ILLUSION,
+        source=SpellSource.WIZARD,
         level=0,
         school=SpellSchool.ILLUSION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="30 feet",
-        duration="1 minute",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=30),
+        duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=1),
         components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         description="Create a sound or image illusion.",
     ),
-    "prestidigitation": SpellEntry(
-        id="prestidigitation",
-        name="Prestidigitation",
-        source="Wizard",
+    SpellId.PRESTIDIGITATION: SpellEntry(
+        id=SpellId.PRESTIDIGITATION,
+        name=SpellId.PRESTIDIGITATION,
+        source=SpellSource.WIZARD,
         level=0,
         school=SpellSchool.TRANSMUTATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="10 feet",
-        duration="Up to 1 hour",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=10),
+        duration=SpellDuration(unit=SpellDurationUnit.HOUR, amount=1, maximum=True),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Perform a minor magical trick.",
     ),
-    "rayOfFrost": SpellEntry(
-        id="rayOfFrost",
-        name="Ray of Frost",
-        source="Wizard",
+    SpellId.RAY_OF_FROST: SpellEntry(
+        id=SpellId.RAY_OF_FROST,
+        name=SpellId.RAY_OF_FROST,
+        source=SpellSource.WIZARD,
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="60 feet",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=60),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Make a ranged spell attack that deals cold damage and slows the target.",
     ),
-    "shockingGrasp": SpellEntry(
-        id="shockingGrasp",
-        name="Shocking Grasp",
-        source="Wizard",
+    SpellId.SHOCKING_GRASP: SpellEntry(
+        id=SpellId.SHOCKING_GRASP,
+        name=SpellId.SHOCKING_GRASP,
+        source=SpellSource.WIZARD,
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Touch",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.TOUCH),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Make a melee spell attack that deals lightning damage and can prevent reactions.",
     ),
-    "absorbElements": SpellEntry(
-        id="absorbElements",
-        name="Absorb Elements",
-        source="Wizard",
+    SpellId.ABSORB_ELEMENTS: SpellEntry(
+        id=SpellId.ABSORB_ELEMENTS,
+        name=SpellId.ABSORB_ELEMENTS,
+        source=SpellSource.WIZARD,
         level=1,
         school=SpellSchool.ABJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 reaction",
-        range="Self",
-        duration="1 round",
+        castingTime=SpellCastingTime.REACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
+        duration=SpellDuration(unit=SpellDurationUnit.ROUND, amount=1),
         components=[SpellComponent.SOMATIC],
         description="Gain resistance to incoming acid, cold, fire, lightning, or thunder damage and empower your next melee attack.",
     ),
-    "burningHands": SpellEntry(
-        id="burningHands",
-        name="Burning Hands",
-        source="Wizard",
+    SpellId.BURNING_HANDS: SpellEntry(
+        id=SpellId.BURNING_HANDS,
+        name=SpellId.BURNING_HANDS,
+        source=SpellSource.WIZARD,
         level=1,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Self",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellConeArea(lengthFeet=15)),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Creatures in a 15-foot cone make a Dexterity save or take fire damage.",
     ),
-    "chromaticOrb": SpellEntry(
-        id="chromaticOrb",
-        name="Chromatic Orb",
-        source="Wizard",
+    SpellId.CHROMATIC_ORB: SpellEntry(
+        id=SpellId.CHROMATIC_ORB,
+        name=SpellId.CHROMATIC_ORB,
+        source=SpellSource.WIZARD,
         level=1,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="90 feet",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=90),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         description="Make a ranged spell attack that deals a chosen elemental damage type.",
     ),
-    "magicMissile": SpellEntry(
-        id="magicMissile",
-        name="Magic Missile",
-        source="Wizard",
+    SpellId.FIND_FAMILIAR: SpellEntry(
+        id=SpellId.FIND_FAMILIAR,
+        name=SpellId.FIND_FAMILIAR,
+        source=SpellSource.WIZARD,
+        level=1,
+        school=SpellSchool.CONJURATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime=SpellCastingTime.HOUR,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=10),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        ritual=True,
+        description="Gain the service of a familiar spirit in an animal form.",
+    ),
+    SpellId.MAGIC_MISSILE: SpellEntry(
+        id=SpellId.MAGIC_MISSILE,
+        name=SpellId.MAGIC_MISSILE,
+        source=SpellSource.WIZARD,
         level=1,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="120 feet",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=120),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Create darts of magical force that hit automatically.",
     ),
-    "protectionFromEvilAndGood": SpellEntry(
-        id="protectionFromEvilAndGood",
-        name="Protection from Evil and Good",
-        source="Wizard",
+    SpellId.PROTECTION_FROM_EVIL_AND_GOOD: SpellEntry(
+        id=SpellId.PROTECTION_FROM_EVIL_AND_GOOD,
+        name=SpellId.PROTECTION_FROM_EVIL_AND_GOOD,
+        source=SpellSource.WIZARD,
         level=1,
         school=SpellSchool.ABJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Touch",
-        duration="Up to 10 minutes",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.TOUCH),
+        duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         concentration=True,
         description="Protect a willing creature against several supernatural creature types.",
     ),
-    "shield": SpellEntry(
-        id="shield",
-        name="Shield",
-        source="Wizard",
+    SpellId.SHIELD: SpellEntry(
+        id=SpellId.SHIELD,
+        name=SpellId.SHIELD,
+        source=SpellSource.WIZARD,
         level=1,
         school=SpellSchool.ABJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 reaction",
-        range="Self",
-        duration="1 round",
+        castingTime=SpellCastingTime.REACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
+        duration=SpellDuration(unit=SpellDurationUnit.ROUND, amount=1),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Gain +5 AC until the start of your next turn, including against the triggering attack.",
     ),
-    "thunderwave": SpellEntry(
-        id="thunderwave",
-        name="Thunderwave",
-        source="Wizard",
+    SpellId.SLEEP: SpellEntry(
+        id=SpellId.SLEEP,
+        name=SpellId.SLEEP,
+        source=SpellSource.WIZARD,
+        level=1,
+        school=SpellSchool.ENCHANTMENT,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=90, area=SpellRadiusArea(radiusFeet=20)),
+        duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=1),
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Magically send creatures into slumber, starting with the lowest current hit points.",
+    ),
+    SpellId.THUNDERWAVE: SpellEntry(
+        id=SpellId.THUNDERWAVE,
+        name=SpellId.THUNDERWAVE,
+        source=SpellSource.WIZARD,
         level=1,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Self",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellCubeArea(sizeFeet=15)),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Creatures in a 15-foot cube make a Constitution save or take thunder damage and are pushed.",
     ),
-    "wardingWind": SpellEntry(
-        id="wardingWind",
-        name="Warding Wind",
-        source="Wizard",
+    SpellId.WARDING_WIND: SpellEntry(
+        id=SpellId.WARDING_WIND,
+        name=SpellId.WARDING_WIND,
+        source=SpellSource.WIZARD,
         level=2,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Self",
-        duration="Up to 10 minutes",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellRadiusArea(radiusFeet=10)),
+        duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
         components=[SpellComponent.VERBAL],
         concentration=True,
         description="A strong wind surrounds you, deafening the area and hindering ranged attacks and movement.",
     ),
-    "scorchingRay": SpellEntry(
-        id="scorchingRay",
-        name="Scorching Ray",
-        source="Wizard",
+    SpellId.SCORCHING_RAY: SpellEntry(
+        id=SpellId.SCORCHING_RAY,
+        name=SpellId.SCORCHING_RAY,
+        source=SpellSource.WIZARD,
         level=2,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="120 feet",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=120),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
         description="Make three ranged spell attacks that deal fire damage.",
     ),
-    "shatter": SpellEntry(
-        id="shatter",
-        name="Shatter",
-        source="Wizard",
+    SpellId.SHATTER: SpellEntry(
+        id=SpellId.SHATTER,
+        name=SpellId.SHATTER,
+        source=SpellSource.WIZARD,
         level=2,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="60 feet",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=60, area=SpellRadiusArea(radiusFeet=10)),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         description="Creatures in a 10-foot-radius sphere make a Constitution save or take thunder damage.",
     ),
-    "counterspell": SpellEntry(
-        id="counterspell",
-        name="Counterspell",
-        source="Wizard",
+    SpellId.COUNTERSPELL: SpellEntry(
+        id=SpellId.COUNTERSPELL,
+        name=SpellId.COUNTERSPELL,
+        source=SpellSource.WIZARD,
         level=3,
         school=SpellSchool.ABJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 reaction",
-        range="60 feet",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.REACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=60),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.SOMATIC],
         description="Interrupt a creature casting a spell.",
     ),
-    "fireball": SpellEntry(
-        id="fireball",
-        name="Fireball",
-        source="Wizard",
+    SpellId.FIREBALL: SpellEntry(
+        id=SpellId.FIREBALL,
+        name=SpellId.FIREBALL,
+        source=SpellSource.WIZARD,
         level=3,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="150 feet",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=150, area=SpellRadiusArea(radiusFeet=20)),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         description="Creatures in a 20-foot-radius sphere make a Dexterity save or take fire damage.",
     ),
-    "lightningBolt": SpellEntry(
-        id="lightningBolt",
-        name="Lightning Bolt",
-        source="Wizard",
+    SpellId.LIGHTNING_BOLT: SpellEntry(
+        id=SpellId.LIGHTNING_BOLT,
+        name=SpellId.LIGHTNING_BOLT,
+        source=SpellSource.WIZARD,
         level=3,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Self",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellLineArea(lengthFeet=100, widthFeet=5)),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         description="Creatures in a 100-foot line make a Dexterity save or take lightning damage.",
     ),
-    "fireShield": SpellEntry(
-        id="fireShield",
-        name="Fire Shield",
-        source="Wizard",
+    SpellId.FIRE_SHIELD: SpellEntry(
+        id=SpellId.FIRE_SHIELD,
+        name=SpellId.FIRE_SHIELD,
+        source=SpellSource.WIZARD,
         level=4,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="Self",
-        duration="10 minutes",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
+        duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         description="Gain resistance and damage attackers with flame or chill energy.",
     ),
-    "iceStorm": SpellEntry(
-        id="iceStorm",
-        name="Ice Storm",
-        source="Wizard",
+    SpellId.ICE_STORM: SpellEntry(
+        id=SpellId.ICE_STORM,
+        name=SpellId.ICE_STORM,
+        source=SpellSource.WIZARD,
         level=4,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime="1 action",
-        range="300 feet",
-        duration="Instantaneous",
+        castingTime=SpellCastingTime.ACTION,
+        targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=300, area=SpellCylinderArea(radiusFeet=20, heightFeet=40)),
+        duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
         description="Creatures in a cylinder make a Dexterity save or take bludgeoning and cold damage.",
     ),
@@ -1639,55 +1679,56 @@ def fighter_subclass_spells(classes) -> list[SpellEntry]:
     character_class = fighter_subclass_class(classes)
     if character_class is None:
         return []
-    source = enum_label(FighterSubclassType.MONSTER_HUNTER)
     if character_class.subclass == FighterSubclassType.MONSTER_HUNTER and character_class.level >= 3:
         return [
             SpellEntry(
-                id="detectMagic",
-                name="Detect Magic",
-                source=source,
+                id=SpellId.DETECT_MAGIC,
+                name=SpellId.DETECT_MAGIC,
+                source=SpellSource.MONSTER_HUNTER,
                 level=1,
                 school=SpellSchool.DIVINATION,
                 castingAbility=AbilityType.WISDOM,
-                castingTime="10 minutes",
-                range="Self",
-                duration="Up to 10 minutes",
+                castingTime=SpellCastingTime.TEN_MINUTES,
+                targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellRadiusArea(radiusFeet=30)),
+                duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
                 components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
                 ritual=True,
                 concentration=True,
                 description="For the duration, sense magic within 30 feet and use an Action to see a faint aura around visible magical creatures or objects.",
             ),
             SpellEntry(
-                id=enum_key(FighterSubclassResourceType.PROTECTION_FROM_EVIL_AND_GOOD),
-                name="Protection from Evil and Good",
-                source=source,
+                id=SpellId.PROTECTION_FROM_EVIL_AND_GOOD,
+                name=SpellId.PROTECTION_FROM_EVIL_AND_GOOD,
+                source=SpellSource.MONSTER_HUNTER,
                 level=1,
                 school=SpellSchool.ABJURATION,
                 castingAbility=AbilityType.WISDOM,
-                castingTime="1 action",
-                range="Touch",
-                duration="Up to 10 minutes",
+                castingTime=SpellCastingTime.ACTION,
+                targeting=SpellTargeting(rangeType=SpellRangeType.TOUCH),
+                duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
                 components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
                 concentration=True,
                 resourceId=enum_key(FighterSubclassResourceType.PROTECTION_FROM_EVIL_AND_GOOD),
+                reset=RestType.LONG_REST,
                 description="One willing creature is protected against aberrations, celestials, elementals, fey, fiends, and undead.",
             ),
         ]
     if character_class.subclass == FighterSubclassType.PSI_WARRIOR and character_class.level >= 18:
         return [
             SpellEntry(
-                id=enum_key(FighterSubclassResourceType.TELEKINETIC_MASTER),
-                name="Telekinesis",
-                source=enum_label(FighterSubclassType.PSI_WARRIOR),
+                id=SpellId.TELEKINESIS,
+                name=SpellId.TELEKINESIS,
+                source=SpellSource.PSI_WARRIOR,
                 level=5,
                 school=SpellSchool.TRANSMUTATION,
                 castingAbility=AbilityType.INTELLIGENCE,
-                castingTime="1 action",
-                range="60 feet",
-                duration="Up to 10 minutes",
+                castingTime=SpellCastingTime.ACTION,
+                targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=60),
+                duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
                 components=[],
                 concentration=True,
                 resourceId=enum_key(FighterSubclassResourceType.TELEKINETIC_MASTER),
+                reset=RestType.LONG_REST,
                 description="Move or manipulate creatures and objects with sustained telekinetic force. While concentrating, make one weapon attack as a Bonus Action on each of your turns.",
             )
         ]
@@ -1708,33 +1749,48 @@ def normalized_eldritch_knight_spell(spell: SpellEntry) -> SpellEntry:
     return SpellEntry(
         id=spell.id,
         name=spell.name,
-        source=spell.source or enum_label(FighterSubclassType.ELDRITCH_KNIGHT),
+        source=spell.source or SpellSource.ELDRITCH_KNIGHT,
         level=spell.level,
         school=spell.school,
         castingAbility=AbilityType.INTELLIGENCE,
         castingTime=spell.castingTime,
-        range=spell.range,
+        targeting=spell.targeting,
         duration=spell.duration,
         components=list(spell.components),
         description=spell.description,
         concentration=spell.concentration,
         ritual=spell.ritual,
         resourceId=spell.resourceId,
+        reset=spell.reset,
     )
 
 
 def eldritch_knight_spell_options(fighter_level_value: int, selected_spell_ids: list[str] | None = None) -> list[SpellEntry]:
     selected = set(selected_spell_ids or [])
     max_spell_level = eldritch_knight_max_spell_level(fighter_level_value)
+    flexible_slots_used = eldritch_knight_flexible_spell_count([
+        spell
+        for spell_id in selected
+        if (spell_key := enum_value(SpellId, spell_id)) is not None
+        if (spell := ELDRITCH_KNIGHT_SPELL_CATALOG.get(spell_key)) is not None
+    ])
+    flexible_slots_available = eldritch_knight_flexible_spell_limit(fighter_level_value)
     return [
         normalized_eldritch_knight_spell(spell)
         for spell in ELDRITCH_KNIGHT_SPELL_CATALOG.values()
-        if spell.id not in selected and (spell.level == 0 or spell.level <= max_spell_level)
+        if (spell.level == 0 or spell.level <= max_spell_level)
+        and (
+            enum_key(spell.id) in selected
+            or spell.level == 0
+            or is_eldritch_knight_school_spell(spell)
+            or flexible_slots_used < flexible_slots_available
+        )
     ]
 
 
-def eldritch_knight_catalog_spell(spell_id: str) -> SpellEntry | None:
-    spell = ELDRITCH_KNIGHT_SPELL_CATALOG.get(spell_id)
+def eldritch_knight_catalog_spell(spell_id: str | SpellId) -> SpellEntry | None:
+    spell_key = spell_id if isinstance(spell_id, SpellId) else enum_value(SpellId, spell_id)
+    spell = ELDRITCH_KNIGHT_SPELL_CATALOG.get(spell_key)
     return normalized_eldritch_knight_spell(spell) if spell is not None else None
 
 
@@ -1749,6 +1805,60 @@ def eldritch_knight_max_spell_level(fighter_level_value: int) -> int:
     if progression.first_level_slots:
         return 1
     return 0
+
+
+def eldritch_knight_flexible_spell_limit(fighter_level_value: int) -> int:
+    if fighter_level_value < 3:
+        return 0
+    return 1 + sum(1 for level in (8, 14, 20) if fighter_level_value >= level)
+
+
+def eldritch_knight_flexible_spell_count(spells: list[SpellEntry]) -> int:
+    return sum(1 for spell in spells if spell.level > 0 and not is_eldritch_knight_school_spell(spell))
+
+
+def is_eldritch_knight_spell_selection_valid(fighter_level_value: int, spells: list[SpellEntry]) -> bool:
+    if fighter_level_value < 3:
+        return not spells
+    progression = eldritch_knight_spellcasting(fighter_level_value)
+    max_spell_level = eldritch_knight_max_spell_level(fighter_level_value)
+    cantrips = [spell for spell in spells if spell.level == 0]
+    leveled_spells = [spell for spell in spells if spell.level > 0]
+    return (
+        len(cantrips) == progression.cantrips_known
+        and len(leveled_spells) == progression.spells_known
+        and all(spell.level <= max_spell_level for spell in leveled_spells)
+        and eldritch_knight_flexible_spell_count(leveled_spells) <= eldritch_knight_flexible_spell_limit(fighter_level_value)
+    )
+
+
+def pruned_eldritch_knight_spells(fighter_level_value: int, spells: list[SpellEntry]) -> list[SpellEntry]:
+    if fighter_level_value < 3:
+        return []
+    progression = eldritch_knight_spellcasting(fighter_level_value)
+    max_spell_level = eldritch_knight_max_spell_level(fighter_level_value)
+    flexible_limit = eldritch_knight_flexible_spell_limit(fighter_level_value)
+    cantrips: list[SpellEntry] = []
+    leveled_spells: list[SpellEntry] = []
+    flexible_count = 0
+    for spell in spells:
+        if spell.level == 0:
+            if len(cantrips) < progression.cantrips_known:
+                cantrips.append(spell)
+            continue
+        if spell.level > max_spell_level or len(leveled_spells) >= progression.spells_known:
+            continue
+        if is_eldritch_knight_school_spell(spell):
+            leveled_spells.append(spell)
+            continue
+        if flexible_count < flexible_limit:
+            leveled_spells.append(spell)
+            flexible_count += 1
+    return [*cantrips, *leveled_spells]
+
+
+def is_eldritch_knight_school_spell(spell: SpellEntry) -> bool:
+    return spell.school in {SpellSchool.ABJURATION, SpellSchool.EVOCATION}
 
 
 def resource_ability(

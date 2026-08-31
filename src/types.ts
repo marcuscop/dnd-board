@@ -96,6 +96,7 @@ export type ConditionType =
   | "stunned"
   | "unconscious";
 export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
+export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
 export type ConditionEffect = {
   condition?: ConditionType;
   conditionLabel?: string;
@@ -110,6 +111,8 @@ export type ConditionEffect = {
   sourceCheckLabel?: string;
   contestChecks?: AbilityType[];
   contestChecksLabel?: string[];
+  duration: ConditionDuration;
+  durationLabel: string;
   description: string;
 };
 export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
@@ -129,6 +132,7 @@ export type DamageType =
   | "thunder";
 export type DiceType = "d4" | "d6" | "d8" | "d10" | "d12" | "d20";
 export type TimeEconomy = "action" | "bonusAction" | "reaction" | "movement" | "passive" | "special";
+export type RestType = "none" | "shortRest" | "longRest";
 export type ProficiencyLevel = "none" | "proficient" | "expertise";
 export type WeaponProperty = "ammunition" | "finesse" | "heavy" | "light" | "thrown" | "twoHanded" | "versatile";
 export type AttackRangeType = "melee" | "ranged";
@@ -141,6 +145,58 @@ export type EquipmentType = "armor" | "gear" | "shield" | "weapon";
 export type ArmorCategory = "light" | "medium" | "heavy";
 export type SpellSchool = "abjuration" | "conjuration" | "divination" | "enchantment" | "evocation" | "illusion" | "necromancy" | "transmutation";
 export type SpellComponent = "verbal" | "somatic" | "material";
+export type SpellCastingTime = "action" | "reaction" | "hour" | "tenMinutes";
+export type SpellRangeType = "self" | "touch" | "distance";
+export type SpellAreaShape = "none" | "radius" | "cone" | "cube" | "line" | "cylinder";
+export type SpellDurationUnit = "instantaneous" | "round" | "minute" | "hour";
+export type SpellNoArea = {
+  shape: "none";
+  shapeLabel: string;
+};
+export type SpellRadiusArea = {
+  radiusFeet: number;
+  shape: "radius";
+  shapeLabel: string;
+  diameterFeet: number;
+};
+export type SpellConeArea = {
+  lengthFeet: number;
+  shape: "cone";
+  shapeLabel: string;
+};
+export type SpellCubeArea = {
+  sizeFeet: number;
+  shape: "cube";
+  shapeLabel: string;
+};
+export type SpellLineArea = {
+  lengthFeet: number;
+  widthFeet: number;
+  shape: "line";
+  shapeLabel: string;
+};
+export type SpellCylinderArea = {
+  radiusFeet: number;
+  heightFeet: number;
+  shape: "cylinder";
+  shapeLabel: string;
+  diameterFeet: number;
+};
+export type SpellArea = SpellNoArea | SpellRadiusArea | SpellConeArea | SpellCubeArea | SpellLineArea | SpellCylinderArea;
+export type SpellTargeting = {
+  rangeType: SpellRangeType;
+  rangeTypeLabel: string;
+  distanceFeet: number;
+  area: SpellArea;
+  summary: string;
+};
+export type SpellDuration = {
+  unit: SpellDurationUnit;
+  unitLabel: string;
+  amount: number;
+  maximum: boolean;
+  summary: string;
+};
 
 export type AttackAction = {
   id: string;
@@ -282,7 +338,7 @@ export type CharacterSheet = {
     name: string;
     currentUses: number;
     maxUses: number;
-    reset: string;
+    reset: RestType;
     resetLabel: string;
     activation: TimeEconomy;
     activationLabel: string;
@@ -303,24 +359,35 @@ export type CharacterSheet = {
   spells: {
     id: string;
     name: string;
+    nameLabel: string;
     source: string;
+    sourceLabel: string;
     level: number;
     school: SpellSchool;
     schoolLabel: string;
     castingAbility: AbilityType;
     castingAbilityLabel: string;
-    castingTime: string;
-    range: string;
-    duration: string;
+    castingTime: SpellCastingTime;
+    castingTimeLabel: string;
+    targeting: SpellTargeting;
+    duration: SpellDuration;
     components: SpellComponent[];
     componentsLabel: string[];
     description: string;
     concentration: boolean;
     ritual: boolean;
     resourceId?: string;
+    reset: RestType;
+    resetLabel: string;
   }[];
   proficiencies: string[];
   conditions: ConditionType[];
+  damageResistances: DamageType[];
+  damageResistancesLabel: string[];
+  damageVulnerabilities: DamageType[];
+  damageVulnerabilitiesLabel: string[];
+  damageImmunities: DamageType[];
+  damageImmunitiesLabel: string[];
   attacks: AttackAction[];
   equipment: {
     id: string;

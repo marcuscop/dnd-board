@@ -91,6 +91,38 @@ test("DM can rest all character sheets from the sheet overview", async ({ page }
   await expect(page.getByRole("heading", { name: "Abilities" }).locator("..").locator(".stepper").first().locator("strong")).toHaveText(`${maxUses}/${maxUses}`);
 });
 
+test("sheet roll cards distinguish draggable target rolls and can be cleared", async ({ page }) => {
+  await page.goto("/test-campaign/player=dm/sheet");
+  await page.getByRole("button", { name: "Open Marina" }).click();
+
+  await page.getByRole("button", { name: "Roll Check" }).first().click();
+  const checkRoll = page.locator(".roll-card", { hasText: "Strength Check" }).first();
+  await expect(checkRoll).toBeVisible();
+  await expect(checkRoll).not.toHaveClass(/draggable/);
+
+  await page.getByRole("button", { name: "Attack Roll" }).first().click();
+  const attackRoll = page.locator(".roll-card", { hasText: "Attack Roll" }).first();
+  await expect(attackRoll).toBeVisible();
+  await expect(attackRoll).toHaveClass(/draggable/);
+
+  await page.getByRole("button", { name: "Clear Rolls" }).click();
+  await expect(page.locator(".roll-card")).toHaveCount(0);
+});
+
+test("self healing rolls stay visible as resolved sheet rolls", async ({ page }) => {
+  await page.goto("/test-campaign/player=dm/sheet");
+  await page.getByRole("button", { name: "Open Marina" }).click();
+
+  const secondWindRow = page.locator(".resource-row", { hasText: "Second Wind" });
+  await secondWindRow.getByRole("button", { name: "Roll" }).click();
+  const secondWindRoll = secondWindRow.locator(".roll-card", { hasText: "Second Wind" });
+  await expect(secondWindRoll).toBeVisible();
+  await expect(secondWindRoll).not.toHaveClass(/draggable/);
+
+  await page.getByRole("button", { name: "Clear Rolls" }).click();
+  await expect(page.locator(".roll-card", { hasText: "Second Wind" })).toHaveCount(0);
+});
+
 test("sheet view shows Monster Hunter spells and restores long-rest spell uses", async ({ page }) => {
   await page.goto("/spell-test-campaign/player=dm/sheet");
 

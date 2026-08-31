@@ -158,10 +158,10 @@ def progression_choices(
             description="Choose known Eldritch Knight cantrips and wizard spells from the curated starter catalog.",
             minimum=spell_count,
             maximum=spell_count,
-            selected=[spell.id for spell in spells],
+            selected=[enum_key(spell.id) for spell in spells],
             options=[
-                ProgressionChoiceOption(value=spell.id, label=spell_option_label(spell))
-                for spell in eldritch_knight_spell_options(fighter.level, [spell.id for spell in spells])
+                ProgressionChoiceOption(value=enum_key(spell.id), label=spell_option_label(spell))
+                for spell in eldritch_knight_spell_options(fighter.level, [enum_key(spell.id) for spell in spells])
             ],
         ))
 
@@ -296,7 +296,7 @@ def fighter_configured_spell_count(fighter: CharacterClassLevel) -> int:
 
 def spell_option_label(spell: SpellEntry) -> str:
     level_label = "Cantrip" if spell.level == 0 else f"Level {spell.level}"
-    return f"{level_label}: {spell.name}"
+    return f"{level_label}: {enum_label(spell.name)}"
 
 
 def has_fighting_style(fighter: CharacterClassLevel, style: FightingStyleType) -> bool:
