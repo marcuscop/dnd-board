@@ -393,6 +393,8 @@ class FightingStyleType(Enum):
     GREAT_WEAPON_FIGHTING = auto()
     INTERCEPTION = auto()
     MARINER = auto()
+    PACK_FIGHTING = auto()
+    PRONE_FIGHTING = auto()
     PROTECTION = auto()
     SUPERIOR_TECHNIQUE = auto()
     THROWN_WEAPON_FIGHTING = auto()
@@ -968,8 +970,8 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
     sides = action.damageDiceType.value
     dice = [random.randint(1, sides) for _ in range(count)]
     if uses_great_weapon_fighting(sheet.classes, action):
-        dice = [random.randint(1, sides) if roll <= 2 else roll for roll in dice]
-        modifier_breakdown.append(RollModifierBreakdown(source="Great Weapon Fighting", value=0, description="Rerolled weapon damage dice of 1 or 2."))
+        dice = [max(3, roll) for roll in dice]
+        modifier_breakdown.append(RollModifierBreakdown(source="Great Weapon Fighting", value=0, description="Treated weapon damage dice of 1 or 2 as 3."))
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",

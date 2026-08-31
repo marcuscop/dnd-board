@@ -46,7 +46,7 @@ from dnd_board.character_sheet import (
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.feats import FIGHTING_STYLE_FEATS, FeatEffectType
 from dnd_board.rules.classes.fighter.archetypes import FighterSubclassRollActionType
-from dnd_board.rules.classes.fighter.battle_master import BATTLE_MASTER_MANEUVERS
+from dnd_board.rules.classes.fighter.battle_master import BATTLE_MASTER_2024_MANEUVERS, BATTLE_MASTER_MANEUVERS
 
 
 def test_fighter_progression_resources_level_1_to_20() -> None:
@@ -368,9 +368,8 @@ def test_fighting_style_dueling_does_not_apply_when_off_hand_weapon_is_occupied(
     assert [(part.source, part.value) for part in roll.modifierBreakdown] == [("Strength", 3)]
 
 
-def test_fighting_style_great_weapon_fighting_rerolls_low_damage_dice(monkeypatch) -> None:
-    rolls = iter([1, 6])
-    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(rolls))
+def test_fighting_style_great_weapon_fighting_treats_low_damage_dice_as_three(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 1)
     sheet = fighter_sheet_with_attacks(
         FightingStyleType.GREAT_WEAPON_FIGHTING,
         [
@@ -388,8 +387,8 @@ def test_fighting_style_great_weapon_fighting_rerolls_low_damage_dice(monkeypatc
 
     roll = build_damage_roll_payload(sheet, "player-1", sheet.attacks[0])
 
-    assert roll.dice == [6]
-    assert roll.total == 9
+    assert roll.dice == [3]
+    assert roll.total == 6
     assert any(part.source == "Great Weapon Fighting" for part in roll.modifierBreakdown)
 
 
@@ -507,13 +506,12 @@ def test_fighting_style_superior_technique_adds_short_rest_superiority_die() -> 
     assert resource.currentUses == 1
     assert resource.maxUses == 1
     assert resource.reset.name == "SHORT_REST"
-    assert len(resource.rollActions or []) == len(BATTLE_MASTER_MANEUVERS)
+    assert len(resource.rollActions or []) == len(BATTLE_MASTER_2024_MANEUVERS)
     assert all(action.diceType == DiceType.D6 for action in resource.rollActions or [])
     assert all(action.consumesResource.name == "SUPERIORITY_DICE" for action in resource.rollActions or [])
     assert {"ambush", "tripAttack"} <= abilities.keys()
     assert abilities["ambush"].resourceId == "superiorityDice"
     assert abilities["ambush"].source == "Battle Master"
-    assert abilities["brace"].activation.name == "REACTION"
     assert abilities["rally"].activation.name == "BONUS_ACTION"
 
 
@@ -715,15 +713,16 @@ def test_fighter_roll_condition_effects_are_automatable() -> None:
             assert all(effect.mode in automated_modes for effect in action.conditionEffects or [])
 
 
-def test_battle_master_rally_roll_applies_temporary_hp_with_charisma_modifier() -> None:
+def test_battle_master_rally_roll_applies_temporary_hp_with_half_fighter_level() -> None:
     sheet = fighter_sheet(3, subclass=FighterSubclassType.BATTLE_MASTER, maneuvers=[BattleMasterManeuverType.RALLY])
     superiority = next(resource for resource in sheet.resources if resource.id == "superiorityDice")
     rally = superiority.rollActions[0]
 
     assert rally.id == BattleMasterManeuverType.RALLY
     assert rally.resolution == RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS
-    assert rally.modifier == RollModifierType.ABILITY_MODIFIER
-    assert rally.modifierAbility == AbilityType.CHARISMA
+    assert rally.staticModifier == 1
+    assert rally.modifier == RollModifierType.NONE
+    assert rally.modifierAbility is None
 
 
 def test_roll_backed_damage_features_resolve_as_damage() -> None:
@@ -769,7 +768,7 @@ def test_roll_backed_damage_features_resolve_as_damage() -> None:
 
 def test_simple_fighter_archetypes_expose_level_gated_features() -> None:
     cases = {
-        FighterSubclassType.BANNERET: {"rallyingCry", "royalEnvoy", "inspiringSurge", "bulwark"},
+        FighterSubclassType.BANNERET: {"knightlyEnvoy", "groupRecovery", "teamTactics", "rallyingSurge", "sharedResilience", "inspiringCommander"},
         FighterSubclassType.CAVALIER: {"bonusProficiency", "bornToTheSaddle", "unwaveringMark", "wardingManeuver", "holdTheLine", "ferociousCharger", "vigilantDefender"},
         FighterSubclassType.SAMURAI: {"bonusProficiency", "fightingSpirit", "elegantCourtier", "tirelessSpirit", "rapidStrike", "strengthBeforeDeath"},
         FighterSubclassType.BRUTE: {"bruteForce", "brutishDurability", "additionalFightingStyle", "devastatingCritical", "survivor"},
@@ -780,7 +779,7 @@ def test_simple_fighter_archetypes_expose_level_gated_features() -> None:
         FighterSubclassType.RUNE_KNIGHT: {"bonusProficiencies", "runeCarver", "giantsMight", "runicShield", "greatStature", "masterOfRunes", "runicJuggernaut"},
         FighterSubclassType.ECHO_KNIGHT: {"manifestEcho", "unleashIncarnation", "echoAvatar", "shadowMartyr", "reclaimPotential", "legionOfOne"},
         FighterSubclassType.PSI_WARRIOR: {"psionicPower", "telekineticAdept", "guardedMind", "bulwarkOfForce", "telekineticMaster"},
-        FighterSubclassType.ELDRITCH_KNIGHT: {"spellcasting", "weaponBond", "warMagic", "eldritchStrike", "arcaneCharge", "improvedWarMagic"},
+        FighterSubclassType.ELDRITCH_KNIGHT: {"spellcasting", "warBond", "warMagic", "eldritchStrike", "arcaneCharge", "improvedWarMagic"},
     }
 
     for subclass, expected_features in cases.items():
@@ -929,7 +928,7 @@ def test_eldritch_knight_tracks_spell_slots_and_known_counts() -> None:
     assert level_20_resources["thirdLevelSpellSlots"].maxUses == 3
     assert level_20_resources["fourthLevelSpellSlots"].maxUses == 1
     assert level_20_abilities["fourthLevelSpellSlots"].resourceId == "fourthLevelSpellSlots"
-    assert "3 cantrips and 13 leveled spells" in spellcasting.description
+    assert "3 cantrips and prepare 13 leveled spells" in spellcasting.description
 
 
 def test_eldritch_knight_spell_progression_exposes_curated_spell_choices() -> None:
@@ -1011,6 +1010,37 @@ def test_fighter_level_progression_exposes_hit_point_and_asi_choices() -> None:
     assert choices["fighterAbilityScoreImprovement"].choiceType.name == "ABILITY_SCORE_IMPROVEMENT"
     assert "alert" in {option.value for option in choices["fighterAbilityScoreImprovement"].options}
     assert "warCaster" in {option.value for option in choices["fighterAbilityScoreImprovement"].options}
+
+
+def test_fighter_progression_labels_legacy_options() -> None:
+    subclass_choices = {choice.id: choice for choice in fighter_sheet(3).pendingChoices}
+    subclass_labels = {option.value: option.label for option in subclass_choices["fighterSubclass"].options}
+    style_sheet = build_character_sheet(
+        token_id="fighter",
+        kind=TokenKind.CHARACTER,
+        name="Fighter",
+        owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(
+            id="fighter",
+            name="Fighter",
+            owner="player-1",
+            avatarUrl=None,
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=12, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+        current_hp=None,
+        resource_overrides={},
+    )
+    style_choices = {choice.id: choice for choice in style_sheet.pendingChoices}
+    style_labels = {option.value: option.label for option in style_choices["fighterFightingStyles"].options}
+
+    assert subclass_labels["battleMaster"] == "Battle Master"
+    assert subclass_labels["runeKnight"] == "Rune Knight (Legacy)"
+    assert style_labels["defense"] == "Defense"
+    assert style_labels["superiorTechnique"] == "Superior Technique (Legacy)"
+    assert style_labels["packFighting"] == "Pack Fighting"
 
 
 def test_fighter_can_have_multiple_fighting_styles() -> None:

@@ -19,7 +19,7 @@ from dnd_board.character_sheet import (
     enum_value,
 )
 from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_spell_options, eldritch_knight_spellcasting, rune_minimum_level
-from dnd_board.rules.classes.fighter.base import FighterSubclassType
+from dnd_board.rules.classes.fighter.base import FighterSubclassType, fighter_subclass_label
 from dnd_board.rules.shared.combat_superiority import combat_superiority_subclass_progression
 
 
@@ -86,7 +86,7 @@ def progression_choices(
             label="Martial Archetype",
             description="Choose a Fighter Martial Archetype.",
             selected=[],
-            options=enum_options(FighterSubclassType),
+            options=fighter_subclass_options(),
         ))
 
     fighting_style_count = fighter_fighting_style_count(fighter)
@@ -100,7 +100,7 @@ def progression_choices(
             minimum=fighting_style_count,
             maximum=fighting_style_count,
             selected=selected_styles,
-            options=enum_options(FightingStyleType),
+            options=fighting_style_options(),
         ))
 
     maneuver_count = fighter_maneuver_count(fighter)
@@ -114,7 +114,7 @@ def progression_choices(
             minimum=maneuver_count,
             maximum=maneuver_count,
             selected=selected_maneuvers,
-            options=enum_options(BattleMasterManeuverType),
+            options=battle_master_maneuver_options(),
         ))
 
     arcane_shot_count = fighter_arcane_shot_count(fighter)
@@ -334,6 +334,22 @@ def choice_id_value(choice_id: ProgressionChoiceId) -> str:
 
 def enum_options(enum_type: type[Enum]) -> list[ProgressionChoiceOption]:
     return [ProgressionChoiceOption(value=enum_key(option), label=enum_label(option)) for option in enum_type]
+
+
+def fighter_subclass_options() -> list[ProgressionChoiceOption]:
+    return [ProgressionChoiceOption(value=enum_key(option), label=fighter_subclass_label(option)) for option in FighterSubclassType]
+
+
+def fighting_style_options() -> list[ProgressionChoiceOption]:
+    from dnd_board.rules.feats import fighting_style_label
+
+    return [ProgressionChoiceOption(value=enum_key(option), label=fighting_style_label(option)) for option in FightingStyleType]
+
+
+def battle_master_maneuver_options() -> list[ProgressionChoiceOption]:
+    from dnd_board.rules.classes.fighter.battle_master import battle_master_maneuver_label
+
+    return [ProgressionChoiceOption(value=enum_key(option), label=battle_master_maneuver_label(option)) for option in BattleMasterManeuverType]
 
 
 def selected_enum_keys(values: list[Enum]) -> list[str]:

@@ -2293,9 +2293,9 @@ def test_battle_master_rally_roll_resolution_adds_temporary_hp_to_ally(tmp_path,
 
     assert resolution.status_code == 200
     assert roll["resolution"] == "applyTemporaryHitPoints"
-    assert roll["total"] == 8
-    assert roll["modifierBreakdown"] == [{"source": "Charisma", "value": 3, "description": ""}]
-    assert ally["hp"] == {"current": 22, "max": 22, "temporary": 8}
+    assert roll["total"] == 6
+    assert roll["modifierBreakdown"] == [{"source": "Modifier", "value": 1, "description": ""}]
+    assert ally["hp"] == {"current": 22, "max": 22, "temporary": 6}
 
 
 def test_condition_roll_resolution_applies_condition_on_failed_save(tmp_path, monkeypatch) -> None:

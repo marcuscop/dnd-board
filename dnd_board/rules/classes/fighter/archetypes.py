@@ -15,6 +15,7 @@ from dnd_board.character_sheet import (
     ResourceTracker,
     RestType,
     RollAction,
+    RollModifierType,
     RollResolutionMode,
     RuneType,
     SheetAbility,
@@ -42,6 +43,7 @@ from dnd_board.character_sheet import (
     proficiency_bonus_for_level,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
+from dnd_board.rules.classes.fighter.base import fighter_subclass_label
 from dnd_board.rules.classes.fighter.battle_master import battle_master_features
 
 
@@ -55,10 +57,12 @@ class ChampionFeatureType(Enum):
 
 
 class BanneretFeatureType(Enum):
-    RALLYING_CRY = auto()
-    ROYAL_ENVOY = auto()
-    INSPIRING_SURGE = auto()
-    BULWARK = auto()
+    KNIGHTLY_ENVOY = auto()
+    GROUP_RECOVERY = auto()
+    TEAM_TACTICS = auto()
+    RALLYING_SURGE = auto()
+    SHARED_RESILIENCE = auto()
+    INSPIRING_COMMANDER = auto()
 
 
 class CavalierFeatureType(Enum):
@@ -151,6 +155,7 @@ class PsiWarriorFeatureType(Enum):
 class EldritchKnightFeatureType(Enum):
     SPELLCASTING = auto()
     WEAPON_BOND = auto()
+    WAR_BOND = auto()
     WAR_MAGIC = auto()
     ELDRITCH_STRIKE = auto()
     ARCANE_CHARGE = auto()
@@ -159,6 +164,8 @@ class EldritchKnightFeatureType(Enum):
 
 class FighterSubclassResourceType(Enum):
     ARCANE_SHOT = auto()
+    GROUP_RECOVERY = auto()
+    KNOW_YOUR_ENEMY = auto()
     UNWAVERING_MARK = auto()
     WARDING_MANEUVER = auto()
     FIGHTING_SPIRIT = auto()
@@ -189,6 +196,7 @@ class FighterSubclassResourceType(Enum):
 
 
 class FighterSubclassRollActionType(Enum):
+    GROUP_RECOVERY_HEAL = auto()
     WARDING_MANEUVER = auto()
     BRUTE_FORCE = auto()
     BRUTISH_DURABILITY = auto()
@@ -646,31 +654,45 @@ SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
     ),
     SubclassFeatureProgression(
         subclass=FighterSubclassType.BANNERET,
-        featureType=BanneretFeatureType.RALLYING_CRY,
+        featureType=BanneretFeatureType.KNIGHTLY_ENVOY,
+        minimum_level=3,
+        activation=TimeEconomy.PASSIVE,
+        description="Cast Comprehend Languages only as a ritual using Charisma, learn one replaceable language, and gain proficiency in Insight, Intimidation, Persuasion, or Performance.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.BANNERET,
+        featureType=BanneretFeatureType.GROUP_RECOVERY,
         minimum_level=3,
         activation=TimeEconomy.SPECIAL,
-        description="When you use Second Wind, choose up to three allied creatures within 60 feet that can see or hear you. Each regains hit points equal to your Fighter level.",
+        description="When you use Second Wind to regain Hit Points, choose allies in a 30-foot Emanation up to your Charisma modifier, minimum one. Each regains 1d4 plus your Fighter level HP. Tracked as a resource.",
     ),
     SubclassFeatureProgression(
         subclass=FighterSubclassType.BANNERET,
-        featureType=BanneretFeatureType.ROYAL_ENVOY,
+        featureType=BanneretFeatureType.TEAM_TACTICS,
         minimum_level=7,
         activation=TimeEconomy.PASSIVE,
-        description="Gain Persuasion proficiency, or Animal Handling, Insight, Intimidation, or Performance if already proficient. Double your proficiency bonus for Persuasion checks.",
+        description="When you use Group Recovery, each chosen ally has Advantage on D20 Tests until the start of your next turn.",
     ),
     SubclassFeatureProgression(
         subclass=FighterSubclassType.BANNERET,
-        featureType=BanneretFeatureType.INSPIRING_SURGE,
+        featureType=BanneretFeatureType.RALLYING_SURGE,
         minimum_level=10,
         activation=TimeEconomy.SPECIAL,
-        description="When you use Action Surge, one allied creature within 60 feet that can see or hear you can use its Reaction to make one weapon attack. At level 18, choose two allies instead.",
+        description="When you use Action Surge, choose allies in a 30-foot Emanation up to your Charisma modifier, minimum one. Each can use its Reaction to make one weapon or Unarmed Strike attack, or move up to half Speed without provoking Opportunity Attacks.",
     ),
     SubclassFeatureProgression(
         subclass=FighterSubclassType.BANNERET,
-        featureType=BanneretFeatureType.BULWARK,
+        featureType=BanneretFeatureType.SHARED_RESILIENCE,
         minimum_level=15,
-        activation=TimeEconomy.SPECIAL,
-        description="When you use Indomitable on an Intelligence, Wisdom, or Charisma save, one allied creature within 60 feet that failed the same save and can see or hear you can reroll too.",
+        activation=TimeEconomy.REACTION,
+        description="When an ally you can see within 60 feet fails a saving throw, use your Reaction and expend Indomitable. The ally rerolls with a bonus equal to your Fighter level and must use the new roll.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.BANNERET,
+        featureType=BanneretFeatureType.INSPIRING_COMMANDER,
+        minimum_level=18,
+        activation=TimeEconomy.PASSIVE,
+        description="Group Recovery and Rallying Surge become 60-foot Emanations, and you are immune to the Charmed and Frightened conditions.",
     ),
     SubclassFeatureProgression(
         subclass=FighterSubclassType.CAVALIER,
@@ -1106,21 +1128,21 @@ SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
         featureType=EldritchKnightFeatureType.SPELLCASTING,
         minimum_level=3,
         activation=TimeEconomy.SPECIAL,
-        description="Cast wizard spells using Intelligence. Spell save DC is 8 + Proficiency Bonus + Intelligence modifier; spell attack modifier is Proficiency Bonus + Intelligence modifier. Most spells known must be abjuration or evocation, except the flexible choices gained at Fighter levels 3, 8, 14, and 20.",
+        description="Prepare and cast Wizard spells using Intelligence. Spell save DC is 8 + Proficiency Bonus + Intelligence modifier; spell attack modifier is Proficiency Bonus + Intelligence modifier.",
     ),
     SubclassFeatureProgression(
         subclass=FighterSubclassType.ELDRITCH_KNIGHT,
-        featureType=EldritchKnightFeatureType.WEAPON_BOND,
+        featureType=EldritchKnightFeatureType.WAR_BOND,
         minimum_level=3,
         activation=TimeEconomy.BONUS_ACTION,
-        description="Bond with up to two weapons by ritual. You cannot be disarmed of a bonded weapon while conscious, and can summon one bonded weapon to your hand as a Bonus Action if it is on the same plane.",
+        description="Bond with up to two weapons by a 1-hour ritual. You cannot be disarmed of a bonded weapon unless Incapacitated, and can summon one bonded weapon to your hand as a Bonus Action if it is on the same plane.",
     ),
     SubclassFeatureProgression(
         subclass=FighterSubclassType.ELDRITCH_KNIGHT,
         featureType=EldritchKnightFeatureType.WAR_MAGIC,
         minimum_level=7,
-        activation=TimeEconomy.BONUS_ACTION,
-        description="When you use your Action to cast a cantrip, make one weapon attack as a Bonus Action.",
+        activation=TimeEconomy.SPECIAL,
+        description="When you take the Attack action, replace one attack with a Wizard cantrip that has a casting time of an action.",
     ),
     SubclassFeatureProgression(
         subclass=FighterSubclassType.ELDRITCH_KNIGHT,
@@ -1140,8 +1162,8 @@ SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
         subclass=FighterSubclassType.ELDRITCH_KNIGHT,
         featureType=EldritchKnightFeatureType.IMPROVED_WAR_MAGIC,
         minimum_level=18,
-        activation=TimeEconomy.BONUS_ACTION,
-        description="When you use your Action to cast a spell, make one weapon attack as a Bonus Action.",
+        activation=TimeEconomy.SPECIAL,
+        description="When you take the Attack action, replace two attacks with one level 1 or level 2 Wizard spell that has a casting time of an action.",
     ),
 )
 
@@ -1165,6 +1187,45 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
     subclass = character_class.subclass
     fighter_level_value = character_class.level
     resources: list[ResourceTracker] = []
+    if subclass == FighterSubclassType.BANNERET and fighter_level_value >= 3:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.GROUP_RECOVERY),
+                name=enum_label(FighterSubclassResourceType.GROUP_RECOVERY),
+                currentUses=1,
+                maxUses=1,
+                reset=RestType.SHORT_REST,
+                activation=TimeEconomy.SPECIAL,
+                description="When you use Second Wind to regain HP, choose allies in a 30-foot Emanation (60 feet at level 18) up to Charisma modifier, minimum one. Each regains 1d4 plus your Fighter level HP.",
+                rollActions=[
+                    RollAction(
+                        id=FighterSubclassRollActionType.GROUP_RECOVERY_HEAL,
+                        name=FighterSubclassResourceType.GROUP_RECOVERY,
+                        diceCount=1,
+                        diceType=DiceType.D4,
+                        modifier=RollModifierType.CLASS_LEVEL,
+                        resolution=RollResolutionMode.NONE,
+                        consumesResource=FighterSubclassResourceType.GROUP_RECOVERY,
+                        activation=TimeEconomy.SPECIAL,
+                        source=enum_label(FighterSubclassType.BANNERET),
+                    )
+                ],
+                source=enum_label(FighterSubclassType.BANNERET),
+            )
+        )
+    if subclass == FighterSubclassType.BATTLE_MASTER and fighter_level_value >= 7:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.KNOW_YOUR_ENEMY),
+                name=enum_label(FighterSubclassResourceType.KNOW_YOUR_ENEMY),
+                currentUses=1,
+                maxUses=1,
+                reset=RestType.LONG_REST,
+                activation=TimeEconomy.BONUS_ACTION,
+                description="Learn a visible creature's damage immunities, resistances, and vulnerabilities within 30 feet. Spend a Superiority Die to restore this use.",
+                source=enum_label(FighterSubclassType.BATTLE_MASTER),
+            )
+        )
     if subclass == FighterSubclassType.ELDRITCH_KNIGHT and fighter_level_value >= 3:
         progression = eldritch_knight_spellcasting(fighter_level_value)
         for resource_type, slot_level, max_uses in eldritch_knight_spell_slot_resources(progression):
@@ -1910,11 +1971,11 @@ def subclass_feature(progression: SubclassFeatureProgression, fighter_level_valu
     description = progression.description
     if progression.subclass == FighterSubclassType.ELDRITCH_KNIGHT and progression.featureType == EldritchKnightFeatureType.SPELLCASTING:
         spellcasting = eldritch_knight_spellcasting(fighter_level_value)
-        description = f"{description} You know {spellcasting.cantrips_known} cantrips and {spellcasting.spells_known} leveled spells."
+        description = f"{description} You know {spellcasting.cantrips_known} cantrips and prepare {spellcasting.spells_known} leveled spells."
     return SheetFeature(
         id=enum_key(progression.featureType),
         name=enum_label(progression.featureType),
-        source=enum_label(progression.subclass),
+        source=fighter_subclass_label(progression.subclass),
         activation=progression.activation,
         description=description,
         conditionEffects=list(progression.conditionEffects) or None,

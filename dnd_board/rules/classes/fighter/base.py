@@ -17,6 +17,7 @@ from dnd_board.character_sheet import (
     enum_key,
     enum_label,
 )
+from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
 
 
 class FighterFeatureType(Enum):
@@ -64,6 +65,24 @@ class FighterSubclassType(Enum):
     ECHO_KNIGHT = auto()
     PSI_WARRIOR = auto()
     ELDRITCH_KNIGHT = auto()
+
+
+FIGHTER_SUBCLASS_SOURCES: dict[FighterSubclassType, RuleSource] = {
+    FighterSubclassType.BANNERET: RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024,
+    FighterSubclassType.BATTLE_MASTER: RuleSource.PLAYERS_HANDBOOK_2024,
+    FighterSubclassType.CHAMPION: RuleSource.PLAYERS_HANDBOOK_2024,
+    FighterSubclassType.ELDRITCH_KNIGHT: RuleSource.PLAYERS_HANDBOOK_2024,
+    FighterSubclassType.PSI_WARRIOR: RuleSource.PLAYERS_HANDBOOK_2024,
+}
+
+
+def fighter_subclass_label(subclass: FighterSubclassType) -> str:
+    label = enum_label(subclass)
+    return f"{label} (Legacy)" if is_legacy_source(fighter_subclass_source(subclass)) else label
+
+
+def fighter_subclass_source(subclass: FighterSubclassType) -> RuleSource:
+    return FIGHTER_SUBCLASS_SOURCES.get(subclass, RuleSource.LEGACY)
 
 
 @dataclass(frozen=True)
@@ -411,6 +430,9 @@ def feature_activation(feature_type: FighterFeatureType) -> TimeEconomy:
 def subclass_description(character_class: CharacterClassLevel) -> str:
     if character_class.subclass is None:
         return "Choose a Fighter subclass."
+    if isinstance(character_class.subclass, FighterSubclassType):
+        source = rule_source_label(fighter_subclass_source(character_class.subclass))
+        return f"{fighter_subclass_label(character_class.subclass)} subclass features ({source}) are included up to your Fighter level."
     return f"{enum_label(character_class.subclass)} subclass features are included up to your Fighter level."
 
 

@@ -41,6 +41,38 @@ class BattleMasterFeatureType(Enum):
     KNOW_YOUR_ENEMY = auto()
     IMPROVED_COMBAT_SUPERIORITY = auto()
     RELENTLESS = auto()
+    ULTIMATE_COMBAT_SUPERIORITY = auto()
+
+
+BATTLE_MASTER_2024_MANEUVERS: frozenset[BattleMasterManeuverType] = frozenset(
+    {
+        BattleMasterManeuverType.AMBUSH,
+        BattleMasterManeuverType.BAIT_AND_SWITCH,
+        BattleMasterManeuverType.COMMANDERS_STRIKE,
+        BattleMasterManeuverType.COMMANDING_PRESENCE,
+        BattleMasterManeuverType.DISARMING_ATTACK,
+        BattleMasterManeuverType.DISTRACTING_STRIKE,
+        BattleMasterManeuverType.EVASIVE_FOOTWORK,
+        BattleMasterManeuverType.FEINTING_ATTACK,
+        BattleMasterManeuverType.GOADING_ATTACK,
+        BattleMasterManeuverType.LUNGING_ATTACK,
+        BattleMasterManeuverType.MANEUVERING_ATTACK,
+        BattleMasterManeuverType.MENACING_ATTACK,
+        BattleMasterManeuverType.PARRY,
+        BattleMasterManeuverType.PRECISION_ATTACK,
+        BattleMasterManeuverType.PUSHING_ATTACK,
+        BattleMasterManeuverType.RALLY,
+        BattleMasterManeuverType.RIPOSTE,
+        BattleMasterManeuverType.SWEEPING_ATTACK,
+        BattleMasterManeuverType.TACTICAL_ASSESSMENT,
+        BattleMasterManeuverType.TRIP_ATTACK,
+    }
+)
+
+
+def battle_master_maneuver_label(maneuver: BattleMasterManeuverType) -> str:
+    label = enum_label(maneuver)
+    return label if maneuver in BATTLE_MASTER_2024_MANEUVERS else f"{label} (Legacy)"
 
 
 @dataclass(frozen=True)
@@ -70,12 +102,12 @@ BATTLE_MASTER_FEATURE_PROGRESSION: tuple[BattleMasterFeatureProgression, ...] = 
     BattleMasterFeatureProgression(
         featureType=BattleMasterFeatureType.STUDENT_OF_WAR,
         minimum_level=3,
-        description="Gain proficiency with one type of artisan's tools of your choice.",
+        description="Gain proficiency with one type of artisan's tools and one skill from the Fighter level 1 skill list.",
     ),
     BattleMasterFeatureProgression(
         featureType=BattleMasterFeatureType.KNOW_YOUR_ENEMY,
         minimum_level=7,
-        description="After spending at least 1 minute observing or interacting with a creature outside combat, learn whether it is equal, superior, or inferior to you in two listed characteristics of your choice.",
+        description="As a Bonus Action, learn whether a visible creature within 30 feet has damage immunities, resistances, or vulnerabilities, and what they are. Once per Long Rest, or restore the use by expending one Superiority Die.",
     ),
     BattleMasterFeatureProgression(
         featureType=BattleMasterFeatureType.IMPROVED_COMBAT_SUPERIORITY,
@@ -85,7 +117,12 @@ BATTLE_MASTER_FEATURE_PROGRESSION: tuple[BattleMasterFeatureProgression, ...] = 
     BattleMasterFeatureProgression(
         featureType=BattleMasterFeatureType.RELENTLESS,
         minimum_level=15,
-        description="When you roll Initiative and have no superiority dice remaining, regain 1 superiority die.",
+        description="Once per turn when you use a maneuver, you can roll 1d8 and use that roll instead of expending a Superiority Die.",
+    ),
+    BattleMasterFeatureProgression(
+        featureType=BattleMasterFeatureType.ULTIMATE_COMBAT_SUPERIORITY,
+        minimum_level=18,
+        description="Your Superiority Die becomes a d12.",
     ),
 )
 
@@ -109,8 +146,8 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
     ),
     BattleMasterManeuverType.COMMANDERS_STRIKE: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.COMMANDERS_STRIKE,
-        activation=TimeEconomy.BONUS_ACTION,
-        description="When you take the Attack action, forgo one attack and use a Bonus Action to choose a friendly creature who can see or hear you. Expend one superiority die; that creature uses its Reaction to make one weapon attack and adds the die to the damage roll.",
+        activation=TimeEconomy.SPECIAL,
+        description="When you take the Attack action, replace one attack to direct a willing creature who can see or hear you. Expend one Superiority Die; that creature immediately uses its Reaction to make one weapon or Unarmed Strike attack and adds the die to damage on a hit.",
         resolution=RollResolutionMode.APPLY_DAMAGE,
     ),
     BattleMasterManeuverType.COMMANDING_PRESENCE: BattleMasterManeuverDefinition(
@@ -140,8 +177,8 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
     ),
     BattleMasterManeuverType.EVASIVE_FOOTWORK: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.EVASIVE_FOOTWORK,
-        activation=TimeEconomy.MOVEMENT,
-        description="When you move, expend one superiority die and add the roll to your AC until you stop moving.",
+        activation=TimeEconomy.BONUS_ACTION,
+        description="As a Bonus Action, expend one Superiority Die and take the Disengage action. Add the die roll to your AC until the start of your next turn.",
     ),
     BattleMasterManeuverType.FEINTING_ATTACK: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.FEINTING_ATTACK,
@@ -179,8 +216,8 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
     ),
     BattleMasterManeuverType.LUNGING_ATTACK: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.LUNGING_ATTACK,
-        activation=TimeEconomy.SPECIAL,
-        description="When you make a melee weapon attack on your turn, expend one superiority die to increase reach for that attack by 5 feet. On a hit, add the die to damage.",
+        activation=TimeEconomy.BONUS_ACTION,
+        description="As a Bonus Action, expend one Superiority Die and take the Dash action. If you move at least 5 feet straight before hitting with a melee attack as part of this turn's Attack action, add the die to damage.",
         resolution=RollResolutionMode.APPLY_DAMAGE,
     ),
     BattleMasterManeuverType.MANEUVERING_ATTACK: BattleMasterManeuverDefinition(
@@ -206,12 +243,12 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
     BattleMasterManeuverType.PARRY: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.PARRY,
         activation=TimeEconomy.REACTION,
-        description="When another creature damages you with a melee attack, use your Reaction and expend one superiority die to reduce the damage by the die roll plus your Dexterity modifier.",
+        description="When another creature damages you with a melee attack roll, use your Reaction and expend one Superiority Die to reduce the damage by the die roll plus your Strength or Dexterity modifier.",
     ),
     BattleMasterManeuverType.PRECISION_ATTACK: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.PRECISION_ATTACK,
         activation=TimeEconomy.SPECIAL,
-        description="When you make a weapon attack roll, expend one superiority die and add it to the roll before or after rolling, but before attack effects are applied.",
+        description="When you miss with an attack roll, expend one Superiority Die and add it to the attack roll, potentially causing the attack to hit.",
     ),
     BattleMasterManeuverType.PUSHING_ATTACK: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.PUSHING_ATTACK,
@@ -236,10 +273,8 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
     BattleMasterManeuverType.RALLY: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.RALLY,
         activation=TimeEconomy.BONUS_ACTION,
-        description="On your turn, use a Bonus Action and expend one superiority die to choose a friendly creature who can see or hear you. It gains temporary hit points equal to the die roll plus your Charisma modifier.",
+        description="As a Bonus Action, expend one Superiority Die and choose an ally within 30 feet who can see or hear you. It gains temporary hit points equal to the die roll plus half your Fighter level.",
         resolution=RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS,
-        modifier=RollModifierType.ABILITY_MODIFIER,
-        modifierAbility=AbilityType.CHARISMA,
     ),
     BattleMasterManeuverType.RIPOSTE: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.RIPOSTE,
@@ -289,12 +324,12 @@ def battle_master_features(character_class: CharacterClassLevel, fighter_level_v
 
 
 def battle_master_feature(progression: BattleMasterFeatureProgression) -> SheetFeature:
-    from dnd_board.rules.classes.fighter.base import FighterSubclassType
+    from dnd_board.rules.classes.fighter.base import FighterSubclassType, fighter_subclass_label
 
     return SheetFeature(
         id=enum_key(progression.featureType),
         name=enum_label(progression.featureType),
-        source=enum_label(FighterSubclassType.BATTLE_MASTER),
+        source=fighter_subclass_label(FighterSubclassType.BATTLE_MASTER),
         activation=TimeEconomy.PASSIVE,
         description=progression.description,
     )

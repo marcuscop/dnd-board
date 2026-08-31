@@ -83,7 +83,7 @@
                         },
                         "subclass": {
                           "$type": "FighterSubclassType",
-                          "value": "BATTLE_MASTER"
+                          "value": "SHARPSHOOTER"
                         },
                         "fightingStyles": {
                           "$type": "list",
@@ -91,23 +91,6 @@
                             {
                               "$type": "FightingStyleType",
                               "value": "UNARMED_FIGHTING"
-                            }
-                          ]
-                        },
-                        "maneuvers": {
-                          "$type": "list",
-                          "items": [
-                            {
-                              "$type": "BattleMasterManeuverType",
-                              "value": "GRAPPLING_STRIKE"
-                            },
-                            {
-                              "$type": "BattleMasterManeuverType",
-                              "value": "PUSHING_ATTACK"
-                            },
-                            {
-                              "$type": "BattleMasterManeuverType",
-                              "value": "RALLY"
                             }
                           ]
                         }

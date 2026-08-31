@@ -29,6 +29,7 @@ from dnd_board.character_sheet import (
     enum_key,
     enum_label,
 )
+from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
 
 
 class FeatCategory(Enum):
@@ -172,6 +173,32 @@ class FeatDefinition:
     repeatable: bool
     description: str
     effects: tuple[FeatEffect, ...]
+    source: RuleSource = RuleSource.PLAYERS_HANDBOOK_2024
+
+
+FIGHTING_STYLE_SOURCES: dict[FightingStyleType, RuleSource] = {
+    FightingStyleType.ARCHERY: RuleSource.PLAYERS_HANDBOOK_2024,
+    FightingStyleType.BLIND_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
+    FightingStyleType.DEFENSE: RuleSource.PLAYERS_HANDBOOK_2024,
+    FightingStyleType.DUELING: RuleSource.PLAYERS_HANDBOOK_2024,
+    FightingStyleType.GREAT_WEAPON_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
+    FightingStyleType.INTERCEPTION: RuleSource.PLAYERS_HANDBOOK_2024,
+    FightingStyleType.PACK_FIGHTING: RuleSource.DND_BEYOND_DROPS_2026,
+    FightingStyleType.PRONE_FIGHTING: RuleSource.DND_BEYOND_DROPS_2026,
+    FightingStyleType.PROTECTION: RuleSource.PLAYERS_HANDBOOK_2024,
+    FightingStyleType.THROWN_WEAPON_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
+    FightingStyleType.TWO_WEAPON_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
+    FightingStyleType.UNARMED_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
+}
+
+
+def fighting_style_label(style: FightingStyleType) -> str:
+    label = enum_label(style)
+    return f"{label} (Legacy)" if is_legacy_source(fighting_style_source(style)) else label
+
+
+def fighting_style_source(style: FightingStyleType) -> RuleSource:
+    return FIGHTING_STYLE_SOURCES.get(style, RuleSource.LEGACY)
 
 
 @dataclass(frozen=True)
@@ -309,6 +336,7 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
                 description="Ranged attack bonus.",
             ),
         ),
+        source=RuleSource.LEGACY,
     ),
     FightingStyleType.DEFENSE: FeatDefinition(
         featType=FightingStyleType.DEFENSE,
@@ -335,12 +363,12 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         featType=FightingStyleType.GREAT_WEAPON_FIGHTING,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
-        description="When rolling damage with an eligible two-handed or versatile melee weapon, reroll weapon damage dice of 1 or 2 and use the new roll.",
+        description="When rolling damage with an eligible two-handed or versatile melee weapon, treat any 1 or 2 on a damage die as a 3.",
         effects=(
             FeatEffect(
                 effectType=FeatEffectType.DAMAGE_DICE_REROLL,
                 damageDiceRerollScope=FeatDamageDiceRerollScope.TWO_HANDED_OR_VERSATILE_MELEE_WEAPON_ATTACK,
-                description="Reroll weapon damage dice of 1 or 2.",
+                description="Treat damage dice of 1 or 2 as 3.",
             ),
         ),
     ),
@@ -350,6 +378,28 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         repeatable=False,
         description="While not wearing heavy armor or using a shield, gain a swimming speed and climbing speed equal to your Speed, and gain a +1 bonus to Armor Class.",
         effects=(FeatEffect(effectType=FeatEffectType.ARMOR_CLASS_BONUS, value=1),),
+        source=RuleSource.LEGACY,
+    ),
+    FightingStyleType.PACK_FIGHTING: FeatDefinition(
+        featType=FightingStyleType.PACK_FIGHTING,
+        category=FeatCategory.FIGHTING_STYLE,
+        repeatable=False,
+        description="When you make a melee attack with a weapon or Unarmed Strike against a creature, gain +1 damage if at least one non-incapacitated ally is within 5 feet of it; +2 if such an ally also has this feat.",
+        effects=(
+            FeatEffect(
+                effectType=FeatEffectType.DESCRIPTION_ONLY,
+                description="Conditional damage bonus; apply manually when an ally is within 5 feet of the target.",
+            ),
+        ),
+        source=RuleSource.DND_BEYOND_DROPS_2026,
+    ),
+    FightingStyleType.PRONE_FIGHTING: FeatDefinition(
+        featType=FightingStyleType.PRONE_FIGHTING,
+        category=FeatCategory.FIGHTING_STYLE,
+        repeatable=False,
+        description="When you have the Prone condition, you do not have Disadvantage on attack rolls from being Prone, and attack rolls against you do not have Advantage from you being Prone.",
+        effects=(FeatEffect(effectType=FeatEffectType.DESCRIPTION_ONLY),),
+        source=RuleSource.DND_BEYOND_DROPS_2026,
     ),
     FightingStyleType.PROTECTION: FeatDefinition(
         featType=FightingStyleType.PROTECTION,
@@ -370,6 +420,7 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         repeatable=False,
         description="Learn one Battle Master maneuver and gain one superiority die, which is a d6 unless added to Battle Master superiority dice from another source. The die fuels your maneuver and returns when you finish a short or long rest. Maneuver save DC is 8 + Proficiency Bonus + Strength or Dexterity modifier.",
         effects=(FeatEffect(effectType=FeatEffectType.RESOURCE),),
+        source=RuleSource.LEGACY,
     ),
     FightingStyleType.THROWN_WEAPON_FIGHTING: FeatDefinition(
         featType=FightingStyleType.THROWN_WEAPON_FIGHTING,
@@ -397,6 +448,7 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
                 description="Enter a defensive stance until your next turn: opportunity attacks do not use your Reaction, and you can use your Reaction to attack a creature that moves more than 5 feet within your reach.",
             ),
         ),
+        source=RuleSource.LEGACY,
     ),
     FightingStyleType.INTERCEPTION: FeatDefinition(
         featType=FightingStyleType.INTERCEPTION,
@@ -478,10 +530,10 @@ def fighting_style_features(classes: list[CharacterClassLevel]):
         features.append(
             SheetFeature(
                 id=enum_key(style),
-                name=enum_label(style),
+                name=fighting_style_label(style),
                 source=enum_label(FeatCategory.FIGHTING_STYLE),
                 activation=TimeEconomy.PASSIVE,
-                description=definition.description,
+                description=f"{definition.description} Source: {rule_source_label(definition.source)}.",
             )
         )
     return features

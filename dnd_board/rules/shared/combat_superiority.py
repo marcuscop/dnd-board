@@ -48,6 +48,7 @@ class SuperiorityActionDefinition:
     resolution: RollResolutionMode = RollResolutionMode.NONE
     modifier: RollModifierType = RollModifierType.NONE
     modifierAbility: AbilityType | None = None
+    staticModifier: int = 0
     conditionEffects: tuple[ConditionEffect, ...] = ()
 
 
@@ -93,6 +94,7 @@ def combat_superiority_resource(classes: list[CharacterClassLevel]) -> ResourceT
                 resolution=definition.resolution,
                 modifier=definition.modifier,
                 modifierAbility=definition.modifierAbility,
+                staticModifier=definition.staticModifier,
                 consumesResource=BattleMasterResourceType.SUPERIORITY_DICE,
                 description=definition.description,
                 activation=definition.activation,
@@ -139,7 +141,7 @@ def combat_superiority_subclass_progression(fighter_level_value: int) -> CombatS
 
 
 def selected_battle_master_maneuvers(classes: list[CharacterClassLevel]) -> list[BattleMasterManeuverType]:
-    from dnd_board.rules.classes.fighter.battle_master import BATTLE_MASTER_MANEUVERS
+    from dnd_board.rules.classes.fighter.battle_master import BATTLE_MASTER_2024_MANEUVERS, BATTLE_MASTER_MANEUVERS
 
     maneuvers: list[BattleMasterManeuverType] = []
     for character_class in classes:
@@ -148,7 +150,7 @@ def selected_battle_master_maneuvers(classes: list[CharacterClassLevel]) -> list
                 maneuvers.append(maneuver)
     if maneuvers:
         return maneuvers
-    return list(BATTLE_MASTER_MANEUVERS)
+    return [maneuver for maneuver in BattleMasterManeuverType if maneuver in BATTLE_MASTER_2024_MANEUVERS]
 
 
 def superiority_action_definitions(classes: list[CharacterClassLevel]) -> list[SuperiorityActionDefinition]:
@@ -179,6 +181,7 @@ def superiority_action_definitions(classes: list[CharacterClassLevel]) -> list[S
                 resolution=definition.resolution,
                 modifier=definition.modifier,
                 modifierAbility=definition.modifierAbility,
+                staticModifier=(fighter.level // 2 if definition.maneuverType == BattleMasterManeuverType.RALLY and fighter is not None else 0),
                 conditionEffects=definition.conditionEffects,
             )
             for definition in (BATTLE_MASTER_MANEUVERS[maneuver] for maneuver in selected_battle_master_maneuvers(classes))
