@@ -7,6 +7,7 @@ from PIL import Image
 
 from dnd_board import server
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
+from dnd_board.rules.feats import general_feat_feature
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -32,6 +33,17 @@ from dnd_board.character_sheet import (
 
 def setup_function() -> None:
     server.rooms.clear()
+
+
+def write_party_campaign(tmp_path, campaign_id: str, *members: PartyMemberConfig) -> None:
+    campaign = tmp_path / campaign_id
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text(json.dumps({"id": campaign_id, "name": campaign_id}), encoding="utf-8")
+    (party / "party.json").write_text(
+        json.dumps(typed_json_from_value(PartyManifest(members=list(members)))),
+        encoding="utf-8",
+    )
 
 
 def test_room_starts_with_four_owned_player_characters() -> None:
@@ -979,7 +991,34 @@ def test_dm_can_delete_loaded_asset() -> None:
     assert player_socket.messages[-1] == {"type": "token_deleted", "tokenId": "asset-1"}
 
 
-def test_sheet_endpoint_returns_party_sheets_for_player() -> None:
+def test_sheet_endpoint_returns_party_sheets_for_player(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "sheet-player-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Marina",
+            maxHp=31,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                race="Human",
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=7)],
+                attacks=[
+                    AttackAction(
+                        id="longsword",
+                        name="Longsword",
+                        ability=AbilityType.STRENGTH,
+                        damageDiceCount=1,
+                        damageDiceType=DiceType.D8,
+                    )
+                ],
+            ),
+        ),
+        PartyMemberConfig(id="player-2", name="Edward"),
+        PartyMemberConfig(id="player-3", name="Hal"),
+        PartyMemberConfig(id="player-4", name="Valarie"),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
 
     response = client.get("/api/rooms/sheet-player-test/sheet?playerKey=Marina")
@@ -1055,7 +1094,22 @@ def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
     assert player_socket.messages[0] == dm_socket.messages[0]
 
 
-def test_player_can_roll_ability_check_and_saving_throw(monkeypatch) -> None:
+def test_player_can_roll_ability_check_and_saving_throw(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "ability-roll-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Roll Fighter",
+            maxHp=31,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=7)],
+                savingThrowProficiencies=[AbilityType.STRENGTH, AbilityType.CONSTITUTION],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
     monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 11)
 
@@ -1093,6 +1147,416 @@ def test_player_can_update_owned_sheet_resource() -> None:
 
     assert response.status_code == 200
     assert action_surge["currentUses"] == 0
+
+
+def test_only_dm_can_level_sheet(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "level-permission-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Level Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/level-permission-test/sheet/player-1/level?playerKey=player-1&delta=1")
+
+    assert response.status_code == 403
+
+
+def test_dm_cannot_level_up_with_unresolved_level_choices(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "level-gate-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Level Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/level-gate-test/sheet/player-1/level?playerKey=dm&delta=1")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Resolve pending level choices before leveling up"
+
+
+def test_player_can_apply_own_level_choice_but_not_other_sheets(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "player-choice-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Choice Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Other Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    other_player = client.post('/api/rooms/player-choice-test/sheet/player-1/choices/fighterFightingStyles?playerKey=player-2', json={"values": ["defense"]})
+    owner = client.post('/api/rooms/player-choice-test/sheet/player-1/choices/fighterFightingStyles?playerKey=player-1', json={"values": ["defense"]})
+
+    assert other_player.status_code == 403
+    assert owner.status_code == 200
+    assert owner.json()["sheet"]["classes"][0]["fightingStyles"] == ["defense"]
+
+
+def test_player_can_apply_fighter_ability_score_improvement(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "asi-choice-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="ASI Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post('/api/rooms/asi-choice-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["strength", "dexterity"]})
+    sheet = response.json()["sheet"]
+
+    assert response.status_code == 200
+    assert sheet["abilityScores"]["strength"] == 17
+    assert sheet["abilityScores"]["dexterity"] == 15
+    assert "fighterAbilityScoreImprovement" not in {choice["id"] for choice in sheet["pendingChoices"]}
+
+
+def test_fighter_ability_score_improvement_can_apply_plus_two_and_caps_at_twenty(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "asi-cap-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="ASI Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=19, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post('/api/rooms/asi-cap-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["strength", "strength"]})
+    sheet = response.json()["sheet"]
+
+    assert response.status_code == 200
+    assert sheet["abilityScores"]["strength"] == 20
+
+
+def test_fighter_ability_score_improvement_updates_hp_when_constitution_modifier_changes(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "asi-constitution-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="ASI Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post('/api/rooms/asi-constitution-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["constitution", "constitution"]})
+    sheet = response.json()["sheet"]
+
+    assert response.status_code == 200
+    assert sheet["abilityScores"]["constitution"] == 17
+    assert sheet["hp"]["max"] == 40
+
+
+def test_player_can_choose_feat_for_fighter_ability_score_improvement(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "asi-feat-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Feat Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post('/api/rooms/asi-feat-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["feat:alert"]})
+    sheet = response.json()["sheet"]
+    feats = {feature["id"]: feature for feature in sheet["features"]}
+
+    assert response.status_code == 200
+    assert feats["alert"]["name"] == "Alert"
+    assert feats["alert"]["source"] == "Player's Handbook"
+    assert "fighterAbilityScoreImprovement" not in {choice["id"] for choice in sheet["pendingChoices"]}
+
+
+def test_fighter_ability_score_improvement_rejects_duplicate_feat(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "asi-duplicate-feat-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Feat Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=6)],
+                abilityScoreImprovements=["feat:alert"],
+                feats=[
+                    general_feat_feature("alert")
+                ],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post('/api/rooms/asi-duplicate-feat-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["feat:alert"]})
+
+    assert response.status_code == 400
+
+
+def test_dm_level_up_exposes_pending_fighter_choices_and_applies_them(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "level-choice-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Level Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=2, fightingStyles=[FightingStyleType.DEFENSE])],
+                hitPointIncreases=[8],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    leveled = client.post("/api/rooms/level-choice-test/sheet/player-1/level?playerKey=dm&delta=1")
+    sheet = leveled.json()["sheet"]
+    choices = {choice["id"]: choice for choice in sheet["pendingChoices"]}
+
+    assert leveled.status_code == 200
+    assert sheet["characterClass"]["level"] == 3
+    assert {"hitPointIncrease", "fighterSubclass"} <= choices.keys()
+
+    hp = client.post('/api/rooms/level-choice-test/sheet/player-1/choices/hitPointIncrease?playerKey=dm', json={"values": ["fixed"]})
+    archetype = client.post('/api/rooms/level-choice-test/sheet/player-1/choices/fighterSubclass?playerKey=dm', json={"values": ["champion"]})
+    final_sheet = archetype.json()["sheet"]
+
+    assert hp.json()["sheet"]["hp"]["max"] == 20
+    assert archetype.json()["sheet"]["classes"][0]["subclass"] == "champion"
+    assert "fighterSubclass" not in {choice["id"] for choice in final_sheet["pendingChoices"]}
+
+
+def test_level_down_prunes_unavailable_fighter_choices_and_hp(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "level-down-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Level Fighter",
+            maxHp=29,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[
+                    CharacterClassLevel(
+                        name=ClassType.FIGHTER,
+                        level=3,
+                        subclass=FighterSubclassType.CHAMPION,
+                        fightingStyles=[FightingStyleType.DEFENSE],
+                    )
+                ],
+                hitPointIncreases=[8, 9],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/level-down-test/sheet/player-1/level?playerKey=dm&delta=-1")
+    sheet = response.json()["sheet"]
+
+    assert response.status_code == 200
+    assert sheet["characterClass"]["level"] == 2
+    assert "subclass" not in sheet["classes"][0]
+    assert sheet["hp"]["max"] == 20
+
+
+def test_level_down_prunes_fighter_ability_score_improvements(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "asi-level-down-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Level Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=18, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                abilityScoreImprovements=["strength:2"],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/asi-level-down-test/sheet/player-1/level?playerKey=dm&delta=-1")
+    sheet = response.json()["sheet"]
+
+    assert response.status_code == 200
+    assert sheet["characterClass"]["level"] == 3
+    assert sheet["abilityScores"]["strength"] == 16
+
+
+def test_level_down_prunes_fighter_feat_improvements(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "feat-level-down-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Level Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                abilityScoreImprovements=["feat:alert"],
+                feats=[general_feat_feature("alert")],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/feat-level-down-test/sheet/player-1/level?playerKey=dm&delta=-1")
+    sheet = response.json()["sheet"]
+
+    assert response.status_code == 200
+    assert sheet["characterClass"]["level"] == 3
+    assert "alert" not in {feature["id"] for feature in sheet["features"]}
+
+
+def test_player_can_choose_eldritch_knight_spells(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "eldritch-spell-choice-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Spell Fighter",
+            maxHp=28,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=14, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.ELDRITCH_KNIGHT, fightingStyles=[FightingStyleType.DEFENSE])],
+                hitPointIncreases=[8, 8],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post(
+        '/api/rooms/eldritch-spell-choice-test/sheet/player-1/choices/eldritchKnightSpells?playerKey=player-1',
+        json={"values": ["fireBolt", "mageHand", "shield", "magicMissile", "thunderwave"]},
+    )
+    sheet = response.json()["sheet"]
+    spells = {spell["id"]: spell for spell in sheet["spells"]}
+
+    assert response.status_code == 200
+    assert spells["fireBolt"]["level"] == 0
+    assert spells["shield"]["castingAbility"] == "intelligence"
+    assert "eldritchKnightSpells" not in {choice["id"] for choice in sheet["pendingChoices"]}
+
+
+def test_eldritch_knight_spell_choice_rejects_wrong_counts(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "eldritch-spell-count-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Spell Fighter",
+            maxHp=28,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=14, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.ELDRITCH_KNIGHT, fightingStyles=[FightingStyleType.DEFENSE])],
+                hitPointIncreases=[8, 8],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post(
+        '/api/rooms/eldritch-spell-count-test/sheet/player-1/choices/eldritchKnightSpells?playerKey=player-1',
+        json={"values": ["fireBolt", "mageHand", "minorIllusion", "shield", "magicMissile"]},
+    )
+
+    assert response.status_code == 400
+
+
+def test_level_down_prunes_eldritch_knight_spells(tmp_path, monkeypatch) -> None:
+    from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell
+
+    write_party_campaign(
+        tmp_path,
+        "eldritch-spell-level-down-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Spell Fighter",
+            maxHp=58,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=14, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=7, subclass=FighterSubclassType.ELDRITCH_KNIGHT, fightingStyles=[FightingStyleType.DEFENSE])],
+                hitPointIncreases=[8, 8, 8, 8, 8, 8],
+                abilityScoreImprovements=["strength:2"],
+                spells=[
+                    eldritch_knight_catalog_spell("fireBolt"),
+                    eldritch_knight_catalog_spell("mageHand"),
+                    eldritch_knight_catalog_spell("shield"),
+                    eldritch_knight_catalog_spell("magicMissile"),
+                    eldritch_knight_catalog_spell("thunderwave"),
+                    eldritch_knight_catalog_spell("absorbElements"),
+                    eldritch_knight_catalog_spell("shatter"),
+                ],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/eldritch-spell-level-down-test/sheet/player-1/level?playerKey=dm&delta=-1")
+    sheet = response.json()["sheet"]
+    spell_ids = {spell["id"] for spell in sheet["spells"]}
+
+    assert response.status_code == 200
+    assert sheet["characterClass"]["level"] == 6
+    assert len(sheet["spells"]) == 6
+    assert "shatter" not in spell_ids
 
 
 def test_only_dm_can_rest_sheet_resources() -> None:
@@ -1249,10 +1713,21 @@ def test_sheet_roll_history_logs_resolution_after_roll_creation(monkeypatch) -> 
     assert history[-1]["resolution"]["id"] == resolution.json()["resolution"]["id"]
 
 
-def test_tactical_mind_roll_consumes_second_wind_and_has_own_pending_slot(monkeypatch) -> None:
+def test_tactical_mind_roll_consumes_second_wind_and_has_own_pending_slot(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "tactical-mind-roll-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Tactical Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
     monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 7)
-    room = server.get_or_create_room("tactical-mind-roll-test")
 
     attack = client.post("/api/rooms/tactical-mind-roll-test/sheet/player-1/rolls/attack?playerKey=player-1")
     tactical_mind = client.post("/api/rooms/tactical-mind-roll-test/sheet/player-1/abilities/tacticalMind/rolls/tacticalMind?playerKey=player-1")

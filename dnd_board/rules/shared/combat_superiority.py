@@ -29,6 +29,12 @@ class ScoutSuperiorityActionType(Enum):
     SCOUTS_EVASION = auto()
 
 
+class MonsterHunterSuperiorityActionType(Enum):
+    HUNTERS_DAMAGE = auto()
+    HUNTERS_WILL = auto()
+    HUNTERS_EYE = auto()
+
+
 @dataclass(frozen=True)
 class SuperiorityActionDefinition:
     actionType: Enum
@@ -93,14 +99,17 @@ def combat_superiority_progression(classes: list[CharacterClassLevel]) -> tuple[
 
     fighter = next((character_class for character_class in classes if character_class.name == ClassType.FIGHTER), None)
     fighter_level = fighter.level if fighter is not None else 0
-    is_battle_master = fighter is not None and fighter.subclass == FighterSubclassType.BATTLE_MASTER
-    is_scout = fighter is not None and fighter.subclass == FighterSubclassType.SCOUT
+    has_subclass_superiority = fighter is not None and fighter.subclass in {
+        FighterSubclassType.BATTLE_MASTER,
+        FighterSubclassType.SCOUT,
+        FighterSubclassType.MONSTER_HUNTER,
+    }
     has_superior_technique = any(
         FightingStyleType.SUPERIOR_TECHNIQUE in (character_class.fightingStyles or [])
         or character_class.fightingStyle == FightingStyleType.SUPERIOR_TECHNIQUE
         for character_class in classes
     )
-    subclass_progression = combat_superiority_subclass_progression(fighter_level) if is_battle_master or is_scout else None
+    subclass_progression = combat_superiority_subclass_progression(fighter_level) if has_subclass_superiority else None
     if subclass_progression is None and not has_superior_technique:
         return None
 
@@ -140,6 +149,8 @@ def superiority_action_definitions(classes: list[CharacterClassLevel]) -> list[S
     definitions: list[SuperiorityActionDefinition] = []
     if fighter is not None and fighter.subclass == FighterSubclassType.SCOUT:
         definitions.extend(scout_superiority_actions())
+    if fighter is not None and fighter.subclass == FighterSubclassType.MONSTER_HUNTER:
+        definitions.extend(monster_hunter_superiority_actions())
     has_battle_master_maneuvers = (
         fighter is not None and fighter.subclass == FighterSubclassType.BATTLE_MASTER
     ) or any(
@@ -189,10 +200,40 @@ def scout_superiority_actions() -> list[SuperiorityActionDefinition]:
     ]
 
 
+def monster_hunter_superiority_actions() -> list[SuperiorityActionDefinition]:
+    from dnd_board.rules.classes.fighter.base import FighterSubclassType
+
+    return [
+        SuperiorityActionDefinition(
+            actionType=MonsterHunterSuperiorityActionType.HUNTERS_DAMAGE,
+            name=MonsterHunterSuperiorityActionType.HUNTERS_DAMAGE,
+            activation=TimeEconomy.SPECIAL,
+            source=FighterSubclassType.MONSTER_HUNTER,
+            description="When you damage a creature with a weapon attack, expend one superiority die and add it to the damage roll. If the attack causes a concentration save, the target has Disadvantage on that save.",
+        ),
+        SuperiorityActionDefinition(
+            actionType=MonsterHunterSuperiorityActionType.HUNTERS_WILL,
+            name=MonsterHunterSuperiorityActionType.HUNTERS_WILL,
+            activation=TimeEconomy.SPECIAL,
+            source=FighterSubclassType.MONSTER_HUNTER,
+            description="When you make an Intelligence, Wisdom, or Charisma saving throw, expend one superiority die and add it before learning whether the save succeeds.",
+        ),
+        SuperiorityActionDefinition(
+            actionType=MonsterHunterSuperiorityActionType.HUNTERS_EYE,
+            name=MonsterHunterSuperiorityActionType.HUNTERS_EYE,
+            activation=TimeEconomy.SPECIAL,
+            source=FighterSubclassType.MONSTER_HUNTER,
+            description="When you make a Wisdom (Perception) check to detect a hidden creature or object, or a Wisdom (Insight) check to determine whether someone is lying, expend one superiority die and add it before learning whether the check succeeds.",
+        ),
+    ]
+
+
 def superiority_resource_source(classes: list[CharacterClassLevel]) -> str:
     from dnd_board.rules.classes.fighter.base import FighterSubclassType
 
     fighter = next((character_class for character_class in classes if character_class.name == ClassType.FIGHTER), None)
     if fighter is not None and fighter.subclass == FighterSubclassType.SCOUT:
         return enum_label(FighterSubclassType.SCOUT)
+    if fighter is not None and fighter.subclass == FighterSubclassType.MONSTER_HUNTER:
+        return enum_label(FighterSubclassType.MONSTER_HUNTER)
     return enum_label(FighterSubclassType.BATTLE_MASTER)

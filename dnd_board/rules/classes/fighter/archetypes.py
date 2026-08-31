@@ -5,17 +5,25 @@ from enum import Enum, auto
 
 from dnd_board.character_sheet import (
     AbilityScores,
+    AbilityType,
+    ArcaneShotType,
+    DamageType,
     DiceType,
     ResourceTracker,
     RestType,
     RollAction,
     RollResolutionMode,
+    RuneType,
     SheetAbility,
     SheetFeature,
+    SpellComponent,
+    SpellEntry,
+    SpellSchool,
     TimeEconomy,
     ability_modifier,
     enum_key,
     enum_label,
+    proficiency_bonus_for_level,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.fighter.battle_master import battle_master_features
@@ -72,18 +80,99 @@ class SharpshooterFeatureType(Enum):
     SNAP_SHOT = auto()
 
 
+class MonsterHunterFeatureType(Enum):
+    BONUS_PROFICIENCIES = auto()
+    COMBAT_SUPERIORITY = auto()
+    HUNTERS_MYSTICISM = auto()
+    MONSTER_SLAYER = auto()
+    IMPROVED_COMBAT_SUPERIORITY = auto()
+    RELENTLESS = auto()
+
+
+class ArcaneArcherFeatureType(Enum):
+    ARCANE_ARCHER_LORE = auto()
+    ARCANE_SHOT = auto()
+    MAGIC_ARROW = auto()
+    CURVING_SHOT = auto()
+    EVER_READY_SHOT = auto()
+
+
+class RuneKnightFeatureType(Enum):
+    BONUS_PROFICIENCIES = auto()
+    RUNE_CARVER = auto()
+    GIANTS_MIGHT = auto()
+    RUNIC_SHIELD = auto()
+    GREAT_STATURE = auto()
+    MASTER_OF_RUNES = auto()
+    RUNIC_JUGGERNAUT = auto()
+
+
+class EchoKnightFeatureType(Enum):
+    MANIFEST_ECHO = auto()
+    UNLEASH_INCARNATION = auto()
+    ECHO_AVATAR = auto()
+    SHADOW_MARTYR = auto()
+    RECLAIM_POTENTIAL = auto()
+    LEGION_OF_ONE = auto()
+
+
+class PsiWarriorFeatureType(Enum):
+    PSIONIC_POWER = auto()
+    TELEKINETIC_ADEPT = auto()
+    GUARDED_MIND = auto()
+    BULWARK_OF_FORCE = auto()
+    TELEKINETIC_MASTER = auto()
+
+
+class EldritchKnightFeatureType(Enum):
+    SPELLCASTING = auto()
+    WEAPON_BOND = auto()
+    WAR_MAGIC = auto()
+    ELDRITCH_STRIKE = auto()
+    ARCANE_CHARGE = auto()
+    IMPROVED_WAR_MAGIC = auto()
+
+
 class FighterSubclassResourceType(Enum):
+    ARCANE_SHOT = auto()
     UNWAVERING_MARK = auto()
     WARDING_MANEUVER = auto()
     FIGHTING_SPIRIT = auto()
     STRENGTH_BEFORE_DEATH = auto()
     STEADY_AIM = auto()
+    PROTECTION_FROM_EVIL_AND_GOOD = auto()
+    GIANTS_MIGHT = auto()
+    RUNIC_SHIELD = auto()
+    CLOUD_RUNE = auto()
+    FIRE_RUNE = auto()
+    FROST_RUNE = auto()
+    STONE_RUNE = auto()
+    HILL_RUNE = auto()
+    STORM_RUNE = auto()
+    UNLEASH_INCARNATION = auto()
+    SHADOW_MARTYR = auto()
+    RECLAIM_POTENTIAL = auto()
+    PSIONIC_ENERGY_DICE = auto()
+    PSIONIC_ENERGY_RECOVERY = auto()
+    TELEKINETIC_MOVEMENT = auto()
+    PSI_POWERED_LEAP = auto()
+    BULWARK_OF_FORCE = auto()
+    TELEKINETIC_MASTER = auto()
+    FIRST_LEVEL_SPELL_SLOTS = auto()
+    SECOND_LEVEL_SPELL_SLOTS = auto()
+    THIRD_LEVEL_SPELL_SLOTS = auto()
+    FOURTH_LEVEL_SPELL_SLOTS = auto()
 
 
 class FighterSubclassRollActionType(Enum):
     WARDING_MANEUVER = auto()
     BRUTE_FORCE = auto()
     BRUTISH_DURABILITY = auto()
+    GIANTS_MIGHT_DAMAGE = auto()
+    FIRE_RUNE_SHACKLES = auto()
+    RECLAIM_POTENTIAL = auto()
+    PROTECTIVE_FIELD = auto()
+    PSIONIC_STRIKE = auto()
 
 
 @dataclass(frozen=True)
@@ -101,12 +190,363 @@ class BruteForceProgression:
     die: DiceType
 
 
+@dataclass(frozen=True)
+class EldritchKnightSpellcastingProgression:
+    fighter_level: int
+    cantrips_known: int
+    spells_known: int
+    first_level_slots: int = 0
+    second_level_slots: int = 0
+    third_level_slots: int = 0
+    fourth_level_slots: int = 0
+
+
 BRUTE_FORCE_PROGRESSION: tuple[BruteForceProgression, ...] = (
     BruteForceProgression(minimum_level=3, die=DiceType.D4),
     BruteForceProgression(minimum_level=10, die=DiceType.D6),
     BruteForceProgression(minimum_level=16, die=DiceType.D8),
     BruteForceProgression(minimum_level=20, die=DiceType.D10),
 )
+
+
+ELDRITCH_KNIGHT_SPELLCASTING: dict[int, EldritchKnightSpellcastingProgression] = {
+    3: EldritchKnightSpellcastingProgression(3, 2, 3, first_level_slots=2),
+    4: EldritchKnightSpellcastingProgression(4, 2, 4, first_level_slots=3),
+    5: EldritchKnightSpellcastingProgression(5, 2, 4, first_level_slots=3),
+    6: EldritchKnightSpellcastingProgression(6, 2, 4, first_level_slots=3),
+    7: EldritchKnightSpellcastingProgression(7, 2, 5, first_level_slots=4, second_level_slots=2),
+    8: EldritchKnightSpellcastingProgression(8, 2, 6, first_level_slots=4, second_level_slots=2),
+    9: EldritchKnightSpellcastingProgression(9, 2, 6, first_level_slots=4, second_level_slots=2),
+    10: EldritchKnightSpellcastingProgression(10, 3, 7, first_level_slots=4, second_level_slots=3),
+    11: EldritchKnightSpellcastingProgression(11, 3, 8, first_level_slots=4, second_level_slots=3),
+    12: EldritchKnightSpellcastingProgression(12, 3, 8, first_level_slots=4, second_level_slots=3),
+    13: EldritchKnightSpellcastingProgression(13, 3, 9, first_level_slots=4, second_level_slots=3, third_level_slots=2),
+    14: EldritchKnightSpellcastingProgression(14, 3, 10, first_level_slots=4, second_level_slots=3, third_level_slots=2),
+    15: EldritchKnightSpellcastingProgression(15, 3, 10, first_level_slots=4, second_level_slots=3, third_level_slots=2),
+    16: EldritchKnightSpellcastingProgression(16, 3, 11, first_level_slots=4, second_level_slots=3, third_level_slots=3),
+    17: EldritchKnightSpellcastingProgression(17, 3, 11, first_level_slots=4, second_level_slots=3, third_level_slots=3),
+    18: EldritchKnightSpellcastingProgression(18, 3, 11, first_level_slots=4, second_level_slots=3, third_level_slots=3),
+    19: EldritchKnightSpellcastingProgression(19, 3, 12, first_level_slots=4, second_level_slots=3, third_level_slots=3, fourth_level_slots=1),
+    20: EldritchKnightSpellcastingProgression(20, 3, 13, first_level_slots=4, second_level_slots=3, third_level_slots=3, fourth_level_slots=1),
+}
+
+
+ELDRITCH_KNIGHT_SPELL_CATALOG: dict[str, SpellEntry] = {
+    "boomingBlade": SpellEntry(
+        id="boomingBlade",
+        name="Booming Blade",
+        source="Wizard",
+        level=0,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Self",
+        duration="1 round",
+        components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Make a melee weapon attack; on a hit, the target takes the weapon's normal effects and is sheathed in booming energy.",
+    ),
+    "fireBolt": SpellEntry(
+        id="fireBolt",
+        name="Fire Bolt",
+        source="Wizard",
+        level=0,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="120 feet",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Make a ranged spell attack that deals fire damage on a hit.",
+    ),
+    "greenFlameBlade": SpellEntry(
+        id="greenFlameBlade",
+        name="Green-Flame Blade",
+        source="Wizard",
+        level=0,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Self",
+        duration="Instantaneous",
+        components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Make a melee weapon attack; green fire can leap from the target to another nearby creature.",
+    ),
+    "light": SpellEntry(
+        id="light",
+        name="Light",
+        source="Wizard",
+        level=0,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Touch",
+        duration="1 hour",
+        components=[SpellComponent.VERBAL, SpellComponent.MATERIAL],
+        description="Make one touched object shed bright and dim light.",
+    ),
+    "mageHand": SpellEntry(
+        id="mageHand",
+        name="Mage Hand",
+        source="Wizard",
+        level=0,
+        school=SpellSchool.CONJURATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="30 feet",
+        duration="1 minute",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Create a spectral hand that can manipulate objects.",
+    ),
+    "minorIllusion": SpellEntry(
+        id="minorIllusion",
+        name="Minor Illusion",
+        source="Wizard",
+        level=0,
+        school=SpellSchool.ILLUSION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="30 feet",
+        duration="1 minute",
+        components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Create a sound or image illusion.",
+    ),
+    "prestidigitation": SpellEntry(
+        id="prestidigitation",
+        name="Prestidigitation",
+        source="Wizard",
+        level=0,
+        school=SpellSchool.TRANSMUTATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="10 feet",
+        duration="Up to 1 hour",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Perform a minor magical trick.",
+    ),
+    "rayOfFrost": SpellEntry(
+        id="rayOfFrost",
+        name="Ray of Frost",
+        source="Wizard",
+        level=0,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="60 feet",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Make a ranged spell attack that deals cold damage and slows the target.",
+    ),
+    "shockingGrasp": SpellEntry(
+        id="shockingGrasp",
+        name="Shocking Grasp",
+        source="Wizard",
+        level=0,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Touch",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Make a melee spell attack that deals lightning damage and can prevent reactions.",
+    ),
+    "absorbElements": SpellEntry(
+        id="absorbElements",
+        name="Absorb Elements",
+        source="Wizard",
+        level=1,
+        school=SpellSchool.ABJURATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 reaction",
+        range="Self",
+        duration="1 round",
+        components=[SpellComponent.SOMATIC],
+        description="Gain resistance to incoming acid, cold, fire, lightning, or thunder damage and empower your next melee attack.",
+    ),
+    "burningHands": SpellEntry(
+        id="burningHands",
+        name="Burning Hands",
+        source="Wizard",
+        level=1,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Self",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Creatures in a 15-foot cone make a Dexterity save or take fire damage.",
+    ),
+    "chromaticOrb": SpellEntry(
+        id="chromaticOrb",
+        name="Chromatic Orb",
+        source="Wizard",
+        level=1,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="90 feet",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Make a ranged spell attack that deals a chosen elemental damage type.",
+    ),
+    "magicMissile": SpellEntry(
+        id="magicMissile",
+        name="Magic Missile",
+        source="Wizard",
+        level=1,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="120 feet",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Create darts of magical force that hit automatically.",
+    ),
+    "protectionFromEvilAndGood": SpellEntry(
+        id="protectionFromEvilAndGood",
+        name="Protection from Evil and Good",
+        source="Wizard",
+        level=1,
+        school=SpellSchool.ABJURATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Touch",
+        duration="Up to 10 minutes",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        concentration=True,
+        description="Protect a willing creature against several supernatural creature types.",
+    ),
+    "shield": SpellEntry(
+        id="shield",
+        name="Shield",
+        source="Wizard",
+        level=1,
+        school=SpellSchool.ABJURATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 reaction",
+        range="Self",
+        duration="1 round",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Gain +5 AC until the start of your next turn, including against the triggering attack.",
+    ),
+    "thunderwave": SpellEntry(
+        id="thunderwave",
+        name="Thunderwave",
+        source="Wizard",
+        level=1,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Self",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Creatures in a 15-foot cube make a Constitution save or take thunder damage and are pushed.",
+    ),
+    "wardingWind": SpellEntry(
+        id="wardingWind",
+        name="Warding Wind",
+        source="Wizard",
+        level=2,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Self",
+        duration="Up to 10 minutes",
+        components=[SpellComponent.VERBAL],
+        concentration=True,
+        description="A strong wind surrounds you, deafening the area and hindering ranged attacks and movement.",
+    ),
+    "scorchingRay": SpellEntry(
+        id="scorchingRay",
+        name="Scorching Ray",
+        source="Wizard",
+        level=2,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="120 feet",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+        description="Make three ranged spell attacks that deal fire damage.",
+    ),
+    "shatter": SpellEntry(
+        id="shatter",
+        name="Shatter",
+        source="Wizard",
+        level=2,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="60 feet",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Creatures in a 10-foot-radius sphere make a Constitution save or take thunder damage.",
+    ),
+    "counterspell": SpellEntry(
+        id="counterspell",
+        name="Counterspell",
+        source="Wizard",
+        level=3,
+        school=SpellSchool.ABJURATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 reaction",
+        range="60 feet",
+        duration="Instantaneous",
+        components=[SpellComponent.SOMATIC],
+        description="Interrupt a creature casting a spell.",
+    ),
+    "fireball": SpellEntry(
+        id="fireball",
+        name="Fireball",
+        source="Wizard",
+        level=3,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="150 feet",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Creatures in a 20-foot-radius sphere make a Dexterity save or take fire damage.",
+    ),
+    "lightningBolt": SpellEntry(
+        id="lightningBolt",
+        name="Lightning Bolt",
+        source="Wizard",
+        level=3,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Self",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Creatures in a 100-foot line make a Dexterity save or take lightning damage.",
+    ),
+    "fireShield": SpellEntry(
+        id="fireShield",
+        name="Fire Shield",
+        source="Wizard",
+        level=4,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="Self",
+        duration="10 minutes",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Gain resistance and damage attackers with flame or chill energy.",
+    ),
+    "iceStorm": SpellEntry(
+        id="iceStorm",
+        name="Ice Storm",
+        source="Wizard",
+        level=4,
+        school=SpellSchool.EVOCATION,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime="1 action",
+        range="300 feet",
+        duration="Instantaneous",
+        components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+        description="Creatures in a cylinder make a Dexterity save or take bludgeoning and cold damage.",
+    ),
+}
 
 
 SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
@@ -334,6 +774,251 @@ SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
         activation=TimeEconomy.SPECIAL,
         description="If you take the Attack action on your first turn of combat, make one additional ranged weapon attack as part of that action.",
     ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.MONSTER_HUNTER,
+        featureType=MonsterHunterFeatureType.BONUS_PROFICIENCIES,
+        minimum_level=3,
+        activation=TimeEconomy.PASSIVE,
+        description="Gain proficiency in two of Arcana, History, Insight, Investigation, Nature, or Perception. A tool proficiency can replace one skill choice.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.MONSTER_HUNTER,
+        featureType=MonsterHunterFeatureType.COMBAT_SUPERIORITY,
+        minimum_level=3,
+        activation=TimeEconomy.SPECIAL,
+        description="Gain Monster Hunter superiority dice for Hunter's Damage, Hunter's Will, and Hunter's Eye. Superiority dice are tracked as a resource.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.MONSTER_HUNTER,
+        featureType=MonsterHunterFeatureType.HUNTERS_MYSTICISM,
+        minimum_level=3,
+        activation=TimeEconomy.SPECIAL,
+        description="Cast Detect Magic as a ritual and Protection from Evil and Good once per long rest. Wisdom is your spellcasting ability for these spells. Also learn Abyssal, Celestial, or Infernal.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.MONSTER_HUNTER,
+        featureType=MonsterHunterFeatureType.MONSTER_SLAYER,
+        minimum_level=7,
+        activation=TimeEconomy.SPECIAL,
+        description="When you expend superiority dice for damage, you can expend up to two dice. Against aberrations, fey, fiends, or undead, those dice deal maximum damage.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.MONSTER_HUNTER,
+        featureType=MonsterHunterFeatureType.IMPROVED_COMBAT_SUPERIORITY,
+        minimum_level=10,
+        activation=TimeEconomy.PASSIVE,
+        description="Your Monster Hunter superiority dice become d10s at Fighter level 10 and d12s at Fighter level 18.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.MONSTER_HUNTER,
+        featureType=MonsterHunterFeatureType.RELENTLESS,
+        minimum_level=15,
+        activation=TimeEconomy.SPECIAL,
+        description="When you roll Initiative and have no superiority dice remaining, regain 1 superiority die.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ARCANE_ARCHER,
+        featureType=ArcaneArcherFeatureType.ARCANE_ARCHER_LORE,
+        minimum_level=3,
+        activation=TimeEconomy.PASSIVE,
+        description="Gain Arcana or Nature proficiency and learn either Prestidigitation or Druidcraft.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ARCANE_ARCHER,
+        featureType=ArcaneArcherFeatureType.ARCANE_SHOT,
+        minimum_level=3,
+        activation=TimeEconomy.SPECIAL,
+        description="Apply an Arcane Shot option to a shortbow or longbow arrow. Save DC is 8 + Proficiency Bonus + Intelligence modifier.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ARCANE_ARCHER,
+        featureType=ArcaneArcherFeatureType.MAGIC_ARROW,
+        minimum_level=7,
+        activation=TimeEconomy.PASSIVE,
+        description="Nonmagical shortbow and longbow arrows count as magical for overcoming resistance and immunity.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ARCANE_ARCHER,
+        featureType=ArcaneArcherFeatureType.CURVING_SHOT,
+        minimum_level=7,
+        activation=TimeEconomy.BONUS_ACTION,
+        description="When you miss with a magic arrow, reroll the attack against a different target within 60 feet of the original target.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ARCANE_ARCHER,
+        featureType=ArcaneArcherFeatureType.EVER_READY_SHOT,
+        minimum_level=15,
+        activation=TimeEconomy.SPECIAL,
+        description="When you roll Initiative and have no Arcane Shot uses remaining, regain 1 use.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.RUNE_KNIGHT,
+        featureType=RuneKnightFeatureType.BONUS_PROFICIENCIES,
+        minimum_level=3,
+        activation=TimeEconomy.PASSIVE,
+        description="Gain smith's tools proficiency and learn Giant.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.RUNE_KNIGHT,
+        featureType=RuneKnightFeatureType.RUNE_CARVER,
+        minimum_level=3,
+        activation=TimeEconomy.SPECIAL,
+        description="Inscribe known runes on eligible objects after a long rest. Rune Magic save DC is 8 + Proficiency Bonus + Constitution modifier.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.RUNE_KNIGHT,
+        featureType=RuneKnightFeatureType.GIANTS_MIGHT,
+        minimum_level=3,
+        activation=TimeEconomy.BONUS_ACTION,
+        description="Become Large if possible for 1 minute, gain Advantage on Strength checks and saves, and add extra weapon or unarmed strike damage once on each turn.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.RUNE_KNIGHT,
+        featureType=RuneKnightFeatureType.RUNIC_SHIELD,
+        minimum_level=7,
+        activation=TimeEconomy.REACTION,
+        description="When another creature within 60 feet is hit by an attack roll, force the attacker to reroll the d20 and use the new roll.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.RUNE_KNIGHT,
+        featureType=RuneKnightFeatureType.GREAT_STATURE,
+        minimum_level=10,
+        activation=TimeEconomy.PASSIVE,
+        description="Grow 3d4 inches, and Giant's Might extra damage becomes 1d8.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.RUNE_KNIGHT,
+        featureType=RuneKnightFeatureType.MASTER_OF_RUNES,
+        minimum_level=15,
+        activation=TimeEconomy.PASSIVE,
+        description="Invoke each known rune twice between rests instead of once.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.RUNE_KNIGHT,
+        featureType=RuneKnightFeatureType.RUNIC_JUGGERNAUT,
+        minimum_level=18,
+        activation=TimeEconomy.PASSIVE,
+        description="Giant's Might extra damage becomes 1d10; you can become Huge and gain 5 feet of reach while Huge.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ECHO_KNIGHT,
+        featureType=EchoKnightFeatureType.MANIFEST_ECHO,
+        minimum_level=3,
+        activation=TimeEconomy.BONUS_ACTION,
+        description="Manifest a magical echo in an unoccupied space within 15 feet. It has AC 14 + Proficiency Bonus, 1 HP, and can move up to 30 feet on your turn.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ECHO_KNIGHT,
+        featureType=EchoKnightFeatureType.UNLEASH_INCARNATION,
+        minimum_level=3,
+        activation=TimeEconomy.SPECIAL,
+        description="When you take the Attack action, make one additional melee attack from the echo's position.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ECHO_KNIGHT,
+        featureType=EchoKnightFeatureType.ECHO_AVATAR,
+        minimum_level=7,
+        activation=TimeEconomy.ACTION,
+        description="See and hear through your echo for up to 10 minutes while you are deafened and blinded; during this use, the echo can be up to 1,000 feet away.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ECHO_KNIGHT,
+        featureType=EchoKnightFeatureType.SHADOW_MARTYR,
+        minimum_level=10,
+        activation=TimeEconomy.REACTION,
+        description="Before an attack roll against another creature, teleport your echo near the target and have the attack target the echo instead.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ECHO_KNIGHT,
+        featureType=EchoKnightFeatureType.RECLAIM_POTENTIAL,
+        minimum_level=15,
+        activation=TimeEconomy.SPECIAL,
+        description="When your echo is destroyed by damage and you have no temporary HP, gain 2d6 + Constitution modifier temporary hit points.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ECHO_KNIGHT,
+        featureType=EchoKnightFeatureType.LEGION_OF_ONE,
+        minimum_level=18,
+        activation=TimeEconomy.BONUS_ACTION,
+        description="Manifest two echoes at once, and regain 1 Unleash Incarnation use when rolling Initiative with none remaining.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.PSI_WARRIOR,
+        featureType=PsiWarriorFeatureType.PSIONIC_POWER,
+        minimum_level=3,
+        activation=TimeEconomy.SPECIAL,
+        description="Use Psionic Energy dice for Protective Field, Psionic Strike, and Telekinetic Movement. Save DC is 8 + Proficiency Bonus + Intelligence modifier.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.PSI_WARRIOR,
+        featureType=PsiWarriorFeatureType.TELEKINETIC_ADEPT,
+        minimum_level=7,
+        activation=TimeEconomy.SPECIAL,
+        description="Gain Psi-Powered Leap and Telekinetic Thrust. Telekinetic Thrust can knock a Psionic Strike target prone or move it on a failed Strength save.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.PSI_WARRIOR,
+        featureType=PsiWarriorFeatureType.GUARDED_MIND,
+        minimum_level=10,
+        activation=TimeEconomy.SPECIAL,
+        description="Gain resistance to psychic damage, and expend one Psionic Energy die to end charm or frighten effects on yourself at the start of your turn.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.PSI_WARRIOR,
+        featureType=PsiWarriorFeatureType.BULWARK_OF_FORCE,
+        minimum_level=15,
+        activation=TimeEconomy.BONUS_ACTION,
+        description="Protect visible creatures within 30 feet, up to Intelligence modifier minimum one, with half cover for 1 minute.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.PSI_WARRIOR,
+        featureType=PsiWarriorFeatureType.TELEKINETIC_MASTER,
+        minimum_level=18,
+        activation=TimeEconomy.ACTION,
+        description="Cast Telekinesis without components using Intelligence as your spellcasting ability, and make one weapon attack as a Bonus Action on each turn while concentrating.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ELDRITCH_KNIGHT,
+        featureType=EldritchKnightFeatureType.SPELLCASTING,
+        minimum_level=3,
+        activation=TimeEconomy.SPECIAL,
+        description="Cast wizard spells using Intelligence. Spell save DC is 8 + Proficiency Bonus + Intelligence modifier; spell attack modifier is Proficiency Bonus + Intelligence modifier. Most spells known must be abjuration or evocation, except the flexible choices gained at Fighter levels 3, 8, 14, and 20.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ELDRITCH_KNIGHT,
+        featureType=EldritchKnightFeatureType.WEAPON_BOND,
+        minimum_level=3,
+        activation=TimeEconomy.BONUS_ACTION,
+        description="Bond with up to two weapons by ritual. You cannot be disarmed of a bonded weapon while conscious, and can summon one bonded weapon to your hand as a Bonus Action if it is on the same plane.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ELDRITCH_KNIGHT,
+        featureType=EldritchKnightFeatureType.WAR_MAGIC,
+        minimum_level=7,
+        activation=TimeEconomy.BONUS_ACTION,
+        description="When you use your Action to cast a cantrip, make one weapon attack as a Bonus Action.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ELDRITCH_KNIGHT,
+        featureType=EldritchKnightFeatureType.ELDRITCH_STRIKE,
+        minimum_level=10,
+        activation=TimeEconomy.SPECIAL,
+        description="When you hit a creature with a weapon attack, it has Disadvantage on the next saving throw it makes against a spell you cast before the end of your next turn.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ELDRITCH_KNIGHT,
+        featureType=EldritchKnightFeatureType.ARCANE_CHARGE,
+        minimum_level=15,
+        activation=TimeEconomy.SPECIAL,
+        description="When you use Action Surge, teleport up to 30 feet to an unoccupied space you can see before or after the additional action.",
+    ),
+    SubclassFeatureProgression(
+        subclass=FighterSubclassType.ELDRITCH_KNIGHT,
+        featureType=EldritchKnightFeatureType.IMPROVED_WAR_MAGIC,
+        minimum_level=18,
+        activation=TimeEconomy.BONUS_ACTION,
+        description="When you use your Action to cast a spell, make one weapon attack as a Bonus Action.",
+    ),
 )
 
 
@@ -345,13 +1030,7 @@ def fighter_subclass_features(subclass: FighterSubclassType | None, fighter_leve
     if subclass == FighterSubclassType.BATTLE_MASTER:
         return battle_master_features(subclass_character_class(subclass, fighter_level_value), fighter_level_value)
     return [
-        SheetFeature(
-            id=enum_key(progression.featureType),
-            name=enum_label(progression.featureType),
-            source=enum_label(progression.subclass),
-            activation=progression.activation,
-            description=progression.description,
-        )
+        subclass_feature(progression, fighter_level_value)
         for progression in SUBCLASS_FEATURES
         if progression.subclass == subclass and fighter_level_value >= progression.minimum_level
     ]
@@ -364,6 +1043,34 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
     subclass = character_class.subclass
     fighter_level_value = character_class.level
     resources: list[ResourceTracker] = []
+    if subclass == FighterSubclassType.ELDRITCH_KNIGHT and fighter_level_value >= 3:
+        progression = eldritch_knight_spellcasting(fighter_level_value)
+        for resource_type, slot_level, max_uses in eldritch_knight_spell_slot_resources(progression):
+            resources.append(
+                ResourceTracker(
+                    id=enum_key(resource_type),
+                    name=enum_label(resource_type),
+                    currentUses=max_uses,
+                    maxUses=max_uses,
+                    reset=RestType.LONG_REST,
+                    activation=TimeEconomy.ACTION,
+                    description=f"Spend to cast an Eldritch Knight spell using a level {slot_level} spell slot.",
+                    source=enum_label(FighterSubclassType.ELDRITCH_KNIGHT),
+                )
+            )
+    if subclass == FighterSubclassType.ARCANE_ARCHER and fighter_level_value >= 3:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.ARCANE_SHOT),
+                name=enum_label(FighterSubclassResourceType.ARCANE_SHOT),
+                currentUses=2,
+                maxUses=2,
+                reset=RestType.SHORT_REST,
+                activation=TimeEconomy.SPECIAL,
+                description="Spend a use to apply one Arcane Shot option to a shortbow or longbow arrow.",
+                source=enum_label(FighterSubclassType.ARCANE_ARCHER),
+            )
+        )
     if subclass == FighterSubclassType.CAVALIER and fighter_level_value >= 3:
         resources.append(
             ResourceTracker(
@@ -442,6 +1149,211 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 source=enum_label(FighterSubclassType.SHARPSHOOTER),
             )
         )
+    if subclass == FighterSubclassType.MONSTER_HUNTER and fighter_level_value >= 3:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.PROTECTION_FROM_EVIL_AND_GOOD),
+                name=enum_label(FighterSubclassResourceType.PROTECTION_FROM_EVIL_AND_GOOD),
+                currentUses=1,
+                maxUses=1,
+                reset=RestType.LONG_REST,
+                activation=TimeEconomy.ACTION,
+                description="Cast Protection from Evil and Good with Wisdom as your spellcasting ability.",
+                source=enum_label(FighterSubclassType.MONSTER_HUNTER),
+            )
+        )
+    if subclass == FighterSubclassType.RUNE_KNIGHT and fighter_level_value >= 3:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.GIANTS_MIGHT),
+                name=enum_label(FighterSubclassResourceType.GIANTS_MIGHT),
+                currentUses=proficiency_bonus_for_level(fighter_level_value),
+                maxUses=proficiency_bonus_for_level(fighter_level_value),
+                reset=RestType.LONG_REST,
+                activation=TimeEconomy.BONUS_ACTION,
+                description="Become Large if possible and gain Giant's Might benefits for 1 minute.",
+                source=enum_label(FighterSubclassType.RUNE_KNIGHT),
+            )
+        )
+        for rune in selected_runes(character_class, fighter_level_value):
+            resources.append(
+                ResourceTracker(
+                    id=enum_key(rune),
+                    name=enum_label(rune),
+                    currentUses=rune_uses(fighter_level_value),
+                    maxUses=rune_uses(fighter_level_value),
+                    reset=RestType.SHORT_REST,
+                    activation=rune_activation(rune),
+                    description=rune_resource_description(rune),
+                    source=enum_label(FighterSubclassType.RUNE_KNIGHT),
+                )
+            )
+    if subclass == FighterSubclassType.RUNE_KNIGHT and fighter_level_value >= 7:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.RUNIC_SHIELD),
+                name=enum_label(FighterSubclassResourceType.RUNIC_SHIELD),
+                currentUses=proficiency_bonus_for_level(fighter_level_value),
+                maxUses=proficiency_bonus_for_level(fighter_level_value),
+                reset=RestType.LONG_REST,
+                activation=TimeEconomy.REACTION,
+                description="Force an attacker to reroll a hit against another creature within 60 feet.",
+                source=enum_label(FighterSubclassType.RUNE_KNIGHT),
+            )
+        )
+    if subclass == FighterSubclassType.ECHO_KNIGHT and fighter_level_value >= 3:
+        uses = max(1, ability_modifier(ability_scores.constitution if ability_scores else 10))
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.UNLEASH_INCARNATION),
+                name=enum_label(FighterSubclassResourceType.UNLEASH_INCARNATION),
+                currentUses=uses,
+                maxUses=uses,
+                reset=RestType.LONG_REST,
+                activation=TimeEconomy.SPECIAL,
+                description="Make one additional melee attack from your echo's position when you take the Attack action.",
+                source=enum_label(FighterSubclassType.ECHO_KNIGHT),
+            )
+        )
+    if subclass == FighterSubclassType.ECHO_KNIGHT and fighter_level_value >= 10:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.SHADOW_MARTYR),
+                name=enum_label(FighterSubclassResourceType.SHADOW_MARTYR),
+                currentUses=1,
+                maxUses=1,
+                reset=RestType.SHORT_REST,
+                activation=TimeEconomy.REACTION,
+                description="Redirect an attack against another creature to your echo.",
+                source=enum_label(FighterSubclassType.ECHO_KNIGHT),
+            )
+        )
+    if subclass == FighterSubclassType.ECHO_KNIGHT and fighter_level_value >= 15:
+        uses = max(1, ability_modifier(ability_scores.constitution if ability_scores else 10))
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.RECLAIM_POTENTIAL),
+                name=enum_label(FighterSubclassResourceType.RECLAIM_POTENTIAL),
+                currentUses=uses,
+                maxUses=uses,
+                reset=RestType.LONG_REST,
+                activation=TimeEconomy.SPECIAL,
+                description="Gain 2d6 + Constitution modifier temporary hit points when your echo is destroyed by damage.",
+                rollActions=[
+                    RollAction(
+                        id=FighterSubclassRollActionType.RECLAIM_POTENTIAL,
+                        name=FighterSubclassRollActionType.RECLAIM_POTENTIAL,
+                        diceCount=2,
+                        diceType=DiceType.D6,
+                        staticModifier=ability_modifier(ability_scores.constitution if ability_scores else 10),
+                        consumesResource=FighterSubclassResourceType.RECLAIM_POTENTIAL,
+                        source=enum_label(FighterSubclassType.ECHO_KNIGHT),
+                    )
+                ],
+                source=enum_label(FighterSubclassType.ECHO_KNIGHT),
+            )
+        )
+    if subclass == FighterSubclassType.PSI_WARRIOR and fighter_level_value >= 3:
+        psi_die = psionic_energy_die(fighter_level_value)
+        intelligence_modifier = ability_modifier(ability_scores.intelligence if ability_scores else 10)
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.PSIONIC_ENERGY_DICE),
+                name=enum_label(FighterSubclassResourceType.PSIONIC_ENERGY_DICE),
+                currentUses=2 * proficiency_bonus_for_level(fighter_level_value),
+                maxUses=2 * proficiency_bonus_for_level(fighter_level_value),
+                reset=RestType.LONG_REST,
+                activation=TimeEconomy.SPECIAL,
+                description=f"Spend Psionic Energy dice ({enum_key(psi_die)}) to fuel Psi Warrior powers.",
+                rollActions=[
+                    RollAction(
+                        id=FighterSubclassRollActionType.PROTECTIVE_FIELD,
+                        name=FighterSubclassRollActionType.PROTECTIVE_FIELD,
+                        diceCount=1,
+                        diceType=psi_die,
+                        staticModifier=intelligence_modifier,
+                        consumesResource=FighterSubclassResourceType.PSIONIC_ENERGY_DICE,
+                        activation=TimeEconomy.REACTION,
+                        source=enum_label(FighterSubclassType.PSI_WARRIOR),
+                    ),
+                    RollAction(
+                        id=FighterSubclassRollActionType.PSIONIC_STRIKE,
+                        name=FighterSubclassRollActionType.PSIONIC_STRIKE,
+                        diceCount=1,
+                        diceType=psi_die,
+                        staticModifier=intelligence_modifier,
+                        consumesResource=FighterSubclassResourceType.PSIONIC_ENERGY_DICE,
+                        activation=TimeEconomy.SPECIAL,
+                        source=enum_label(FighterSubclassType.PSI_WARRIOR),
+                        damageType=DamageType.FORCE,
+                    ),
+                ],
+                source=enum_label(FighterSubclassType.PSI_WARRIOR),
+            )
+        )
+        resources.extend(
+            [
+                ResourceTracker(
+                    id=enum_key(FighterSubclassResourceType.PSIONIC_ENERGY_RECOVERY),
+                    name=enum_label(FighterSubclassResourceType.PSIONIC_ENERGY_RECOVERY),
+                    currentUses=1,
+                    maxUses=1,
+                    reset=RestType.SHORT_REST,
+                    activation=TimeEconomy.BONUS_ACTION,
+                    description="Regain one expended Psionic Energy die.",
+                    source=enum_label(FighterSubclassType.PSI_WARRIOR),
+                ),
+                ResourceTracker(
+                    id=enum_key(FighterSubclassResourceType.TELEKINETIC_MOVEMENT),
+                    name=enum_label(FighterSubclassResourceType.TELEKINETIC_MOVEMENT),
+                    currentUses=1,
+                    maxUses=1,
+                    reset=RestType.SHORT_REST,
+                    activation=TimeEconomy.ACTION,
+                    description="Move a willing creature or loose object within 30 feet. Spend a Psionic Energy die to use again.",
+                    source=enum_label(FighterSubclassType.PSI_WARRIOR),
+                ),
+            ]
+        )
+    if subclass == FighterSubclassType.PSI_WARRIOR and fighter_level_value >= 7:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.PSI_POWERED_LEAP),
+                name=enum_label(FighterSubclassResourceType.PSI_POWERED_LEAP),
+                currentUses=1,
+                maxUses=1,
+                reset=RestType.SHORT_REST,
+                activation=TimeEconomy.BONUS_ACTION,
+                description="Gain a flying speed equal to twice your walking speed until the end of the turn. Spend a Psionic Energy die to use again.",
+                source=enum_label(FighterSubclassType.PSI_WARRIOR),
+            )
+        )
+    if subclass == FighterSubclassType.PSI_WARRIOR and fighter_level_value >= 15:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.BULWARK_OF_FORCE),
+                name=enum_label(FighterSubclassResourceType.BULWARK_OF_FORCE),
+                currentUses=1,
+                maxUses=1,
+                reset=RestType.LONG_REST,
+                activation=TimeEconomy.BONUS_ACTION,
+                description="Grant half cover for 1 minute to visible creatures within 30 feet, up to Intelligence modifier minimum one. Spend a Psionic Energy die to use again.",
+                source=enum_label(FighterSubclassType.PSI_WARRIOR),
+            )
+        )
+    if subclass == FighterSubclassType.PSI_WARRIOR and fighter_level_value >= 18:
+        resources.append(
+            ResourceTracker(
+                id=enum_key(FighterSubclassResourceType.TELEKINETIC_MASTER),
+                name=enum_label(FighterSubclassResourceType.TELEKINETIC_MASTER),
+                currentUses=1,
+                maxUses=1,
+                reset=RestType.LONG_REST,
+                activation=TimeEconomy.ACTION,
+                description="Cast Telekinesis without components. Spend a Psionic Energy die to use again.",
+                source=enum_label(FighterSubclassType.PSI_WARRIOR),
+            )
+        )
     return resources
 
 
@@ -452,6 +1364,30 @@ def fighter_subclass_abilities(classes) -> list[SheetAbility]:
     subclass = character_class.subclass
     fighter_level_value = character_class.level
     abilities: list[SheetAbility] = []
+    if subclass == FighterSubclassType.ELDRITCH_KNIGHT and fighter_level_value >= 3:
+        progression = eldritch_knight_spellcasting(fighter_level_value)
+        for resource_type, slot_level, _max_uses in eldritch_knight_spell_slot_resources(progression):
+            abilities.append(
+                resource_ability(
+                    resource_type,
+                    FighterSubclassType.ELDRITCH_KNIGHT,
+                    TimeEconomy.ACTION,
+                    f"Track level {slot_level} Eldritch Knight spell slots. Regain expended slots on a long rest.",
+                )
+            )
+    if subclass == FighterSubclassType.ARCANE_ARCHER and fighter_level_value >= 3:
+        for arcane_shot in selected_arcane_shots(character_class):
+            abilities.append(
+                SheetAbility(
+                    id=enum_key(arcane_shot),
+                    name=enum_label(arcane_shot),
+                    source=enum_label(FighterSubclassType.ARCANE_ARCHER),
+                    activation=TimeEconomy.SPECIAL,
+                    description=arcane_shot_description(arcane_shot, fighter_level_value),
+                    resourceId=enum_key(FighterSubclassResourceType.ARCANE_SHOT),
+                    rollActions=arcane_shot_roll_actions(arcane_shot, fighter_level_value),
+                )
+            )
     if subclass == FighterSubclassType.BRUTE and fighter_level_value >= 3:
         die = brute_force_die(fighter_level_value)
         if die is not None:
@@ -494,7 +1430,418 @@ def fighter_subclass_abilities(classes) -> list[SheetAbility]:
                 ],
             )
         )
+    if subclass == FighterSubclassType.RUNE_KNIGHT and fighter_level_value >= 3:
+        giant_die = giants_might_die(fighter_level_value)
+        abilities.append(
+            SheetAbility(
+                id=enum_key(FighterSubclassResourceType.GIANTS_MIGHT),
+                name=enum_label(FighterSubclassResourceType.GIANTS_MIGHT),
+                source=enum_label(FighterSubclassType.RUNE_KNIGHT),
+                activation=TimeEconomy.BONUS_ACTION,
+                description="Activate Giant's Might, then roll this extra damage once on each of your turns when a weapon or unarmed strike hits.",
+                resourceId=enum_key(FighterSubclassResourceType.GIANTS_MIGHT),
+                rollActions=[
+                    RollAction(
+                        id=FighterSubclassRollActionType.GIANTS_MIGHT_DAMAGE,
+                        name=FighterSubclassRollActionType.GIANTS_MIGHT_DAMAGE,
+                        diceCount=1,
+                        diceType=giant_die,
+                        source=enum_label(FighterSubclassType.RUNE_KNIGHT),
+                    )
+                ],
+            )
+        )
+        for rune in selected_runes(character_class, fighter_level_value):
+            abilities.append(
+                SheetAbility(
+                    id=enum_key(rune),
+                    name=enum_label(rune),
+                    source=enum_label(FighterSubclassType.RUNE_KNIGHT),
+                    activation=rune_activation(rune),
+                    description=rune_ability_description(rune),
+                    resourceId=enum_key(rune),
+                    rollActions=rune_roll_actions(rune),
+                )
+            )
+    if subclass == FighterSubclassType.RUNE_KNIGHT and fighter_level_value >= 7:
+        abilities.append(
+            resource_ability(
+                FighterSubclassResourceType.RUNIC_SHIELD,
+                FighterSubclassType.RUNE_KNIGHT,
+                TimeEconomy.REACTION,
+                "Force an attacker to reroll a hit against another creature within 60 feet and use the new roll.",
+            )
+        )
+    if subclass == FighterSubclassType.ECHO_KNIGHT and fighter_level_value >= 3:
+        abilities.append(
+            resource_ability(
+                FighterSubclassResourceType.UNLEASH_INCARNATION,
+                FighterSubclassType.ECHO_KNIGHT,
+                TimeEconomy.SPECIAL,
+                "Make one additional melee attack from your echo's position when you take the Attack action.",
+            )
+        )
+    if subclass == FighterSubclassType.ECHO_KNIGHT and fighter_level_value >= 10:
+        abilities.append(
+            resource_ability(
+                FighterSubclassResourceType.SHADOW_MARTYR,
+                FighterSubclassType.ECHO_KNIGHT,
+                TimeEconomy.REACTION,
+                "Before an attack roll against another creature, teleport your echo near that creature and have the attack target the echo instead.",
+            )
+        )
+    if subclass == FighterSubclassType.PSI_WARRIOR and fighter_level_value >= 3:
+        abilities.extend(
+            [
+                resource_ability(
+                    FighterSubclassResourceType.PSIONIC_ENERGY_RECOVERY,
+                    FighterSubclassType.PSI_WARRIOR,
+                    TimeEconomy.BONUS_ACTION,
+                    "Regain one expended Psionic Energy die.",
+                ),
+                resource_ability(
+                    FighterSubclassResourceType.TELEKINETIC_MOVEMENT,
+                    FighterSubclassType.PSI_WARRIOR,
+                    TimeEconomy.ACTION,
+                    "Move a willing creature or loose object within 30 feet; spend a Psionic Energy die to use again.",
+                ),
+            ]
+        )
+    if subclass == FighterSubclassType.PSI_WARRIOR and fighter_level_value >= 7:
+        abilities.append(
+            resource_ability(
+                FighterSubclassResourceType.PSI_POWERED_LEAP,
+                FighterSubclassType.PSI_WARRIOR,
+                TimeEconomy.BONUS_ACTION,
+                "Gain a flying speed equal to twice your walking speed until the end of the turn; spend a Psionic Energy die to use again.",
+            )
+        )
+    if subclass == FighterSubclassType.PSI_WARRIOR and fighter_level_value >= 10:
+        abilities.append(
+            resource_ability(
+                FighterSubclassResourceType.PSIONIC_ENERGY_DICE,
+                FighterSubclassType.PSI_WARRIOR,
+                TimeEconomy.SPECIAL,
+                "Spend one Psionic Energy die to end every charm or frighten effect on yourself at the start of your turn.",
+                ability_id="guardedMind",
+                ability_name="Guarded Mind",
+            )
+        )
+    if subclass == FighterSubclassType.PSI_WARRIOR and fighter_level_value >= 15:
+        abilities.append(
+            resource_ability(
+                FighterSubclassResourceType.BULWARK_OF_FORCE,
+                FighterSubclassType.PSI_WARRIOR,
+                TimeEconomy.BONUS_ACTION,
+                "Grant half cover for 1 minute to visible creatures within 30 feet, up to Intelligence modifier minimum one; spend a Psionic Energy die to use again.",
+            )
+        )
+    if subclass == FighterSubclassType.PSI_WARRIOR and fighter_level_value >= 18:
+        abilities.append(
+            resource_ability(
+                FighterSubclassResourceType.TELEKINETIC_MASTER,
+                FighterSubclassType.PSI_WARRIOR,
+                TimeEconomy.ACTION,
+                "Cast Telekinesis without components; spend a Psionic Energy die to use again.",
+            )
+        )
     return abilities
+
+
+def fighter_subclass_spells(classes) -> list[SpellEntry]:
+    character_class = fighter_subclass_class(classes)
+    if character_class is None:
+        return []
+    source = enum_label(FighterSubclassType.MONSTER_HUNTER)
+    if character_class.subclass == FighterSubclassType.MONSTER_HUNTER and character_class.level >= 3:
+        return [
+            SpellEntry(
+                id="detectMagic",
+                name="Detect Magic",
+                source=source,
+                level=1,
+                school=SpellSchool.DIVINATION,
+                castingAbility=AbilityType.WISDOM,
+                castingTime="10 minutes",
+                range="Self",
+                duration="Up to 10 minutes",
+                components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
+                ritual=True,
+                concentration=True,
+                description="For the duration, sense magic within 30 feet and use an Action to see a faint aura around visible magical creatures or objects.",
+            ),
+            SpellEntry(
+                id=enum_key(FighterSubclassResourceType.PROTECTION_FROM_EVIL_AND_GOOD),
+                name="Protection from Evil and Good",
+                source=source,
+                level=1,
+                school=SpellSchool.ABJURATION,
+                castingAbility=AbilityType.WISDOM,
+                castingTime="1 action",
+                range="Touch",
+                duration="Up to 10 minutes",
+                components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+                concentration=True,
+                resourceId=enum_key(FighterSubclassResourceType.PROTECTION_FROM_EVIL_AND_GOOD),
+                description="One willing creature is protected against aberrations, celestials, elementals, fey, fiends, and undead.",
+            ),
+        ]
+    if character_class.subclass == FighterSubclassType.PSI_WARRIOR and character_class.level >= 18:
+        return [
+            SpellEntry(
+                id=enum_key(FighterSubclassResourceType.TELEKINETIC_MASTER),
+                name="Telekinesis",
+                source=enum_label(FighterSubclassType.PSI_WARRIOR),
+                level=5,
+                school=SpellSchool.TRANSMUTATION,
+                castingAbility=AbilityType.INTELLIGENCE,
+                castingTime="1 action",
+                range="60 feet",
+                duration="Up to 10 minutes",
+                components=[],
+                concentration=True,
+                resourceId=enum_key(FighterSubclassResourceType.TELEKINETIC_MASTER),
+                description="Move or manipulate creatures and objects with sustained telekinetic force. While concentrating, make one weapon attack as a Bonus Action on each of your turns.",
+            )
+        ]
+    return []
+
+
+def normalized_spellcasting_spells(classes, spells: list[SpellEntry]) -> list[SpellEntry]:
+    character_class = fighter_subclass_class(classes)
+    if character_class is None or character_class.subclass != FighterSubclassType.ELDRITCH_KNIGHT:
+        return spells
+    return [
+        normalized_eldritch_knight_spell(spell)
+        for spell in spells
+    ]
+
+
+def normalized_eldritch_knight_spell(spell: SpellEntry) -> SpellEntry:
+    return SpellEntry(
+        id=spell.id,
+        name=spell.name,
+        source=spell.source or enum_label(FighterSubclassType.ELDRITCH_KNIGHT),
+        level=spell.level,
+        school=spell.school,
+        castingAbility=AbilityType.INTELLIGENCE,
+        castingTime=spell.castingTime,
+        range=spell.range,
+        duration=spell.duration,
+        components=list(spell.components),
+        description=spell.description,
+        concentration=spell.concentration,
+        ritual=spell.ritual,
+        resourceId=spell.resourceId,
+    )
+
+
+def eldritch_knight_spell_options(fighter_level_value: int, selected_spell_ids: list[str] | None = None) -> list[SpellEntry]:
+    selected = set(selected_spell_ids or [])
+    max_spell_level = eldritch_knight_max_spell_level(fighter_level_value)
+    return [
+        normalized_eldritch_knight_spell(spell)
+        for spell in ELDRITCH_KNIGHT_SPELL_CATALOG.values()
+        if spell.id not in selected and (spell.level == 0 or spell.level <= max_spell_level)
+    ]
+
+
+def eldritch_knight_catalog_spell(spell_id: str) -> SpellEntry | None:
+    spell = ELDRITCH_KNIGHT_SPELL_CATALOG.get(spell_id)
+    return normalized_eldritch_knight_spell(spell) if spell is not None else None
+
+
+def eldritch_knight_max_spell_level(fighter_level_value: int) -> int:
+    progression = eldritch_knight_spellcasting(fighter_level_value)
+    if progression.fourth_level_slots:
+        return 4
+    if progression.third_level_slots:
+        return 3
+    if progression.second_level_slots:
+        return 2
+    if progression.first_level_slots:
+        return 1
+    return 0
+
+
+def resource_ability(
+    resource_type: FighterSubclassResourceType,
+    subclass: FighterSubclassType,
+    activation: TimeEconomy,
+    description: str,
+    *,
+    ability_id: str | None = None,
+    ability_name: str | None = None,
+) -> SheetAbility:
+    return SheetAbility(
+        id=ability_id or enum_key(resource_type),
+        name=ability_name or enum_label(resource_type),
+        source=enum_label(subclass),
+        activation=activation,
+        description=description,
+        resourceId=enum_key(resource_type),
+    )
+
+
+def selected_arcane_shots(character_class) -> list[ArcaneShotType]:
+    return character_class.arcaneShots or list(ArcaneShotType)
+
+
+def eldritch_knight_spellcasting(fighter_level_value: int) -> EldritchKnightSpellcastingProgression:
+    eligible_level = max(level for level in ELDRITCH_KNIGHT_SPELLCASTING if fighter_level_value >= level)
+    return ELDRITCH_KNIGHT_SPELLCASTING[eligible_level]
+
+
+def eldritch_knight_spell_slot_resources(
+    progression: EldritchKnightSpellcastingProgression,
+) -> list[tuple[FighterSubclassResourceType, int, int]]:
+    return [
+        slot_resource
+        for slot_resource in [
+            (FighterSubclassResourceType.FIRST_LEVEL_SPELL_SLOTS, 1, progression.first_level_slots),
+            (FighterSubclassResourceType.SECOND_LEVEL_SPELL_SLOTS, 2, progression.second_level_slots),
+            (FighterSubclassResourceType.THIRD_LEVEL_SPELL_SLOTS, 3, progression.third_level_slots),
+            (FighterSubclassResourceType.FOURTH_LEVEL_SPELL_SLOTS, 4, progression.fourth_level_slots),
+        ]
+        if slot_resource[2] > 0
+    ]
+
+
+def subclass_feature(progression: SubclassFeatureProgression, fighter_level_value: int) -> SheetFeature:
+    description = progression.description
+    if progression.subclass == FighterSubclassType.ELDRITCH_KNIGHT and progression.featureType == EldritchKnightFeatureType.SPELLCASTING:
+        spellcasting = eldritch_knight_spellcasting(fighter_level_value)
+        description = f"{description} You know {spellcasting.cantrips_known} cantrips and {spellcasting.spells_known} leveled spells."
+    return SheetFeature(
+        id=enum_key(progression.featureType),
+        name=enum_label(progression.featureType),
+        source=enum_label(progression.subclass),
+        activation=progression.activation,
+        description=description,
+    )
+
+
+def arcane_shot_roll_actions(arcane_shot: ArcaneShotType, fighter_level_value: int) -> list[RollAction] | None:
+    damage_type = arcane_shot_damage_type(arcane_shot)
+    dice_count = arcane_shot_dice_count(arcane_shot, fighter_level_value)
+    if damage_type is None or dice_count <= 0:
+        return None
+    return [
+        RollAction(
+            id=arcane_shot,
+            name=arcane_shot,
+            diceCount=dice_count,
+            diceType=DiceType.D6,
+            consumesResource=FighterSubclassResourceType.ARCANE_SHOT,
+            source=enum_label(FighterSubclassType.ARCANE_ARCHER),
+            damageType=damage_type,
+        )
+    ]
+
+
+def arcane_shot_dice_count(arcane_shot: ArcaneShotType, fighter_level_value: int) -> int:
+    if arcane_shot == ArcaneShotType.BANISHING_ARROW:
+        return 2 if fighter_level_value >= 18 else 0
+    if arcane_shot in {ArcaneShotType.PIERCING_ARROW, ArcaneShotType.SEEKING_ARROW}:
+        return 2 if fighter_level_value >= 18 else 1
+    return 4 if fighter_level_value >= 18 else 2
+
+
+def arcane_shot_damage_type(arcane_shot: ArcaneShotType) -> DamageType | None:
+    return {
+        ArcaneShotType.BANISHING_ARROW: DamageType.FORCE,
+        ArcaneShotType.BEGUILING_ARROW: DamageType.PSYCHIC,
+        ArcaneShotType.BURSTING_ARROW: DamageType.FORCE,
+        ArcaneShotType.ENFEEBLING_ARROW: DamageType.NECROTIC,
+        ArcaneShotType.GRASPING_ARROW: DamageType.POISON,
+        ArcaneShotType.PIERCING_ARROW: DamageType.PIERCING,
+        ArcaneShotType.SEEKING_ARROW: DamageType.FORCE,
+        ArcaneShotType.SHADOW_ARROW: DamageType.PSYCHIC,
+    }.get(arcane_shot)
+
+
+def arcane_shot_description(arcane_shot: ArcaneShotType, fighter_level_value: int) -> str:
+    save_dc = "Arcane Shot save DC is 8 + Proficiency Bonus + Intelligence modifier."
+    descriptions = {
+        ArcaneShotType.BANISHING_ARROW: "Hit target makes a Charisma save or is banished until the end of its next turn. At Fighter 18, the hit also deals force damage.",
+        ArcaneShotType.BEGUILING_ARROW: "Hit target takes psychic damage and makes a Wisdom save or is charmed by an ally until the start of your next turn.",
+        ArcaneShotType.BURSTING_ARROW: "After the arrow hits, the target and each creature within 10 feet take force damage.",
+        ArcaneShotType.ENFEEBLING_ARROW: "Hit target takes necrotic damage and makes a Constitution save or its weapon attack damage is halved until your next turn.",
+        ArcaneShotType.GRASPING_ARROW: "Hit target takes poison damage, has speed reduced, and takes slashing damage the first time each turn it moves without teleporting.",
+        ArcaneShotType.PIERCING_ARROW: "No attack roll; creatures in a 30-foot line make a Dexterity save, taking weapon damage plus piercing damage on failure or half on success.",
+        ArcaneShotType.SEEKING_ARROW: "No attack roll; a seen target makes a Dexterity save, taking weapon damage plus force damage on failure or half on success.",
+        ArcaneShotType.SHADOW_ARROW: "Hit target takes psychic damage and makes a Wisdom save or cannot see beyond 5 feet until your next turn.",
+    }
+    return f"{descriptions[arcane_shot]} {save_dc}"
+
+
+def selected_runes(character_class, fighter_level_value: int) -> list[RuneType]:
+    configured = character_class.runes or list(RuneType)
+    return [rune for rune in configured if rune_minimum_level(rune) <= fighter_level_value]
+
+
+def rune_minimum_level(rune: RuneType) -> int:
+    return 7 if rune in {RuneType.HILL_RUNE, RuneType.STORM_RUNE} else 3
+
+
+def rune_uses(fighter_level_value: int) -> int:
+    return 2 if fighter_level_value >= 15 else 1
+
+
+def rune_activation(rune: RuneType) -> TimeEconomy:
+    if rune in {RuneType.CLOUD_RUNE, RuneType.STONE_RUNE, RuneType.STORM_RUNE}:
+        return TimeEconomy.REACTION
+    return TimeEconomy.BONUS_ACTION if rune in {RuneType.FROST_RUNE, RuneType.HILL_RUNE} else TimeEconomy.SPECIAL
+
+
+def rune_resource_description(rune: RuneType) -> str:
+    return f"Invoke {enum_label(rune)}. Rune Magic save DC is 8 + Proficiency Bonus + Constitution modifier."
+
+
+def rune_ability_description(rune: RuneType) -> str:
+    descriptions = {
+        RuneType.CLOUD_RUNE: "Reaction when you or a visible creature within 30 feet is hit by an attack: redirect the attack to another creature within 30 feet.",
+        RuneType.FIRE_RUNE: "When you hit with a weapon attack, deal extra fire damage and force a Strength save or restrain the target with fiery shackles.",
+        RuneType.FROST_RUNE: "Bonus Action for 10 minutes: gain +2 to Strength and Constitution ability checks and saving throws.",
+        RuneType.STONE_RUNE: "Reaction when a visible creature ends its turn within 30 feet: force a Wisdom save or charm and incapacitate it with speed 0.",
+        RuneType.HILL_RUNE: "Bonus Action for 1 minute: gain resistance to bludgeoning, piercing, and slashing damage.",
+        RuneType.STORM_RUNE: "Bonus Action for 1 minute: use Reactions to give visible creatures within 60 feet Advantage or Disadvantage on attacks, saves, or checks.",
+    }
+    return descriptions[rune]
+
+
+def rune_roll_actions(rune: RuneType) -> list[RollAction] | None:
+    if rune != RuneType.FIRE_RUNE:
+        return None
+    return [
+        RollAction(
+            id=FighterSubclassRollActionType.FIRE_RUNE_SHACKLES,
+            name=FighterSubclassRollActionType.FIRE_RUNE_SHACKLES,
+            diceCount=2,
+            diceType=DiceType.D6,
+            consumesResource=RuneType.FIRE_RUNE,
+            source=enum_label(FighterSubclassType.RUNE_KNIGHT),
+            damageType=DamageType.FIRE,
+        )
+    ]
+
+
+def giants_might_die(fighter_level_value: int) -> DiceType:
+    if fighter_level_value >= 18:
+        return DiceType.D10
+    if fighter_level_value >= 10:
+        return DiceType.D8
+    return DiceType.D6
+
+
+def psionic_energy_die(fighter_level_value: int) -> DiceType:
+    if fighter_level_value >= 17:
+        return DiceType.D12
+    if fighter_level_value >= 11:
+        return DiceType.D10
+    if fighter_level_value >= 5:
+        return DiceType.D8
+    return DiceType.D6
 
 
 def brute_force_die(fighter_level_value: int) -> DiceType | None:

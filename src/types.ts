@@ -26,7 +26,8 @@ export enum SheetSectionType {
   RESOURCES = "resources",
   FEATURES = "features",
   ABILITIES = "abilities",
-  ABILITY_SCORES = "abilityScores"
+  ABILITY_SCORES = "abilityScores",
+  SPELLS = "spells"
 }
 
 export type Token = {
@@ -76,6 +77,7 @@ export type Asset = {
 };
 
 export type AbilityType = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
+export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
 export type DamageType =
   | "acid"
   | "bludgeoning"
@@ -102,6 +104,8 @@ export type AttackActionType = "standard" | "unarmedStrike" | "thrownWeapon";
 export type EquipmentSlot = "carried" | "mainHand" | "offHand" | "twoHands" | "armor";
 export type EquipmentType = "armor" | "gear" | "shield" | "weapon";
 export type ArmorCategory = "light" | "medium" | "heavy";
+export type SpellSchool = "abjuration" | "conjuration" | "divination" | "enchantment" | "evocation" | "illusion" | "necromancy" | "transmutation";
+export type SpellComponent = "verbal" | "somatic" | "material";
 
 export type AttackAction = {
   id: string;
@@ -145,6 +149,8 @@ export type RollAction = {
   consumesResource?: string;
   description?: string;
   activation?: TimeEconomy;
+  damageType?: DamageType;
+  damageTypeLabel?: string;
 };
 
 export type AbilityScores = {
@@ -154,6 +160,21 @@ export type AbilityScores = {
   intelligence: number;
   wisdom: number;
   charisma: number;
+};
+
+export type ProgressionChoice = {
+  id: string;
+  choiceType: ProgressionChoiceType;
+  choiceTypeLabel: string;
+  label: string;
+  description: string;
+  minimum: number;
+  maximum: number;
+  selected: string[];
+  options: {
+    value: string;
+    label: string;
+  }[];
 };
 
 export type CharacterSheet = {
@@ -206,6 +227,7 @@ export type CharacterSheet = {
     passive: number;
   }[];
   passiveChecks: Record<string, number>;
+  pendingChoices: ProgressionChoice[];
   abilities: {
     id: string;
     name: string;
@@ -237,6 +259,25 @@ export type CharacterSheet = {
     activationLabel: string;
     description: string;
     rollActions?: RollAction[];
+  }[];
+  spells: {
+    id: string;
+    name: string;
+    source: string;
+    level: number;
+    school: SpellSchool;
+    schoolLabel: string;
+    castingAbility: AbilityType;
+    castingAbilityLabel: string;
+    castingTime: string;
+    range: string;
+    duration: string;
+    components: SpellComponent[];
+    componentsLabel: string[];
+    description: string;
+    concentration: boolean;
+    ritual: boolean;
+    resourceId?: string;
   }[];
   proficiencies: string[];
   conditions: string[];
@@ -285,6 +326,8 @@ export type RollPayload = {
   }[];
   total: number;
   createdAt: number;
+  damageType?: DamageType;
+  damageTypeLabel?: string;
   resourceSpent?: {
     resourceId: string;
     resourceName: string;

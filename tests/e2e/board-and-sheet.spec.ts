@@ -35,6 +35,7 @@ test("sheet view opens a character and creates roll cards", async ({ page }) => 
   await expect(page.locator(".roll-card", { hasText: "Attack Roll" }).filter({ hasText: "Longsword" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Short Rest" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Long Rest" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Level up Marina" })).toHaveCount(0);
 });
 
 test("DM can rest all character sheets from the sheet overview", async ({ page }) => {
@@ -42,16 +43,47 @@ test("DM can rest all character sheets from the sheet overview", async ({ page }
 
   await expect(page.getByRole("button", { name: "Short Rest" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Long Rest" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Level up Marina" })).toBeVisible();
+  await page.getByRole("button", { name: "Short Rest" }).click();
 
   await page.getByRole("button", { name: "Open Marina" }).click();
+  await expect(page.getByRole("button", { name: "Level up Marina" })).toBeVisible();
+  const progressionSelect = page.locator(".progression-choice").getByRole("combobox").first();
+  if ((await progressionSelect.count()) > 0) {
+    await progressionSelect.selectOption({ index: 1 });
+    const selectedProgressionValue = await progressionSelect.inputValue();
+    await page.waitForTimeout(1800);
+    await expect(progressionSelect).toHaveValue(selectedProgressionValue);
+  }
   await expect(page.getByRole("button", { name: "Short Rest" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Long Rest" })).toHaveCount(0);
 
-  await page.getByRole("heading", { name: "Abilities" }).locator("..").getByRole("button", { name: "-" }).first().click();
-  await expect.poll(async () => page.getByText("2/3").count()).toBeGreaterThanOrEqual(1);
+  const abilityStepper = page.getByRole("heading", { name: "Abilities" }).locator("..").locator(".stepper").first();
+  const initialUses = await abilityStepper.locator("strong").innerText();
+  const [currentUses, maxUses] = initialUses.split("/").map((value) => Number(value));
+  await abilityStepper.getByRole("button", { name: "-" }).click();
+  await expect(abilityStepper.locator("strong")).toHaveText(`${currentUses - 1}/${maxUses}`);
 
   await page.getByRole("button", { name: "Back to sheets" }).click();
   await page.getByRole("button", { name: "Short Rest" }).click();
   await page.getByRole("button", { name: "Open Marina" }).click();
-  await expect.poll(async () => page.getByText("3/3").count()).toBeGreaterThanOrEqual(1);
+  await expect(page.getByRole("heading", { name: "Abilities" }).locator("..").locator(".stepper").first().locator("strong")).toHaveText(`${maxUses}/${maxUses}`);
+});
+
+test("sheet view shows Monster Hunter spells and restores long-rest spell uses", async ({ page }) => {
+  await page.goto("/spell-test-campaign/player=dm/sheet");
+
+  await page.getByRole("button", { name: "Open Voss" }).click();
+  await expect(page.getByRole("heading", { name: "Spells" })).toBeVisible();
+  await expect(page.locator(".spell-row", { hasText: "Detect Magic" })).toBeVisible();
+  await expect(page.locator(".spell-row", { hasText: "Protection from Evil and Good" })).toBeVisible();
+  await expect(page.getByText(/Monster Hunter .* Level 1 .* Wisdom .* Ritual .* Concentration/)).toBeVisible();
+
+  await page.locator(".spell-row", { hasText: "Protection from Evil and Good" }).getByRole("button", { name: "-" }).click();
+  await expect(page.locator(".spell-row", { hasText: "Protection from Evil and Good" }).getByText("0/1")).toBeVisible();
+
+  await page.getByRole("button", { name: "Back to sheets" }).click();
+  await page.getByRole("button", { name: "Long Rest" }).click();
+  await page.getByRole("button", { name: "Open Voss" }).click();
+  await expect(page.locator(".spell-row", { hasText: "Protection from Evil and Good" }).getByText("1/1")).toBeVisible();
 });

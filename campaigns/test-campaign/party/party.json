@@ -7,85 +7,514 @@
         {
           "$type": "PartyMemberConfig",
           "fields": {
-            "id": { "$type": "str", "value": "player-1" },
-            "name": { "$type": "str", "value": "Marina" },
-            "image": { "$type": "str", "value": "ex1.png" },
-            "maxHp": { "$type": "int", "value": 31 },
+            "id": {
+              "$type": "str",
+              "value": "player-1"
+            },
+            "name": {
+              "$type": "str",
+              "value": "Marina"
+            },
+            "image": {
+              "$type": "str",
+              "value": "ex1.png"
+            },
+            "maxHp": {
+              "$type": "int",
+              "value": 44
+            },
             "abilityScores": {
               "$type": "AbilityScores",
               "fields": {
-                "strength": { "$type": "int", "value": 16 },
-                "dexterity": { "$type": "int", "value": 14 },
-                "constitution": { "$type": "int", "value": 15 },
-                "intelligence": { "$type": "int", "value": 10 },
-                "wisdom": { "$type": "int", "value": 12 },
-                "charisma": { "$type": "int", "value": 8 }
+                "strength": {
+                  "$type": "int",
+                  "value": 16
+                },
+                "dexterity": {
+                  "$type": "int",
+                  "value": 14
+                },
+                "constitution": {
+                  "$type": "int",
+                  "value": 15
+                },
+                "intelligence": {
+                  "$type": "int",
+                  "value": 10
+                },
+                "wisdom": {
+                  "$type": "int",
+                  "value": 12
+                },
+                "charisma": {
+                  "$type": "int",
+                  "value": 8
+                }
               }
             },
             "sheet": {
               "$type": "PartyMemberSheet",
               "fields": {
-                "race": { "$type": "str", "value": "Human" },
-                "background": { "$type": "str", "value": "Soldier" },
-                "alignment": { "$type": "str", "value": "Neutral Good" },
-                "armorClass": { "$type": "int", "value": 18 },
-                "speed": { "$type": "int", "value": 30 },
+                "race": {
+                  "$type": "str",
+                  "value": "Human"
+                },
+                "background": {
+                  "$type": "str",
+                  "value": "Soldier"
+                },
+                "alignment": {
+                  "$type": "str",
+                  "value": "Neutral Good"
+                },
                 "classes": {
                   "$type": "list",
                   "items": [
                     {
                       "$type": "CharacterClassLevel",
                       "fields": {
-                        "name": { "$type": "ClassType", "value": "FIGHTER" },
-                        "level": { "$type": "int", "value": 7 },
-                        "subclass": { "$type": "FighterSubclassType", "value": "SHARPSHOOTER" },
+                        "name": {
+                          "$type": "ClassType",
+                          "value": "FIGHTER"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 3
+                        },
+                        "subclass": {
+                          "$type": "FighterSubclassType",
+                          "value": "ELDRITCH_KNIGHT"
+                        },
                         "fightingStyles": {
                           "$type": "list",
                           "items": [
-                            { "$type": "FightingStyleType", "value": "ARCHERY" },
-                            { "$type": "FightingStyleType", "value": "BLIND_FIGHTING" },
-                            { "$type": "FightingStyleType", "value": "CLOSE_QUARTERS_SHOOTER" },
-                            { "$type": "FightingStyleType", "value": "DEFENSE" },
-                            { "$type": "FightingStyleType", "value": "DUELING" },
-                            { "$type": "FightingStyleType", "value": "GREAT_WEAPON_FIGHTING" },
-                            { "$type": "FightingStyleType", "value": "MARINER" },
-                            { "$type": "FightingStyleType", "value": "PROTECTION" },
-                            { "$type": "FightingStyleType", "value": "THROWN_WEAPON_FIGHTING" },
-                            { "$type": "FightingStyleType", "value": "TUNNEL_FIGHTER" },
-                            { "$type": "FightingStyleType", "value": "INTERCEPTION" },
-                            { "$type": "FightingStyleType", "value": "TWO_WEAPON_FIGHTING" },
-                            { "$type": "FightingStyleType", "value": "UNARMED_FIGHTING" }
+                            {
+                              "$type": "FightingStyleType",
+                              "value": "ARCHERY"
+                            }
                           ]
                         }
                       }
                     }
                   ]
                 },
+                "armorClass": {
+                  "$type": "int",
+                  "value": 18
+                },
+                "speed": {
+                  "$type": "int",
+                  "value": 30
+                },
                 "skills": {
-                  "$type": "dict[ProficiencyLevel]",
+                  "$type": "dict",
                   "value": {
-                    "athletics": { "$type": "ProficiencyLevel", "value": "PROFICIENT" },
-                    "intimidation": { "$type": "ProficiencyLevel", "value": "PROFICIENT" },
-                    "perception": { "$type": "ProficiencyLevel", "value": "PROFICIENT" },
-                    "survival": { "$type": "ProficiencyLevel", "value": "PROFICIENT" }
+                    "athletics": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    },
+                    "intimidation": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    },
+                    "perception": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    },
+                    "survival": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    }
                   }
                 },
                 "savingThrowProficiencies": {
                   "$type": "list",
                   "items": [
-                    { "$type": "AbilityType", "value": "STRENGTH" },
-                    { "$type": "AbilityType", "value": "CONSTITUTION" }
+                    {
+                      "$type": "AbilityType",
+                      "value": "STRENGTH"
+                    },
+                    {
+                      "$type": "AbilityType",
+                      "value": "CONSTITUTION"
+                    }
                   ]
                 },
                 "proficiencies": {
                   "$type": "list",
                   "items": [
-                    { "$type": "str", "value": "All armor" },
-                    { "$type": "str", "value": "Shields" },
-                    { "$type": "str", "value": "Simple weapons" },
-                    { "$type": "str", "value": "Martial weapons" },
-                    { "$type": "str", "value": "Dice set" },
-                    { "$type": "str", "value": "Vehicles" }
+                    {
+                      "$type": "str",
+                      "value": "All armor"
+                    },
+                    {
+                      "$type": "str",
+                      "value": "Shields"
+                    },
+                    {
+                      "$type": "str",
+                      "value": "Simple weapons"
+                    },
+                    {
+                      "$type": "str",
+                      "value": "Martial weapons"
+                    },
+                    {
+                      "$type": "str",
+                      "value": "Dice set"
+                    },
+                    {
+                      "$type": "str",
+                      "value": "Vehicles"
+                    }
+                  ]
+                },
+                "spells": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "boomingBlade"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Booming Blade"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Wizard"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "EVOCATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "str",
+                          "value": "1 action"
+                        },
+                        "range": {
+                          "$type": "str",
+                          "value": "Self"
+                        },
+                        "duration": {
+                          "$type": "str",
+                          "value": "1 round"
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Make a melee weapon attack; on a hit, the target takes the weapon's normal effects and is sheathed in booming energy."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "rayOfFrost"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Ray of Frost"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Wizard"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "EVOCATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "str",
+                          "value": "1 action"
+                        },
+                        "range": {
+                          "$type": "str",
+                          "value": "60 feet"
+                        },
+                        "duration": {
+                          "$type": "str",
+                          "value": "Instantaneous"
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Make a ranged spell attack that deals cold damage and slows the target."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "protectionFromEvilAndGood"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Protection from Evil and Good"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Wizard"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "str",
+                          "value": "1 action"
+                        },
+                        "range": {
+                          "$type": "str",
+                          "value": "Touch"
+                        },
+                        "duration": {
+                          "$type": "str",
+                          "value": "Up to 10 minutes"
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Protect a willing creature against several supernatural creature types."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "shield"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Shield"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Wizard"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "str",
+                          "value": "1 reaction"
+                        },
+                        "range": {
+                          "$type": "str",
+                          "value": "Self"
+                        },
+                        "duration": {
+                          "$type": "str",
+                          "value": "1 round"
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Gain +5 AC until the start of your next turn, including against the triggering attack."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "absorbElements"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Absorb Elements"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Wizard"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "str",
+                          "value": "1 reaction"
+                        },
+                        "range": {
+                          "$type": "str",
+                          "value": "Self"
+                        },
+                        "duration": {
+                          "$type": "str",
+                          "value": "1 round"
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Gain resistance to incoming acid, cold, fire, lightning, or thunder damage and empower your next melee attack."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        }
+                      }
+                    }
+                  ]
+                },
+                "hitPointIncreases": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "int",
+                      "value": 8
+                    },
+                    {
+                      "$type": "int",
+                      "value": 8
+                    }
                   ]
                 },
                 "attacks": {
@@ -94,35 +523,155 @@
                     {
                       "$type": "AttackAction",
                       "fields": {
-                        "id": { "$type": "str", "value": "longsword" },
-                        "name": { "$type": "str", "value": "Longsword" },
-                        "ability": { "$type": "AbilityType", "value": "STRENGTH" },
-                        "damageDiceCount": { "$type": "int", "value": 1 },
-                        "damageDiceType": { "$type": "DiceType", "value": "D8" },
-                        "damageType": { "$type": "DamageType", "value": "SLASHING" },
+                        "id": {
+                          "$type": "str",
+                          "value": "longsword"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Longsword"
+                        },
+                        "ability": {
+                          "$type": "AbilityType",
+                          "value": "STRENGTH"
+                        },
+                        "damageDiceCount": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "damageDiceType": {
+                          "$type": "DiceType",
+                          "value": "D8"
+                        },
+                        "proficient": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "damageType": {
+                          "$type": "DamageType",
+                          "value": "SLASHING"
+                        },
+                        "toHitBonus": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "damageBonus": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "attackRange": {
+                          "$type": "AttackRangeType",
+                          "value": "MELEE"
+                        },
+                        "weaponCategory": {
+                          "$type": "WeaponCategory",
+                          "value": "MELEE"
+                        },
+                        "damageAbilityModifier": {
+                          "$type": "AttackDamageAbilityModifierMode",
+                          "value": "INCLUDED"
+                        },
+                        "attackKind": {
+                          "$type": "AttackKind",
+                          "value": "STANDARD"
+                        },
+                        "attackType": {
+                          "$type": "AttackActionType",
+                          "value": "STANDARD"
+                        },
                         "properties": {
                           "$type": "list",
-                          "items": [{ "$type": "WeaponProperty", "value": "VERSATILE" }]
+                          "items": [
+                            {
+                              "$type": "WeaponProperty",
+                              "value": "VERSATILE"
+                            }
+                          ]
                         }
                       }
                     },
                     {
                       "$type": "AttackAction",
                       "fields": {
-                        "id": { "$type": "str", "value": "longbow" },
-                        "name": { "$type": "str", "value": "Longbow" },
-                        "ability": { "$type": "AbilityType", "value": "DEXTERITY" },
-                        "damageDiceCount": { "$type": "int", "value": 1 },
-                        "damageDiceType": { "$type": "DiceType", "value": "D8" },
-                        "damageType": { "$type": "DamageType", "value": "PIERCING" },
-                        "attackRange": { "$type": "AttackRangeType", "value": "RANGED" },
-                        "weaponCategory": { "$type": "WeaponCategory", "value": "RANGED" },
+                        "id": {
+                          "$type": "str",
+                          "value": "longbow"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Longbow"
+                        },
+                        "ability": {
+                          "$type": "AbilityType",
+                          "value": "DEXTERITY"
+                        },
+                        "damageDiceCount": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "damageDiceType": {
+                          "$type": "DiceType",
+                          "value": "D8"
+                        },
+                        "proficient": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "damageType": {
+                          "$type": "DamageType",
+                          "value": "PIERCING"
+                        },
+                        "toHitBonus": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "damageBonus": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "attackRange": {
+                          "$type": "AttackRangeType",
+                          "value": "RANGED"
+                        },
+                        "weaponCategory": {
+                          "$type": "WeaponCategory",
+                          "value": "RANGED"
+                        },
+                        "damageAbilityModifier": {
+                          "$type": "AttackDamageAbilityModifierMode",
+                          "value": "INCLUDED"
+                        },
+                        "attackKind": {
+                          "$type": "AttackKind",
+                          "value": "STANDARD"
+                        },
+                        "attackType": {
+                          "$type": "AttackActionType",
+                          "value": "STANDARD"
+                        },
                         "properties": {
                           "$type": "list",
                           "items": [
-                            { "$type": "WeaponProperty", "value": "AMMUNITION" },
-                            { "$type": "WeaponProperty", "value": "HEAVY" },
-                            { "$type": "WeaponProperty", "value": "TWO_HANDED" }
+                            {
+                              "$type": "WeaponProperty",
+                              "value": "AMMUNITION"
+                            },
+                            {
+                              "$type": "WeaponProperty",
+                              "value": "HEAVY"
+                            },
+                            {
+                              "$type": "WeaponProperty",
+                              "value": "TWO_HANDED"
+                            }
                           ]
                         }
                       }
@@ -135,52 +684,185 @@
                     {
                       "$type": "EquipmentItem",
                       "fields": {
-                        "id": { "$type": "str", "value": "chain-mail" },
-                        "name": { "$type": "str", "value": "Chain Mail" },
-                        "equipped": { "$type": "bool", "value": true },
-                        "quantity": { "$type": "int", "value": 1 },
-                        "weight": { "$type": "float", "value": 55.0 },
-                        "itemType": { "$type": "EquipmentType", "value": "ARMOR" },
-                        "slot": { "$type": "EquipmentSlot", "value": "ARMOR" },
-                        "armorCategory": { "$type": "ArmorCategory", "value": "HEAVY" },
-                        "armorClass": { "$type": "int", "value": 16 }
+                        "id": {
+                          "$type": "str",
+                          "value": "chain-mail"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Chain Mail"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 55.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "ARMOR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "ARMOR"
+                        },
+                        "armorCategory": {
+                          "$type": "ArmorCategory",
+                          "value": "HEAVY"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 16
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
                       }
                     },
                     {
                       "$type": "EquipmentItem",
                       "fields": {
-                        "id": { "$type": "str", "value": "shield" },
-                        "name": { "$type": "str", "value": "Shield" },
-                        "equipped": { "$type": "bool", "value": true },
-                        "quantity": { "$type": "int", "value": 1 },
-                        "weight": { "$type": "float", "value": 6.0 },
-                        "itemType": { "$type": "EquipmentType", "value": "SHIELD" },
-                        "slot": { "$type": "EquipmentSlot", "value": "OFF_HAND" },
-                        "armorClassBonus": { "$type": "int", "value": 2 }
+                        "id": {
+                          "$type": "str",
+                          "value": "shield"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Shield"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 6.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "SHIELD"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "OFF_HAND"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 2
+                        }
                       }
                     },
                     {
                       "$type": "EquipmentItem",
                       "fields": {
-                        "id": { "$type": "str", "value": "longsword" },
-                        "name": { "$type": "str", "value": "Longsword" },
-                        "equipped": { "$type": "bool", "value": true },
-                        "quantity": { "$type": "int", "value": 1 },
-                        "weight": { "$type": "float", "value": 3.0 },
-                        "itemType": { "$type": "EquipmentType", "value": "WEAPON" },
-                        "slot": { "$type": "EquipmentSlot", "value": "MAIN_HAND" }
+                        "id": {
+                          "$type": "str",
+                          "value": "longsword"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Longsword"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 3.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "WEAPON"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "MAIN_HAND"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
                       }
                     },
                     {
                       "$type": "EquipmentItem",
                       "fields": {
-                        "id": { "$type": "str", "value": "longbow" },
-                        "name": { "$type": "str", "value": "Longbow" },
-                        "equipped": { "$type": "bool", "value": false },
-                        "quantity": { "$type": "int", "value": 1 },
-                        "weight": { "$type": "float", "value": 2.0 },
-                        "itemType": { "$type": "EquipmentType", "value": "WEAPON" },
-                        "slot": { "$type": "EquipmentSlot", "value": "CARRIED" }
+                        "id": {
+                          "$type": "str",
+                          "value": "longbow"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Longbow"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 2.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "WEAPON"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
                       }
                     }
                   ]
@@ -192,25 +874,52 @@
         {
           "$type": "PartyMemberConfig",
           "fields": {
-            "id": { "$type": "str", "value": "player-2" },
-            "name": { "$type": "str", "value": "Edward" },
-            "image": { "$type": "str", "value": "ex2.png" }
+            "id": {
+              "$type": "str",
+              "value": "player-2"
+            },
+            "name": {
+              "$type": "str",
+              "value": "Edward"
+            },
+            "image": {
+              "$type": "str",
+              "value": "ex2.png"
+            }
           }
         },
         {
           "$type": "PartyMemberConfig",
           "fields": {
-            "id": { "$type": "str", "value": "player-3" },
-            "name": { "$type": "str", "value": "Hal" },
-            "image": { "$type": "str", "value": "ex3.png" }
+            "id": {
+              "$type": "str",
+              "value": "player-3"
+            },
+            "name": {
+              "$type": "str",
+              "value": "Hal"
+            },
+            "image": {
+              "$type": "str",
+              "value": "ex3.png"
+            }
           }
         },
         {
           "$type": "PartyMemberConfig",
           "fields": {
-            "id": { "$type": "str", "value": "player-4" },
-            "name": { "$type": "str", "value": "Valarie" },
-            "image": { "$type": "str", "value": "ex4.png" }
+            "id": {
+              "$type": "str",
+              "value": "player-4"
+            },
+            "name": {
+              "$type": "str",
+              "value": "Valarie"
+            },
+            "image": {
+              "$type": "str",
+              "value": "ex4.png"
+            }
           }
         }
       ]

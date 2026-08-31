@@ -518,6 +518,32 @@ canvas.is-dragging,
   font-size: 0.75rem;
 }
 
+.level-stepper {
+  display: inline-grid;
+  grid-template-columns: 32px auto 32px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: #d8b778;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.level-stepper button {
+  width: 32px;
+  min-width: 32px;
+  min-height: 30px;
+  padding: 0;
+}
+
+.choice-alert {
+  width: auto;
+  min-height: 28px;
+  margin-top: 6px;
+  padding: 3px 8px;
+  font-size: 0.78rem;
+}
+
 .full-sheet {
   display: grid;
   align-content: start;
@@ -620,6 +646,97 @@ canvas.is-dragging,
   padding: 8px;
 }
 
+.progression-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.progression-choice-list {
+  display: grid;
+  gap: 10px;
+}
+
+.progression-choice {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1.25fr) auto;
+  align-items: start;
+  gap: 10px;
+  border-top: 1px solid rgba(216, 156, 70, 0.32);
+  padding-top: 10px;
+}
+
+.progression-choice:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.progression-choice strong,
+.progression-choice span {
+  display: block;
+}
+
+.progression-choice span {
+  color: #d8b778;
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.progression-choice button {
+  min-width: 72px;
+}
+
+.choice-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 6px;
+}
+
+.choice-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  font-size: 0.78rem;
+}
+
+.choice-option input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.asi-choice-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.asi-choice-controls label {
+  display: grid;
+  gap: 4px;
+}
+
+.choice-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.choice-mode-toggle button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 8px;
+}
+
+.choice-mode-toggle button.active {
+  background: #d89c46;
+  color: #1b1207;
+}
+
+.asi-choice-controls span {
+  color: #d8b778;
+  font-size: 0.74rem;
+  line-height: 1;
+}
+
 .sheet-stat-row span,
 .sheet-panel span,
 .resource-row p,
@@ -650,7 +767,8 @@ canvas.is-dragging,
 .tag-list,
 .skill-grid,
 .feature-list,
-.resource-list {
+.resource-list,
+.spell-list {
   display: grid;
   gap: 6px;
 }
@@ -677,7 +795,8 @@ canvas.is-dragging,
 }
 
 .resource-row,
-.feature-list article {
+.feature-list article,
+.spell-row {
   display: grid;
   gap: 4px;
   border: 1px solid rgba(216, 156, 70, 0.28);
@@ -693,6 +812,24 @@ canvas.is-dragging,
 
 .resource-row p {
   grid-column: 1 / -1;
+  font-size: 0.84rem;
+}
+
+.spell-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.spell-row small {
+  display: block;
+  color: #c89752;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.spell-row p {
+  grid-column: 1 / -1;
+  color: #d8b778;
   font-size: 0.84rem;
 }
 

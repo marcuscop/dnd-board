@@ -58,6 +58,12 @@ class FighterSubclassType(Enum):
     BRUTE = auto()
     SCOUT = auto()
     SHARPSHOOTER = auto()
+    MONSTER_HUNTER = auto()
+    ARCANE_ARCHER = auto()
+    RUNE_KNIGHT = auto()
+    ECHO_KNIGHT = auto()
+    PSI_WARRIOR = auto()
+    ELDRITCH_KNIGHT = auto()
 
 
 @dataclass(frozen=True)

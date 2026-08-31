@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MutableRefObject } from "react";
 import { SheetSectionType, TokenKind } from "./types";
-import type { Asset, Board, CharacterSheet, EquipmentSlot, FogState, PlayerSummary, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
+import type { AbilityType, Asset, Board, CharacterSheet, EquipmentSlot, FogState, PlayerSummary, ProgressionChoice, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
 
 const DEFAULT_BOARD_WIDTH = 1200;
 const DEFAULT_BOARD_HEIGHT = 720;
@@ -16,6 +16,15 @@ const REQUESTED_PLAYER_KEY = INITIAL_ROUTE.playerKey;
 const DEFAULT_FOG: FogState = { hideMode: false, brushSize: 120, revealedAreas: [] };
 const DEFAULT_BOARD: Board = { id: "", name: "", width: DEFAULT_BOARD_WIDTH, height: DEFAULT_BOARD_HEIGHT };
 const ROLL_HISTORY_LIMIT = 10;
+const SAME_ABILITY_VALUE = "__same__";
+const ABILITY_SCORE_OPTIONS: { value: AbilityType; label: string }[] = [
+  { value: "strength", label: "Strength" },
+  { value: "dexterity", label: "Dexterity" },
+  { value: "constitution", label: "Constitution" },
+  { value: "intelligence", label: "Intelligence" },
+  { value: "wisdom", label: "Wisdom" },
+  { value: "charisma", label: "Charisma" }
+];
 
 type ConnectionState = "connecting" | "connected" | "disconnected";
 type AppView = "board" | "sheet";
@@ -687,6 +696,46 @@ export function App() {
     [playerKey]
   );
 
+  const updateSheetLevel = useCallback(
+    async (sheet: CharacterSheet, delta: 1 | -1) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/level?playerKey=${encodeURIComponent(playerKey)}&delta=${encodeURIComponent(delta)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      const body = (await response.json()) as { sheet: CharacterSheet };
+      if (body.sheet) {
+        setSheets((current) => current.map((candidate) => (candidate.id === body.sheet.id ? body.sheet : candidate)));
+      }
+    },
+    [playerKey]
+  );
+
+  const updateProgressionChoice = useCallback(
+    async (sheet: CharacterSheet, choiceId: string, values: string[]) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/choices/${encodeURIComponent(choiceId)}?playerKey=${encodeURIComponent(playerKey)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ values })
+        }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      const body = (await response.json()) as { sheet: CharacterSheet };
+      if (body.sheet) {
+        setSheets((current) => current.map((candidate) => (candidate.id === body.sheet.id ? body.sheet : candidate)));
+      }
+    },
+    [playerKey]
+  );
+
   const updateEquipmentSlot = useCallback(
     async (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => {
       const response = await fetch(
@@ -716,7 +765,9 @@ export function App() {
         onRollResourceAction={rollResourceAction}
         onRollSavingThrow={rollSavingThrow}
         onRestSheets={restSheets}
+        onUpdateProgressionChoice={updateProgressionChoice}
         onUpdateEquipmentSlot={updateEquipmentSlot}
+        onUpdateSheetLevel={updateSheetLevel}
         onUpdateResource={updateResource}
         playerKey={playerKey}
         rollHistory={rollHistory}
@@ -900,7 +951,9 @@ type SheetViewProps = {
   onRollResourceAction: (sheet: CharacterSheet, abilityId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
   onRestSheets: (rest: "short" | "long") => void;
+  onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
+  onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   playerKey: string;
   rollHistory: RollLogEntry[];
@@ -910,7 +963,7 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRestSheets, onUpdateEquipmentSlot, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRestSheets, onUpdateProgressionChoice, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -970,9 +1023,12 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityC
           onRollDamage={onRollDamage}
           onRollResourceAction={onRollResourceAction}
           onRollSavingThrow={onRollSavingThrow}
+          onUpdateProgressionChoice={onUpdateProgressionChoice}
           onUpdateEquipmentSlot={onUpdateEquipmentSlot}
+          onUpdateSheetLevel={onUpdateSheetLevel}
           onUpdateResource={onUpdateResource}
           onClose={() => onExpand(null)}
+          isDm={isDm}
         />
       ) : (
         <div className="sheet-sections" aria-busy={sheetStatus === "loading"}>
@@ -984,6 +1040,8 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityC
             onApplyRoll={applyRollToSheet}
             onDropTarget={setDropTargetSheetId}
             onExpand={onExpand}
+            onUpdateProgressionChoice={onUpdateProgressionChoice}
+            onUpdateSheetLevel={onUpdateSheetLevel}
             rolls={rolls}
             playerKey={playerKey}
             isDm={isDm}
@@ -1003,6 +1061,8 @@ function SheetView({ connection, expandedSheetId, isDm, onExpand, onRollAbilityC
               onApplyRoll={applyRollToSheet}
               onDropTarget={setDropTargetSheetId}
               onExpand={onExpand}
+              onUpdateProgressionChoice={onUpdateProgressionChoice}
+              onUpdateSheetLevel={onUpdateSheetLevel}
               rolls={rolls}
               playerKey={playerKey}
               isDm={isDm}
@@ -1041,6 +1101,8 @@ function SheetSection({
   onDragRollStart,
   onDropTarget,
   onExpand,
+  onUpdateProgressionChoice,
+  onUpdateSheetLevel,
   playerKey,
   isDm,
   draggingRollId,
@@ -1055,6 +1117,8 @@ function SheetSection({
   onDragRollStart: (rollId: string) => void;
   onDropTarget: (sheetId: string | null) => void;
   onExpand: (sheetId: string | null) => void;
+  onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
+  onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   playerKey: string;
   isDm: boolean;
   draggingRollId: string | null;
@@ -1078,6 +1142,8 @@ function SheetSection({
             onDragRollStart={onDragRollStart}
             onDropTarget={onDropTarget}
             onExpand={() => onExpand(sheet.id)}
+            onUpdateProgressionChoice={onUpdateProgressionChoice}
+            onUpdateSheetLevel={onUpdateSheetLevel}
             pendingRolls={rolls.filter((roll) => roll.tokenId === sheet.tokenId)}
             rollDraggable={isDm}
           />
@@ -1097,6 +1163,8 @@ function SheetCard({
   onDragRollStart,
   onDropTarget,
   onExpand,
+  onUpdateProgressionChoice,
+  onUpdateSheetLevel,
   pendingRolls,
   rollDraggable
 }: {
@@ -1109,6 +1177,8 @@ function SheetCard({
   onDragRollStart: (rollId: string) => void;
   onDropTarget: (sheetId: string | null) => void;
   onExpand: () => void;
+  onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
+  onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   pendingRolls: RollPayload[];
   rollDraggable: boolean;
 }) {
@@ -1143,6 +1213,12 @@ function SheetCard({
         <p className="status">
           HP {sheet.hp.current}/{sheet.hp.max} · AC {sheet.armorClass} · {sheet.characterClass.nameLabel} {sheet.characterClass.level}
         </p>
+        {rollDraggable && <LevelStepper sheet={sheet} onUpdateSheetLevel={onUpdateSheetLevel} />}
+        {sheet.pendingChoices.length > 0 && (
+          <button className="choice-alert" onClick={onExpand}>
+            {sheet.pendingChoices.length} choice{sheet.pendingChoices.length === 1 ? "" : "s"}
+          </button>
+        )}
         {sheet.conditions.length > 0 && <div className="condition-list">{sheet.conditions.map((condition) => <span key={condition}>{condition}</span>)}</div>}
       </div>
       <div className="card-roll-slot">
@@ -1162,6 +1238,209 @@ function SheetCard({
           <span className="empty-roll-slot">No roll</span>
         )}
       </div>
+    </article>
+  );
+}
+
+function LevelStepper({ sheet, onUpdateSheetLevel }: { sheet: CharacterSheet; onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void }) {
+  const hasPendingChoices = sheet.pendingChoices.length > 0;
+  return (
+    <div className="level-stepper">
+      <button disabled={sheet.characterClass.level <= 1} onClick={() => onUpdateSheetLevel(sheet, -1)} aria-label={`Level down ${sheet.name}`}>
+        -
+      </button>
+      <span>Level {sheet.characterClass.level}</span>
+      <button
+        disabled={sheet.characterClass.level >= 20 || hasPendingChoices}
+        onClick={() => onUpdateSheetLevel(sheet, 1)}
+        aria-label={`Level up ${sheet.name}`}
+        title={hasPendingChoices ? "Resolve pending level choices before leveling up" : undefined}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function ProgressionChoicePanel({
+  sheet,
+  onUpdateProgressionChoice
+}: {
+  sheet: CharacterSheet;
+  onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
+}) {
+  return (
+    <section className="sheet-panel progression-panel">
+      <h2>Level Choices</h2>
+      <div className="progression-choice-list">
+        {sheet.pendingChoices.map((choice) => (
+          <ProgressionChoiceRow key={choice.id} sheet={sheet} choice={choice} onUpdateProgressionChoice={onUpdateProgressionChoice} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProgressionChoiceRow({
+  sheet,
+  choice,
+  onUpdateProgressionChoice
+}: {
+  sheet: CharacterSheet;
+  choice: ProgressionChoice;
+  onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>(choice.selected);
+  const choiceStateKey = [
+    choice.id,
+    choice.minimum,
+    choice.maximum,
+    choice.selected.join(","),
+    choice.options.map((option) => option.value).join(",")
+  ].join(":");
+
+  useEffect(() => {
+    setSelected(choice.selected);
+  }, [choiceStateKey]);
+
+  if (choice.choiceType === "abilityScoreImprovement") {
+    return <AbilityScoreImprovementChoice sheet={sheet} choice={choice} onUpdateProgressionChoice={onUpdateProgressionChoice} />;
+  }
+
+  if (choice.options.length === 0) {
+    return (
+      <article className="progression-choice">
+        <div>
+          <strong>{choice.label}</strong>
+          <span>{choice.description}</span>
+        </div>
+      </article>
+    );
+  }
+
+  const canApply = selected.length >= choice.minimum && selected.length <= choice.maximum;
+  const single = choice.maximum === 1;
+
+  return (
+    <article className="progression-choice">
+      <div>
+        <strong>{choice.label}</strong>
+        <span>
+          {choice.description} Choose {choice.maximum}.
+        </span>
+      </div>
+      {single ? (
+        <select value={selected[0] ?? ""} onChange={(event) => setSelected(event.currentTarget.value ? [event.currentTarget.value] : [])}>
+          <option value="">Choose...</option>
+          {choice.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <div className="choice-options">
+          {choice.options.map((option) => {
+            const checked = selected.includes(option.value);
+            return (
+              <label className="choice-option" key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={!checked && selected.length >= choice.maximum}
+                  onChange={(event) => {
+                    if (event.currentTarget.checked) {
+                      setSelected((current) => [...current, option.value].slice(0, choice.maximum));
+                    } else {
+                      setSelected((current) => current.filter((value) => value !== option.value));
+                    }
+                  }}
+                />
+                {option.label}
+              </label>
+            );
+          })}
+        </div>
+      )}
+      <button disabled={!canApply} onClick={() => onUpdateProgressionChoice(sheet, choice.id, selected)}>
+        Apply
+      </button>
+    </article>
+  );
+}
+
+function AbilityScoreImprovementChoice({
+  sheet,
+  choice,
+  onUpdateProgressionChoice
+}: {
+  sheet: CharacterSheet;
+  choice: ProgressionChoice;
+  onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
+}) {
+  const [mode, setMode] = useState<"scores" | "feat">("scores");
+  const [firstAbility, setFirstAbility] = useState<AbilityType>("strength");
+  const [secondAbility, setSecondAbility] = useState<AbilityType | typeof SAME_ABILITY_VALUE>(SAME_ABILITY_VALUE);
+  const [selectedFeat, setSelectedFeat] = useState("");
+  const values = mode === "feat" ? [`feat:${selectedFeat}`] : [firstAbility, secondAbility === SAME_ABILITY_VALUE ? firstAbility : secondAbility];
+  const canApply = mode === "scores" || selectedFeat.length > 0;
+
+  return (
+    <article className="progression-choice">
+      <div>
+        <strong>{choice.label}</strong>
+        <span>{choice.description}</span>
+      </div>
+      <div className="asi-choice-controls">
+        <div className="choice-mode-toggle" role="group" aria-label="Ability Score Improvement type">
+          <button className={mode === "scores" ? "active" : ""} type="button" onClick={() => setMode("scores")}>
+            Scores
+          </button>
+          <button className={mode === "feat" ? "active" : ""} type="button" onClick={() => setMode("feat")}>
+            Feat
+          </button>
+        </div>
+        {mode === "scores" ? (
+          <>
+            <label>
+              <span>First +1</span>
+              <select value={firstAbility} onChange={(event) => setFirstAbility(event.currentTarget.value as AbilityType)}>
+                {ABILITY_SCORE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Second +1</span>
+              <select value={secondAbility} onChange={(event) => setSecondAbility(event.currentTarget.value as AbilityType | typeof SAME_ABILITY_VALUE)}>
+                <option value={SAME_ABILITY_VALUE}>Same ability</option>
+                {ABILITY_SCORE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        ) : (
+          <label>
+            <span>Feat</span>
+            <select value={selectedFeat} onChange={(event) => setSelectedFeat(event.currentTarget.value)}>
+              <option value="">Choose...</option>
+              {choice.options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+      <button disabled={!canApply} onClick={() => onUpdateProgressionChoice(sheet, choice.id, values)}>
+        Apply
+      </button>
     </article>
   );
 }
@@ -1200,7 +1479,7 @@ function RollCard({
       </span>
       <span className="roll-main">
         <strong>{roll.label}</strong>
-        <small>{rollParentLabel}</small>
+        <small>{roll.damageTypeLabel ? `${rollParentLabel} · ${roll.damageTypeLabel}` : rollParentLabel}</small>
       </span>
       {!compact && <span className="roll-total roll-result-number">{rollMathText(roll)}</span>}
     </li>
@@ -1406,6 +1685,7 @@ function InlineRolls({
 function FullSheet({
   sheet,
   canRoll,
+  isDm,
   pendingRolls,
   rollDraggable,
   onDragRollEnd,
@@ -1416,11 +1696,14 @@ function FullSheet({
   onRollDamage,
   onRollResourceAction,
   onRollSavingThrow,
+  onUpdateProgressionChoice,
   onUpdateEquipmentSlot,
+  onUpdateSheetLevel,
   onUpdateResource
 }: {
   sheet: CharacterSheet;
   canRoll: boolean;
+  isDm: boolean;
   pendingRolls: RollPayload[];
   rollDraggable: boolean;
   onDragRollEnd: () => void;
@@ -1431,7 +1714,9 @@ function FullSheet({
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
+  onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
+  onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
 }) {
   const scores = Object.entries(sheet.abilityScores);
@@ -1451,9 +1736,14 @@ function FullSheet({
               {sheet.characterClass.nameLabel} {sheet.characterClass.level}
               {metadata ? ` · ${metadata}` : ""}
             </p>
+            {isDm && <LevelStepper sheet={sheet} onUpdateSheetLevel={onUpdateSheetLevel} />}
           </div>
         </div>
       </div>
+
+      {canRoll && sheet.pendingChoices.length > 0 && (
+        <ProgressionChoicePanel sheet={sheet} onUpdateProgressionChoice={onUpdateProgressionChoice} />
+      )}
 
       <div className="ability-grid">
         {scores.map(([ability, score]) => (
@@ -1532,6 +1822,8 @@ function FullSheet({
         onRollResourceAction={onRollResourceAction}
         onUpdateResource={onUpdateResource}
       />
+
+      <SheetSpellList canRoll={canRoll} sheet={sheet} onUpdateResource={onUpdateResource} />
 
       <section className="attack-list sheet-panel">
         <h2>Attacks</h2>
@@ -1629,6 +1921,58 @@ function FullSheet({
           )}
         </div>
       )}
+    </section>
+  );
+}
+
+function SheetSpellList({
+  canRoll,
+  onUpdateResource,
+  sheet
+}: {
+  canRoll: boolean;
+  onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
+  sheet: CharacterSheet;
+}) {
+  if (sheet.spells.length === 0) return null;
+
+  return (
+    <section className="sheet-panel">
+      <h2>Spells</h2>
+      <div className="spell-list">
+        {sheet.spells.map((spell) => {
+          const resource = spell.resourceId ? sheet.resources.find((candidate) => candidate.id === spell.resourceId) : undefined;
+          const tags = [
+            spell.source,
+            spell.level === 0 ? "Cantrip" : `Level ${spell.level}`,
+            spell.schoolLabel,
+            spell.castingAbilityLabel,
+            spell.ritual ? "Ritual" : "",
+            spell.concentration ? "Concentration" : ""
+          ].filter(Boolean);
+
+          return (
+            <article className="spell-row" key={spell.id}>
+              <div>
+                <strong>{spell.name}</strong>
+                <span>{tags.join(" · ")}</span>
+                <small>
+                  {spell.castingTime} · {spell.range} · {spell.duration} · {spell.componentsLabel.join(", ")}
+                </small>
+              </div>
+              {resource && (
+                <ResourceStepper
+                  canRoll={canRoll}
+                  currentUses={resource.currentUses}
+                  maxUses={resource.maxUses}
+                  onUpdate={(currentUses) => onUpdateResource(sheet, resource.id, currentUses)}
+                />
+              )}
+              {spell.description && <p>{spell.description}</p>}
+            </article>
+          );
+        })}
+      </div>
     </section>
   );
 }

@@ -37,6 +37,18 @@ class SheetSectionType(Enum):
     FEATURES = auto()
     ABILITIES = auto()
     ABILITY_SCORES = auto()
+    SPELLS = auto()
+
+
+class ProgressionChoiceType(Enum):
+    HIT_POINTS = auto()
+    ABILITY_SCORE_IMPROVEMENT = auto()
+    SUBCLASS = auto()
+    FIGHTING_STYLE = auto()
+    BATTLE_MASTER_MANEUVERS = auto()
+    ARCANE_SHOTS = auto()
+    RUNES = auto()
+    SPELLS = auto()
 
 
 class AbilityRollType(Enum):
@@ -78,6 +90,23 @@ class DamageType(Enum):
     RADIANT = auto()
     SLASHING = auto()
     THUNDER = auto()
+
+
+class SpellSchool(Enum):
+    ABJURATION = auto()
+    CONJURATION = auto()
+    DIVINATION = auto()
+    ENCHANTMENT = auto()
+    EVOCATION = auto()
+    ILLUSION = auto()
+    NECROMANCY = auto()
+    TRANSMUTATION = auto()
+
+
+class SpellComponent(Enum):
+    VERBAL = auto()
+    SOMATIC = auto()
+    MATERIAL = auto()
 
 
 class WeaponProperty(Enum):
@@ -216,6 +245,26 @@ class BattleMasterManeuverType(Enum):
     TRIP_ATTACK = auto()
 
 
+class ArcaneShotType(Enum):
+    BANISHING_ARROW = auto()
+    BEGUILING_ARROW = auto()
+    BURSTING_ARROW = auto()
+    ENFEEBLING_ARROW = auto()
+    GRASPING_ARROW = auto()
+    PIERCING_ARROW = auto()
+    SEEKING_ARROW = auto()
+    SHADOW_ARROW = auto()
+
+
+class RuneType(Enum):
+    CLOUD_RUNE = auto()
+    FIRE_RUNE = auto()
+    FROST_RUNE = auto()
+    STONE_RUNE = auto()
+    HILL_RUNE = auto()
+    STORM_RUNE = auto()
+
+
 def api_field(method: Any) -> property:
     method.__api_field__ = True
     return property(method)
@@ -275,6 +324,7 @@ class RollAction:
     description: str | None = None
     activation: TimeEconomy | None = None
     source: str | None = None
+    damageType: DamageType | None = None
 
     @api_field
     def dice(self) -> str:
@@ -303,6 +353,8 @@ class CharacterClassLevel:
     fightingStyle: FightingStyleType | None = None
     fightingStyles: list[FightingStyleType] | None = None
     maneuvers: list[BattleMasterManeuverType] | None = None
+    arcaneShots: list[ArcaneShotType] | None = None
+    runes: list[RuneType] | None = None
 
 
 @dataclass
@@ -319,6 +371,24 @@ class SavingThrowBonus:
     ability: AbilityType
     proficient: bool
     modifier: int
+
+
+@dataclass
+class ProgressionChoiceOption:
+    value: str
+    label: str
+
+
+@dataclass
+class ProgressionChoice:
+    id: str
+    choiceType: ProgressionChoiceType
+    label: str
+    description: str
+    minimum: int
+    maximum: int
+    selected: list[str]
+    options: list[ProgressionChoiceOption]
 
 
 @dataclass
@@ -356,6 +426,24 @@ class SheetFeature:
 
 
 @dataclass
+class SpellEntry:
+    id: str
+    name: str
+    source: str
+    level: int
+    school: SpellSchool
+    castingAbility: AbilityType
+    castingTime: str
+    range: str
+    duration: str
+    components: list[SpellComponent]
+    description: str
+    concentration: bool = False
+    ritual: bool = False
+    resourceId: str | None = None
+
+
+@dataclass
 class EquipmentItem:
     id: str
     name: str
@@ -386,6 +474,9 @@ class PartyMemberSheet:
     traits: list[SheetFeature] | None = None
     features: list[SheetFeature] | None = None
     resources: list[ResourceTracker] | None = None
+    spells: list[SpellEntry] | None = None
+    hitPointIncreases: list[int] | None = None
+    abilityScoreImprovements: list[str] | None = None
     attacks: list[AttackAction] | None = None
     equipment: list[EquipmentItem] | None = None
 
@@ -434,9 +525,11 @@ class CharacterSheet:
     savingThrows: list[SavingThrowBonus]
     skills: list[SkillBonus]
     passiveChecks: dict[str, int]
+    pendingChoices: list[ProgressionChoice]
     resources: list[ResourceTracker]
     abilities: list[SheetAbility]
     features: list[SheetFeature]
+    spells: list[SpellEntry]
     proficiencies: list[str]
     conditions: list[str]
     attacks: list[AttackAction]
@@ -461,6 +554,7 @@ class RollPayload:
     modifierBreakdown: list[RollModifierBreakdown]
     total: int
     createdAt: int
+    damageType: DamageType | None = None
     resourceSpent: RollResourceSpend | None = None
 
 
@@ -568,6 +662,12 @@ def build_character_sheet(
     subclass_abilities = default_subclass_abilities(classes)
     abilities = [*resource_roll_abilities(resources), *feat_abilities, *subclass_abilities]
     features = default_features(classes)
+    configured_spells = sheet_config.spells if sheet_config and sheet_config.spells else []
+    configured_feats = sheet_config.feats if sheet_config and sheet_config.feats else []
+    hit_point_increases = sheet_config.hitPointIncreases if sheet_config and sheet_config.hitPointIncreases else []
+    ability_score_improvements = sheet_config.abilityScoreImprovements if sheet_config and sheet_config.abilityScoreImprovements else []
+    pending_choices = default_progression_choices(classes, configured_spells, hit_point_increases, ability_score_improvements, configured_feats)
+    spells = [*default_spells(classes), *default_spellcasting_spells(classes, configured_spells)]
     if sheet_config:
         features = [*(sheet_config.traits or []), *features, *(sheet_config.features or []), *(sheet_config.feats or [])]
     equipment = apply_equipment_slot_overrides(sheet_config.equipment if sheet_config and sheet_config.equipment else [], equipment_slot_overrides or {})
@@ -598,9 +698,11 @@ def build_character_sheet(
         savingThrows=build_saving_throws(ability_modifiers, save_proficiencies, proficiency_bonus),
         skills=build_skills(ability_modifiers, skill_proficiencies, proficiency_bonus),
         passiveChecks=build_passive_checks(ability_modifiers, skill_proficiencies, proficiency_bonus),
+        pendingChoices=pending_choices,
         resources=resources,
         abilities=abilities,
         features=features,
+        spells=spells,
         proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
         conditions=[],
         attacks=attacks,
@@ -639,6 +741,7 @@ def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         modifierBreakdown=modifier_breakdown,
         total=sum(dice) + modifier,
         createdAt=created_at,
+        damageType=action.damageType,
     )
 
 
@@ -677,6 +780,7 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         modifierBreakdown=modifier_breakdown,
         total=sum(dice) + modifier,
         createdAt=created_at,
+        damageType=action.damageType,
     )
 
 
@@ -1006,6 +1110,30 @@ def default_subclass_abilities(classes: list[CharacterClassLevel]) -> list[Sheet
     return fighter_subclass_abilities(classes)
 
 
+def default_spells(classes: list[CharacterClassLevel]) -> list[SpellEntry]:
+    from dnd_board.rules.classes.fighter.archetypes import fighter_subclass_spells
+
+    return fighter_subclass_spells(classes)
+
+
+def default_spellcasting_spells(classes: list[CharacterClassLevel], spells: list[SpellEntry]) -> list[SpellEntry]:
+    from dnd_board.rules.classes.fighter.archetypes import normalized_spellcasting_spells
+
+    return normalized_spellcasting_spells(classes, spells)
+
+
+def default_progression_choices(
+    classes: list[CharacterClassLevel],
+    spells: list[SpellEntry],
+    hit_point_increases: list[int],
+    ability_score_improvements: list[str],
+    feats: list[SheetFeature] | None = None,
+) -> list[ProgressionChoice]:
+    from dnd_board.rules.progression import progression_choices
+
+    return progression_choices(classes, spells, hit_point_increases, ability_score_improvements, feats)
+
+
 def default_armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:
     from dnd_board.rules.feats import armor_class_bonus
 
@@ -1152,7 +1280,7 @@ def typed_primitive_value(type_name: str, value: Any) -> Any:
 def typed_json_registry() -> dict[str, type[Any]]:
     from dnd_board.rules.classes.fighter.archetypes import FighterSubclassResourceType, FighterSubclassRollActionType
     from dnd_board.rules.classes.fighter.base import FighterSubclassType
-    from dnd_board.rules.shared.combat_superiority import BattleMasterResourceType, ScoutSuperiorityActionType
+    from dnd_board.rules.shared.combat_superiority import BattleMasterResourceType, MonsterHunterSuperiorityActionType, ScoutSuperiorityActionType
 
     return {
         type_.__name__: type_
@@ -1160,6 +1288,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             AbilityScores,
             AbilityRollType,
             AbilityType,
+            ArcaneShotType,
             ArmorCategory,
             AttackAction,
             AttackActionType,
@@ -1168,6 +1297,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             AttackRangeType,
             BattleMasterManeuverType,
             BattleMasterResourceType,
+            MonsterHunterSuperiorityActionType,
             FighterSubclassResourceType,
             FighterSubclassRollActionType,
             CharacterClassLevel,
@@ -1182,6 +1312,9 @@ def typed_json_registry() -> dict[str, type[Any]]:
             PartyManifest,
             PartyMemberConfig,
             PartyMemberSheet,
+            ProgressionChoice,
+            ProgressionChoiceOption,
+            ProgressionChoiceType,
             ProficiencyLevel,
             RestType,
             RollAction,
@@ -1191,6 +1324,10 @@ def typed_json_registry() -> dict[str, type[Any]]:
             RollModifierType,
             RollResolutionMode,
             ResourceTracker,
+            RuneType,
+            SpellComponent,
+            SpellEntry,
+            SpellSchool,
             SheetFeature,
             SheetAbility,
             ScoutSuperiorityActionType,

@@ -8,7 +8,7 @@ from pathlib import Path
 from time import time_ns
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
@@ -18,8 +18,13 @@ from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
     CharacterSheet,
+    CharacterClassLevel,
+    ClassType,
     EquipmentSlot,
+    PartyMemberConfig,
+    PartyMemberSheet,
     PartyMember,
+    PartyManifest,
     RollPayload,
     RollLogEntry,
     RollLogEntryType,
@@ -36,6 +41,7 @@ from dnd_board.character_sheet import (
     build_damage_roll_payload,
     build_saving_throw_roll_payload,
     build_roll_action_payload,
+    ability_modifier,
     enum_value,
     enum_key,
     party_manifest_from_dict,
@@ -45,7 +51,9 @@ from dnd_board.character_sheet import (
     roll_log_entry_to_dict,
     roll_resolution_to_dict,
     sheet_to_dict,
+    typed_json_from_value,
 )
+from dnd_board.rules.progression import apply_progression_choice, fighter_asi_levels_up_to, prune_progression_choices, update_class_level
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -287,6 +295,88 @@ async def update_sheet_resource(room_id: str, sheet_id: str, resource_id: str, p
     room.resource_uses.setdefault(sheet.tokenId, {})[resource.id] = clamp_int(int(currentUses), 0, resource.maxUses)
     updated = get_visible_sheet(room, player, sheet.id)
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else sheet_to_dict(sheet)}
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/level")
+async def update_sheet_level(room_id: str, sheet_id: str, playerKey: str, delta: int, className: str = "fighter") -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-level", name="DM", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    if not is_dm(player):
+        raise HTTPException(status_code=403, detail="Only the DM can level sheets")
+
+    class_type = enum_value(ClassType, className)
+    if class_type is None:
+        raise HTTPException(status_code=400, detail="Invalid class")
+
+    sanitized_sheet_id = sanitize_asset_id(sheet_id)
+    current_sheet = get_visible_sheet(room, player, sanitized_sheet_id)
+    if current_sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    level_delta = clamp_int(delta, -1, 1)
+    if level_delta > 0 and current_sheet.pendingChoices:
+        raise HTTPException(status_code=400, detail="Resolve pending level choices before leveling up")
+
+    updated_member = update_party_member_config(
+        room.id,
+        sanitized_sheet_id,
+        lambda member: set_member_class_levels(member, update_class_level(member_sheet_classes(member), class_type, level_delta)),
+    )
+    if updated_member is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+
+    room.resource_uses.pop(updated_member.id, None)
+    room.hit_points.pop(updated_member.id, None)
+    sheet = get_visible_sheet(room, player, updated_member.id)
+    return {"roomId": room.id, "sheet": sheet_to_dict(sheet) if sheet else None}
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/choices/{choice_id}")
+async def update_sheet_progression_choice(room_id: str, sheet_id: str, choice_id: str, playerKey: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-choice", name="Sheet Choice", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    sheet = get_visible_sheet(room, player, sanitize_asset_id(sheet_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    if not can_control_sheet_roll(player, sheet):
+        raise HTTPException(status_code=403, detail="Cannot update this sheet")
+
+    values = payload.get("values", []) if isinstance(payload, dict) else []
+    if not isinstance(values, list):
+        raise HTTPException(status_code=400, detail="Choice values must be a list")
+
+    normalized_choice_id = normalize_choice_id(choice_id)
+    if normalized_choice_id == "hitpointincrease":
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_hit_point_choice(member, str(values[0]) if values else "fixed"),
+        )
+    elif normalized_choice_id == "fighterabilityscoreimprovement":
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_ability_score_improvement(member, [str(value) for value in values]),
+        )
+    elif normalized_choice_id == "eldritchknightspells":
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_eldritch_knight_spells(member, [str(value) for value in values]),
+        )
+    else:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: set_member_class_levels(member, apply_progression_choice(member_sheet_classes(member), choice_id, [str(value) for value in values])),
+        )
+    if updated_member is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+
+    room.resource_uses.pop(updated_member.id, None)
+    updated_sheet = get_visible_sheet(room, player, updated_member.id)
+    return {"roomId": room.id, "sheet": sheet_to_dict(updated_sheet) if updated_sheet else None}
 
 
 @app.post("/api/rooms/{room_id}/sheet/rest")
@@ -1318,6 +1408,313 @@ def load_party_members(campaign_id: str | None = None) -> list[PartyMember]:
             )
         )
     return members or default_party_members()
+
+
+def update_party_member_config(campaign_id: str, member_id: str, update: Any) -> PartyMemberConfig | None:
+    path = campaign_asset_dir("party", campaign_id) / "party.json"
+    manifest = load_party_manifest_config(path)
+    if manifest is None:
+        return None
+
+    target = next((member for member in manifest.members if normalize_party_member_id(member.id, "") == member_id), None)
+    if target is None:
+        return None
+
+    update(target)
+    path.write_text(json.dumps(typed_json_from_value(manifest), indent=2, sort_keys=False), encoding="utf-8")
+    return target
+
+
+def load_party_manifest_config(path: Path) -> PartyManifest | None:
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return party_manifest_from_dict(data)
+
+
+def member_sheet_classes(member: PartyMemberConfig) -> list[CharacterClassLevel]:
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)])
+    if not member.sheet.classes:
+        member.sheet.classes = [CharacterClassLevel(name=ClassType.FIGHTER, level=1)]
+    return prune_progression_choices(member.sheet.classes)
+
+
+def set_member_class_levels(member: PartyMemberConfig, classes: list[CharacterClassLevel]) -> None:
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet()
+    member.sheet.classes = prune_progression_choices(classes)
+    prune_member_hit_point_increases(member)
+    prune_member_ability_score_improvements(member)
+    prune_member_eldritch_knight_spells(member)
+
+
+def apply_member_hit_point_choice(member: PartyMemberConfig, choice: str) -> None:
+    classes = member_sheet_classes(member)
+    expected_increases = max(0, total_member_level(member) - 1)
+    if expected_increases <= 0:
+        return
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=classes)
+    increases = member.sheet.hitPointIncreases or []
+    if len(increases) >= expected_increases:
+        return
+    bump = fighter_hit_point_bump(member, choice)
+    if member.maxHp is None:
+        member.maxHp = max(1, 10 + member_constitution_modifier(member))
+    member.maxHp += bump
+    member.sheet.hitPointIncreases = [*increases, bump]
+    prune_member_hit_point_increases(member)
+
+
+def apply_member_eldritch_knight_spells(member: PartyMemberConfig, values: list[str]) -> None:
+    from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell, eldritch_knight_spellcasting
+    from dnd_board.rules.classes.fighter.base import FighterSubclassType
+
+    fighter = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.FIGHTER), None)
+    if fighter is None or fighter.subclass != FighterSubclassType.ELDRITCH_KNIGHT or fighter.level < 3:
+        raise HTTPException(status_code=400, detail="Eldritch Knight spellcasting is not available")
+
+    progression = eldritch_knight_spellcasting(fighter.level)
+    selected_ids = unique_clean_values(values)
+    spells = []
+    for spell_id in selected_ids:
+        spell = eldritch_knight_catalog_spell(spell_id)
+        if spell is None:
+            raise HTTPException(status_code=400, detail="Invalid Eldritch Knight spell")
+        spells.append(spell)
+
+    cantrips = [spell for spell in spells if spell.level == 0]
+    leveled_spells = [spell for spell in spells if spell.level > 0]
+    if len(cantrips) != progression.cantrips_known or len(leveled_spells) != progression.spells_known:
+        raise HTTPException(status_code=400, detail="Choose the required Eldritch Knight cantrips and leveled spells")
+
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[fighter])
+    member.sheet.spells = spells
+
+
+def fighter_hit_point_bump(member: PartyMemberConfig, choice: str) -> int:
+    constitution_modifier = member_constitution_modifier(member)
+    if normalize_choice_id(choice) == "roll":
+        return max(1, random.randint(1, 10) + constitution_modifier)
+    return max(1, 6 + constitution_modifier)
+
+
+def member_constitution_modifier(member: PartyMemberConfig) -> int:
+    constitution = member.abilityScores.constitution if member.abilityScores else 10
+    return ability_modifier(constitution)
+
+
+def prune_member_hit_point_increases(member: PartyMemberConfig) -> None:
+    if member.sheet is None or not member.sheet.hitPointIncreases:
+        return
+    expected_increases = max(0, total_member_level(member) - 1)
+    increases = member.sheet.hitPointIncreases
+    if len(increases) <= expected_increases:
+        return
+    removed = increases[expected_increases:]
+    member.sheet.hitPointIncreases = increases[:expected_increases] or None
+    if member.maxHp is not None:
+        member.maxHp = max(1, member.maxHp - sum(removed))
+
+
+def apply_member_ability_score_improvement(member: PartyMemberConfig, values: list[str]) -> None:
+    classes = member_sheet_classes(member)
+    fighter = next((character_class for character_class in classes if character_class.name == ClassType.FIGHTER), None)
+    if fighter is None:
+        return
+
+    expected_improvements = fighter_asi_levels_up_to(fighter.level)
+    if expected_improvements <= 0:
+        return
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=classes)
+    improvements = member.sheet.abilityScoreImprovements or []
+    if len(improvements) >= expected_improvements:
+        return
+
+    if is_feat_choice(values):
+        apply_member_feat_improvement(member, improvements, values[0])
+        return
+
+    requested_changes = ability_score_improvement_changes(values)
+    ensure_member_ability_scores(member)
+    applied_changes: dict[AbilityType, int] = {}
+    for ability, delta in requested_changes.items():
+        ability_key = enum_key(ability)
+        current_score = getattr(member.abilityScores, ability_key)
+        next_score = min(20, current_score + delta)
+        applied_delta = next_score - current_score
+        if applied_delta > 0:
+            setattr(member.abilityScores, ability_key, next_score)
+            if ability == AbilityType.CONSTITUTION:
+                apply_constitution_hp_delta(member, current_score, next_score)
+            applied_changes[ability] = applied_delta
+
+    if not applied_changes:
+        raise HTTPException(status_code=400, detail="Ability scores cannot be increased above 20")
+    member.sheet.abilityScoreImprovements = [*improvements, serialize_ability_score_improvement(applied_changes)]
+
+
+def is_feat_choice(values: list[str]) -> bool:
+    clean_values = [value for value in values if value.strip()]
+    return len(clean_values) == 1 and normalize_choice_id(clean_values[0]).startswith("feat")
+
+
+def apply_member_feat_improvement(member: PartyMemberConfig, improvements: list[str], value: str) -> None:
+    from dnd_board.rules.feats import general_feat_feature, parse_general_feat, selected_general_feat_keys
+
+    feat_key = value.split(":", 1)[1] if ":" in value else value
+    feat_type = parse_general_feat(feat_key)
+    if feat_type is None:
+        raise HTTPException(status_code=400, detail="Invalid feat")
+    feature = general_feat_feature(feat_key)
+    if feature is None:
+        raise HTTPException(status_code=400, detail="Invalid feat")
+    existing_feats = member.sheet.feats or []
+    if feature.id in selected_general_feat_keys(existing_feats):
+        raise HTTPException(status_code=400, detail="Feat is already selected")
+    member.sheet.feats = [*existing_feats, feature]
+    member.sheet.abilityScoreImprovements = [*improvements, serialize_feat_improvement(feature.id)]
+
+
+def ability_score_improvement_changes(values: list[str]) -> dict[AbilityType, int]:
+    clean_values = [value for value in values if value.strip()]
+    if len(clean_values) > 2:
+        raise HTTPException(status_code=400, detail="Choose one ability twice or two abilities once")
+
+    parsed: list[AbilityType] = []
+    for value in clean_values:
+        ability = enum_value(AbilityType, value)
+        if ability is None:
+            raise HTTPException(status_code=400, detail="Invalid ability score")
+        parsed.append(ability)
+
+    if len(parsed) == 1:
+        parsed.append(parsed[0])
+    if len(parsed) != 2:
+        raise HTTPException(status_code=400, detail="Choose one ability twice or two abilities once")
+
+    changes: dict[AbilityType, int] = {}
+    for ability in parsed:
+        changes[ability] = changes.get(ability, 0) + 1
+    return changes
+
+
+def ensure_member_ability_scores(member: PartyMemberConfig) -> None:
+    if member.abilityScores is None:
+        member.abilityScores = AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10)
+
+
+def serialize_ability_score_improvement(changes: dict[AbilityType, int]) -> str:
+    return ",".join(f"{enum_key(ability)}:{delta}" for ability, delta in changes.items())
+
+
+def serialize_feat_improvement(feat_key: str) -> str:
+    return f"feat:{feat_key}"
+
+
+def parse_feat_improvement(value: str) -> str | None:
+    if not value.startswith("feat:"):
+        return None
+    return value.split(":", 1)[1]
+
+
+def parse_ability_score_improvement(value: str) -> dict[AbilityType, int]:
+    changes: dict[AbilityType, int] = {}
+    for part in value.split(","):
+        ability_key, separator, delta_text = part.partition(":")
+        if not separator:
+            continue
+        ability = enum_value(AbilityType, ability_key)
+        if ability is None:
+            continue
+        try:
+            delta = int(delta_text)
+        except ValueError:
+            continue
+        if delta > 0:
+            changes[ability] = changes.get(ability, 0) + delta
+    return changes
+
+
+def prune_member_ability_score_improvements(member: PartyMemberConfig) -> None:
+    if member.sheet is None or not member.sheet.abilityScoreImprovements:
+        return
+    fighter = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.FIGHTER), None)
+    expected_improvements = fighter_asi_levels_up_to(fighter.level) if fighter is not None else 0
+    improvements = member.sheet.abilityScoreImprovements
+    if len(improvements) <= expected_improvements:
+        return
+
+    removed = improvements[expected_improvements:]
+    member.sheet.abilityScoreImprovements = improvements[:expected_improvements] or None
+    ensure_member_ability_scores(member)
+    for improvement in reversed(removed):
+        feat_key = parse_feat_improvement(improvement)
+        if feat_key is not None:
+            member.sheet.feats = [feat for feat in member.sheet.feats or [] if feat.id != feat_key] or None
+            continue
+        for ability, delta in parse_ability_score_improvement(improvement).items():
+            ability_key = enum_key(ability)
+            current_score = getattr(member.abilityScores, ability_key)
+            next_score = max(1, current_score - delta)
+            setattr(member.abilityScores, ability_key, next_score)
+            if ability == AbilityType.CONSTITUTION:
+                apply_constitution_hp_delta(member, current_score, next_score)
+
+
+def apply_constitution_hp_delta(member: PartyMemberConfig, previous_score: int, next_score: int) -> None:
+    if member.maxHp is None:
+        return
+    modifier_delta = ability_modifier(next_score) - ability_modifier(previous_score)
+    if modifier_delta != 0:
+        member.maxHp = max(1, member.maxHp + total_member_level(member) * modifier_delta)
+
+
+def prune_member_eldritch_knight_spells(member: PartyMemberConfig) -> None:
+    from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell, eldritch_knight_spellcasting, eldritch_knight_max_spell_level
+    from dnd_board.rules.classes.fighter.base import FighterSubclassType
+
+    if member.sheet is None or not member.sheet.spells:
+        return
+
+    fighter = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.FIGHTER), None)
+    if fighter is None or fighter.subclass != FighterSubclassType.ELDRITCH_KNIGHT or fighter.level < 3:
+        member.sheet.spells = [spell for spell in member.sheet.spells if eldritch_knight_catalog_spell(spell.id) is None] or None
+        return
+
+    progression = eldritch_knight_spellcasting(fighter.level)
+    max_spell_level = eldritch_knight_max_spell_level(fighter.level)
+    cantrips = [spell for spell in member.sheet.spells if spell.level == 0 and eldritch_knight_catalog_spell(spell.id) is not None]
+    leveled_spells = [spell for spell in member.sheet.spells if 0 < spell.level <= max_spell_level and eldritch_knight_catalog_spell(spell.id) is not None]
+    other_spells = [spell for spell in member.sheet.spells if eldritch_knight_catalog_spell(spell.id) is None]
+    member.sheet.spells = [
+        *other_spells,
+        *cantrips[: progression.cantrips_known],
+        *leveled_spells[: progression.spells_known],
+    ] or None
+
+
+def unique_clean_values(values: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for value in values:
+        clean_value = value.strip()
+        if clean_value and clean_value not in cleaned:
+            cleaned.append(clean_value)
+    return cleaned
+
+
+def total_member_level(member: PartyMemberConfig) -> int:
+    return sum(character_class.level for character_class in member_sheet_classes(member))
+
+
+def normalize_choice_id(value: str) -> str:
+    return value.strip().replace("-", "").replace("_", "").lower()
 
 
 def load_party_members_from_manifest(path: Path, campaign_id: str | None = None) -> list[PartyMember]:
