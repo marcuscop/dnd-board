@@ -1,12 +1,17 @@
 import asyncio
 import json
+from dataclasses import replace
 from io import BytesIO
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from dnd_board import server
+from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
+from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, RogueSubclassAttackType, RogueSubclassRollActionType, arcane_trickster_catalog_spell
+from dnd_board.rules.classes.rogue.base import RogueSubclassType
 from dnd_board.rules.feats import general_feat_feature
 from dnd_board.character_sheet import (
     AbilityScores,
@@ -32,12 +37,18 @@ from dnd_board.character_sheet import (
     PartyMemberConfig,
     PartyMemberSheet,
     ProficiencyLevel,
+    ResourceTracker,
     RollPayload,
+    RollAction,
     RollResolutionMode,
     RollSource,
+    RestType,
     SheetSectionType,
+    SpellSource,
+    TimeEconomy,
     WeaponCategory,
     WeaponProperty,
+    enum_key,
     typed_json_from_value,
 )
 
@@ -55,6 +66,32 @@ def write_party_campaign(tmp_path, campaign_id: str, *members: PartyMemberConfig
         json.dumps(typed_json_from_value(PartyManifest(members=list(members)))),
         encoding="utf-8",
     )
+
+
+def resolve_rogue_level_choices(client: TestClient, room_id: str) -> dict:
+    sheet = client.get(f"/api/rooms/{room_id}/sheet/player-1?playerKey=player-1").json()["sheet"]
+    while sheet["pendingChoices"]:
+        choice_ids = {choice["id"] for choice in sheet["pendingChoices"]}
+        if "hitPointIncrease" in choice_ids:
+            response = client.post(f"/api/rooms/{room_id}/sheet/player-1/choices/hitPointIncrease?playerKey=player-1", json={"values": ["fixed"]})
+        elif "rogueSubclass" in choice_ids:
+            response = client.post(f"/api/rooms/{room_id}/sheet/player-1/choices/rogueSubclass?playerKey=player-1", json={"values": [enum_key(RogueSubclassType.SOULKNIFE)]})
+        elif "rogueAbilityScoreImprovement" in choice_ids:
+            response = client.post(f"/api/rooms/{room_id}/sheet/player-1/choices/rogueAbilityScoreImprovement?playerKey=player-1", json={"values": ["dexterity", "dexterity"]})
+        else:
+            raise AssertionError(f"Unhandled Rogue level choice: {choice_ids}")
+        assert response.status_code == 200
+        sheet = response.json()["sheet"]
+    return sheet
+
+
+def test_health_endpoint_returns_ok() -> None:
+    client = TestClient(server.app)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.text == "ok"
 
 
 def test_room_starts_with_four_owned_player_characters() -> None:
@@ -302,6 +339,26 @@ def test_avatar_upload_rejects_non_image_file(tmp_path, monkeypatch) -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_avatar_upload_rejects_missing_token_and_oversized_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(server, "MAX_AVATAR_BYTES", 3)
+    client = TestClient(server.app)
+
+    missing = client.post(
+        "/api/rooms/avatar-error-test/tokens/not-a-token/avatar?playerKey=dm",
+        files={"file": ("hero.png", make_image("PNG"), "image/png")},
+    )
+    oversized = client.post(
+        "/api/rooms/avatar-error-test/tokens/player-1/avatar?playerKey=player-1",
+        files={"file": ("hero.png", b"1234", "image/png")},
+    )
+
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "Token not found"
+    assert oversized.status_code == 400
+    assert oversized.json()["detail"] == "Avatar image is too large"
 
 
 def test_only_dm_can_save_room_state(tmp_path, monkeypatch) -> None:
@@ -932,6 +989,15 @@ def test_non_dm_cannot_resize_token() -> None:
     assert player_socket.messages == []
 
 
+def test_http_resize_rejects_missing_token() -> None:
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/resize-missing-test/tokens/not-a-token/radius?playerKey=dm&radius=72")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Token resize failed"
+
+
 def test_resize_token_clamps_position_to_active_board() -> None:
     room = server.get_or_create_room("resize-clamp-test")
     dm_socket = FakeSocket()
@@ -1149,6 +1215,15 @@ def test_player_can_roll_ability_check_and_saving_throw(tmp_path, monkeypatch) -
     assert save_roll["total"] == 17
 
 
+def test_ability_roll_rejects_unknown_ability() -> None:
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/unknown-ability-test/sheet/player-1/rolls/ability-check?playerKey=player-1&ability=luck")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Ability not found"
+
+
 def test_player_can_update_owned_sheet_resource(tmp_path, monkeypatch) -> None:
     write_party_campaign(
         tmp_path,
@@ -1174,6 +1249,36 @@ def test_player_can_update_owned_sheet_resource(tmp_path, monkeypatch) -> None:
 
     assert response.status_code == 200
     assert action_surge["currentUses"] == 0
+
+
+def test_sheet_resource_update_rejects_missing_resource(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "missing-resource-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Resource Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1, fightingStyles=[FightingStyleType.DEFENSE])]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/missing-resource-test/sheet/player-1/resources/notAResource?playerKey=player-1&currentUses=0")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Resource not found"
+
+
+def test_sheet_endpoint_rejects_missing_visible_sheet() -> None:
+    client = TestClient(server.app)
+
+    response = client.get("/api/rooms/missing-sheet-test/sheet/not-a-sheet?playerKey=player-1")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Sheet not found"
 
 
 def test_player_can_update_owned_sheet_conditions(tmp_path, monkeypatch) -> None:
@@ -1264,6 +1369,27 @@ def test_only_dm_can_level_sheet(tmp_path, monkeypatch) -> None:
     assert response.status_code == 403
 
 
+def test_level_sheet_rejects_invalid_class(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "level-invalid-class-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Level Rogue",
+            maxHp=10,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=14, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/level-invalid-class-test/sheet/player-1/level?playerKey=dm&delta=1&className=wizard")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid class"
+
+
 def test_dm_cannot_level_up_with_unresolved_level_choices(tmp_path, monkeypatch) -> None:
     write_party_campaign(
         tmp_path,
@@ -1334,6 +1460,48 @@ def test_player_can_apply_own_level_choice_but_not_other_sheets(tmp_path, monkey
     assert other_player.status_code == 403
     assert owner.status_code == 200
     assert owner.json()["sheet"]["classes"][0]["fightingStyles"] == ["defense"]
+
+
+def test_progression_choice_rejects_non_list_values(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "choice-values-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Choice Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post('/api/rooms/choice-values-test/sheet/player-1/choices/fighterFightingStyles?playerKey=player-1', json={"values": "defense"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Choice values must be a list"
+
+
+def test_progression_choice_rejects_invalid_choice_id(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "invalid-choice-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Choice Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post('/api/rooms/invalid-choice-test/sheet/player-1/choices/notAChoice?playerKey=player-1', json={"values": []})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid progression choice"
 
 
 def test_player_can_apply_fighter_ability_score_improvement(tmp_path, monkeypatch) -> None:
@@ -1610,6 +1778,92 @@ def test_player_can_choose_eldritch_knight_spells(tmp_path, monkeypatch) -> None
     assert "eldritchKnightSpells" not in {choice["id"] for choice in sheet["pendingChoices"]}
 
 
+def test_player_can_choose_arcane_trickster_spells(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "arcane-trickster-spell-choice-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Spell Rogue",
+            maxHp=24,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=14, intelligence=14, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.ROGUE, level=3, subclass=RogueSubclassType.ARCANE_TRICKSTER)],
+                hitPointIncreases=[7, 7],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post(
+        '/api/rooms/arcane-trickster-spell-choice-test/sheet/player-1/choices/arcaneTricksterSpells?playerKey=player-1',
+        json={"values": ["fireBolt", "mageHand", "mindSliver", "shield", "magicMissile", "charmPerson"]},
+    )
+    sheet = response.json()["sheet"]
+    spells = {spell["id"]: spell for spell in sheet["spells"]}
+
+    assert response.status_code == 200
+    assert spells["mageHand"]["level"] == 0
+    assert spells["shield"]["castingAbility"] == "intelligence"
+    assert spells["charmPerson"]["source"] == "arcaneTrickster"
+    assert "arcaneTricksterSpells" not in {choice["id"] for choice in sheet["pendingChoices"]}
+
+
+def test_rogue_levels_into_soulknife_and_uses_homing_strikes(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "soulknife-journey-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Journey Rogue",
+            maxHp=10,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=14, intelligence=12, wisdom=12, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 4)
+    client = TestClient(server.app)
+
+    sheet = None
+    for _ in range(8):
+        leveled = client.post("/api/rooms/soulknife-journey-test/sheet/player-1/level?playerKey=dm&delta=1&className=rogue")
+        assert leveled.status_code == 200
+        sheet = resolve_rogue_level_choices(client, "soulknife-journey-test")
+
+    assert sheet is not None
+    assert sheet["characterClass"]["name"] == "rogue"
+    assert sheet["characterClass"]["level"] == 9
+    assert sheet["abilityScores"]["dexterity"] == 20
+    assert "rogueAbilityScoreImprovement" not in {choice["id"] for choice in sheet["pendingChoices"]}
+    resources = {resource["id"]: resource for resource in sheet["resources"]}
+    abilities = {ability["id"]: ability for ability in sheet["abilities"]}
+    attacks = {attack["id"]: attack for attack in sheet["attacks"]}
+    assert resources["psionicEnergyDice"]["maxUses"] == 8
+    assert abilities[enum_key(RogueSubclassAbilityType.HOMING_STRIKES)]["resourceId"] == "psionicEnergyDice"
+    assert attacks[enum_key(RogueSubclassAttackType.PSYCHIC_BLADE)]["id"] == enum_key(RogueSubclassAttackType.PSYCHIC_BLADE)
+    assert attacks[enum_key(RogueSubclassAttackType.PSYCHIC_BLADE)]["damageType"] == "psychic"
+
+    roll = client.post(
+        f"/api/rooms/soulknife-journey-test/sheet/player-1/abilities/{enum_key(RogueSubclassAbilityType.HOMING_STRIKES)}/rolls/{enum_key(RogueSubclassRollActionType.HOMING_STRIKES)}?playerKey=player-1"
+    )
+    updated_sheet = client.get("/api/rooms/soulknife-journey-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    psionic_energy = next(resource for resource in updated_sheet["resources"] if resource["id"] == "psionicEnergyDice")
+
+    assert roll.status_code == 200
+    assert roll.json()["roll"]["label"] == "Homing Strikes"
+    assert roll.json()["roll"]["die"] == "1d8"
+    assert roll.json()["roll"]["dice"] == [4]
+    assert roll.json()["roll"]["resourceSpent"] == {
+        "resourceId": "psionicEnergyDice",
+        "resourceName": "Psionic Energy Dice",
+        "remainingUses": 7,
+        "maxUses": 8,
+    }
+    assert psionic_energy["currentUses"] == 7
+
+
 def test_eldritch_knight_spell_choice_rejects_wrong_counts(tmp_path, monkeypatch) -> None:
     write_party_campaign(
         tmp_path,
@@ -1710,6 +1964,15 @@ def test_only_dm_can_rest_sheet_resources() -> None:
     assert response.status_code == 403
 
 
+def test_rest_sheet_resources_rejects_invalid_rest_type() -> None:
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/rest-invalid-test/sheet/rest?playerKey=dm&rest=nap")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid rest type"
+
+
 def test_short_rest_resets_only_short_rest_resources(tmp_path, monkeypatch) -> None:
     campaign = tmp_path / "short-rest-test"
     party = campaign / "party"
@@ -1800,7 +2063,8 @@ def test_long_rest_resets_short_and_long_rest_resources(tmp_path, monkeypatch) -
     assert rested_sheet["hp"]["temporary"] == 0
 
 
-def test_rest_clears_only_conditions_with_matching_durations() -> None:
+def test_rest_clears_only_conditions_with_matching_durations(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
     room = server.get_or_create_room("condition-rest-test")
     room.condition_overrides["player-1"] = [ConditionType.BLINDED, ConditionType.FRIGHTENED, ConditionType.PRONE]
@@ -2656,6 +2920,45 @@ def test_equipment_slot_update_recalculates_fighting_style_armor_class(tmp_path,
     assert unworn_armor.json()["sheet"]["armorClass"] == 14
 
 
+def test_equipment_slot_update_rejects_missing_item_and_invalid_slots(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "equipment-slot-errors",
+        PartyMemberConfig(
+            id="player-1",
+            name="Equipment Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=13, intelligence=12, wisdom=10, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1, fightingStyle=FightingStyleType.DEFENSE)],
+                equipment=[
+                    EquipmentItem(
+                        id="chain-mail",
+                        name="Chain Mail",
+                        itemType=EquipmentType.ARMOR,
+                        slot=EquipmentSlot.CARRIED,
+                        armorCategory=ArmorCategory.HEAVY,
+                        armorClass=16,
+                    )
+                ],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    missing = client.post("/api/rooms/equipment-slot-errors/sheet/player-1/equipment/missing/slot?playerKey=player-1&slot=armor")
+    invalid_slot = client.post("/api/rooms/equipment-slot-errors/sheet/player-1/equipment/chain-mail/slot?playerKey=player-1&slot=leftPocket")
+    invalid_for_item = client.post("/api/rooms/equipment-slot-errors/sheet/player-1/equipment/chain-mail/slot?playerKey=player-1&slot=mainHand")
+
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "Equipment item not found"
+    assert invalid_slot.status_code == 400
+    assert invalid_slot.json()["detail"] == "Invalid equipment slot"
+    assert invalid_for_item.status_code == 400
+    assert invalid_for_item.json()["detail"] == "Invalid slot for equipment item"
+
+
 def test_unarmed_fighting_damage_die_updates_after_equipment_slot_changes(tmp_path, monkeypatch) -> None:
     campaign = tmp_path / "unarmed-slot-campaign"
     party = campaign / "party"
@@ -2736,6 +3039,372 @@ def test_unarmed_fighting_grapple_rider_roll_resolves_as_damage(tmp_path, monkey
     assert roll["resolution"] == "applyDamage"
     assert roll["damageType"] == "bludgeoning"
     assert target["hp"]["current"] == 17
+
+
+def test_server_endpoint_guard_paths_for_sheet_mutations(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "guard-path-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Guard Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(16, 14, 13, 12, 10, 8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)],
+                equipment=[EquipmentItem(id="rope", name="Rope", itemType=EquipmentType.GEAR, slot=EquipmentSlot.CARRIED)],
+            ),
+        ),
+        PartyMemberConfig(id="player-2", name="Other"),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    assert client.post("/api/rooms/guard-path-test/sheet/not-a-sheet/rolls/clear?playerKey=player-1").status_code == 404
+    assert client.post("/api/rooms/guard-path-test/sheet/player-1/rolls/clear?playerKey=player-2").status_code == 403
+    assert client.post("/api/rooms/guard-path-test/sheet/not-a-sheet/resources/actionSurge?playerKey=player-1&currentUses=0").status_code == 404
+    assert client.post("/api/rooms/guard-path-test/sheet/player-1/resources/secondWind?playerKey=player-2&currentUses=0").status_code == 403
+    assert client.post("/api/rooms/guard-path-test/sheet/not-a-sheet/level?playerKey=dm&delta=1").status_code == 404
+    assert client.post("/api/rooms/guard-path-test/sheet/not-a-sheet/choices/fighterSubclass?playerKey=player-1", json={"values": ["champion"]}).status_code == 404
+    assert client.post("/api/rooms/guard-path-test/sheet/player-1/choices/fighterSubclass?playerKey=player-2", json={"values": ["champion"]}).status_code == 403
+    assert client.post("/api/rooms/guard-path-test/sheet/player-1/choices/fighterSubclass?playerKey=player-1", json={"values": "champion"}).status_code == 400
+    assert client.post("/api/rooms/guard-path-test/sheet/player-1/choices/not-a-choice?playerKey=player-1", json={"values": ["champion"]}).status_code == 400
+    assert client.post("/api/rooms/guard-path-test/sheet/player-1/equipment/rope/slot?playerKey=player-1&slot=armor").status_code == 400
+    assert client.post("/api/rooms/guard-path-test/sheet/player-1/equipment/rope/slot?playerKey=player-1&slot=bad-slot").status_code == 400
+    assert client.post("/api/rooms/guard-path-test/sheet/player-1/conditions/not-a-condition?playerKey=player-1&active=true").status_code == 400
+
+
+def test_handle_message_dispatches_websocket_routes(monkeypatch) -> None:
+    room = server.get_or_create_room("dispatch-test")
+    socket = FakeSocket()
+    player = server.Player(id="connection-1", name="Player", player_key="player-1", websocket=socket, room_id=room.id)
+    room.players[player.id] = player
+    calls: list[tuple[str, tuple]] = []
+
+    async def record(name):
+        async def inner(*args):
+            calls.append((name, args))
+        return inner
+
+    async def join(*args):
+        calls.append(("join_room", args))
+
+    monkeypatch.setattr(server, "join_room", join)
+    for name in [
+        "lock_token",
+        "move_token",
+        "release_token",
+        "set_token_scene",
+        "set_token_radius",
+        "set_fog_mode",
+        "reveal_fog",
+        "set_board",
+        "load_asset_token",
+        "delete_token",
+        "clear_scene",
+    ]:
+        monkeypatch.setattr(server, name, asyncio.run(record(name)))
+
+    asyncio.run(server.handle_message(player, {"type": "join_room", "roomId": "next", "playerName": "Ana", "playerKey": "dm"}))
+    asyncio.run(server.handle_message(player, {"type": "request_token_lock", "tokenId": "player-1"}))
+    asyncio.run(server.handle_message(player, {"type": "move_token", "tokenId": "player-1"}))
+    asyncio.run(server.handle_message(player, {"type": "release_token", "tokenId": "player-1"}))
+    asyncio.run(server.handle_message(player, {"type": "set_token_scene", "tokenId": "player-1"}))
+    asyncio.run(server.handle_message(player, {"type": "set_token_radius", "tokenId": "player-1", "radius": 88}))
+    asyncio.run(server.handle_message(player, {"type": "set_fog_mode"}))
+    asyncio.run(server.handle_message(player, {"type": "reveal_fog"}))
+    asyncio.run(server.handle_message(player, {"type": "set_board", "boardId": "windmill"}))
+    asyncio.run(server.handle_message(player, {"type": "load_asset", "assetKind": "asset", "assetId": "aboleth"}))
+    asyncio.run(server.handle_message(player, {"type": "delete_token", "tokenId": "asset-1"}))
+    asyncio.run(server.handle_message(player, {"type": "clear_scene"}))
+    player.room_id = None
+    asyncio.run(server.handle_message(player, {"type": "move_token", "tokenId": "player-1"}))
+
+    assert [name for name, _args in calls] == [
+        "join_room",
+        "lock_token",
+        "move_token",
+        "release_token",
+        "set_token_scene",
+        "set_token_radius",
+        "set_fog_mode",
+        "reveal_fog",
+        "set_board",
+        "load_asset_token",
+        "delete_token",
+        "clear_scene",
+    ]
+
+
+def test_server_state_helpers_cover_rest_equipment_and_room_edges(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    room = server.get_or_create_room("helper-path-test")
+    dm_socket = FakeSocket()
+    player = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
+    room.players[player.id] = player
+    sheet = server.token_to_sheet(room.tokens["player-1"], room.id, current_hp=5)
+    short_resource = ResourceTracker("short", "Short", 0, 2, RestType.SHORT_REST, TimeEconomy.SPECIAL, "short")
+    long_resource = ResourceTracker("long", "Long", 0, 1, RestType.LONG_REST, TimeEconomy.SPECIAL, "long")
+    none_resource = ResourceTracker("none", "None", 0, 1, RestType.NONE, TimeEconomy.SPECIAL, "none")
+    sheet.resources = [short_resource, long_resource, none_resource]
+    sheet.conditions = [ConditionType.PRONE, ConditionType.FRIGHTENED, ConditionType.CHARMED]
+    room.condition_durations[sheet.tokenId] = {
+        ConditionType.PRONE: ConditionDuration.UNTIL_SHORT_REST,
+        ConditionType.FRIGHTENED: ConditionDuration.UNTIL_LONG_REST,
+        ConditionType.CHARMED: ConditionDuration.MANUAL,
+    }
+    room.temporary_hit_points[sheet.tokenId] = 7
+
+    server.reset_sheet_resources(room, sheet, RestType.SHORT_REST)
+    server.reset_sheet_conditions(room, sheet, RestType.SHORT_REST)
+    server.reset_sheet_temporary_hit_points(room, sheet, RestType.SHORT_REST)
+    assert room.resource_uses[sheet.tokenId] == {"short": 2}
+    assert room.condition_overrides[sheet.tokenId] == [ConditionType.FRIGHTENED, ConditionType.CHARMED]
+    assert room.temporary_hit_points[sheet.tokenId] == 7
+
+    server.reset_sheet_resources(room, sheet, RestType.LONG_REST)
+    server.reset_sheet_conditions(room, sheet, RestType.LONG_REST)
+    server.reset_sheet_temporary_hit_points(room, sheet, RestType.LONG_REST)
+    assert room.resource_uses[sheet.tokenId] == {"short": 2, "long": 1}
+    assert sheet.tokenId not in room.temporary_hit_points
+    assert server.parse_rest_type("short-rest") == RestType.SHORT_REST
+    assert server.parse_rest_type("long") == RestType.LONG_REST
+    assert server.resource_resets_on_rest(RestType.NONE, RestType.LONG_REST) is False
+
+    armor = EquipmentItem(id="chain", name="Chain Mail", itemType=EquipmentType.ARMOR, slot=EquipmentSlot.ARMOR, armorCategory=ArmorCategory.HEAVY, armorClass=16)
+    sword = EquipmentItem(id="sword", name="Sword", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND)
+    shield_item = EquipmentItem(id="shield", name="Shield", itemType=EquipmentType.SHIELD, slot=EquipmentSlot.OFF_HAND)
+    sheet.equipment = [armor, sword, shield_item]
+    server.set_equipment_slot(room, sheet, "new-armor", EquipmentSlot.ARMOR)
+    server.set_equipment_slot(room, sheet, "greatsword", EquipmentSlot.TWO_HANDS)
+    server.set_equipment_slot(room, sheet, "dagger", EquipmentSlot.MAIN_HAND)
+    assert room.equipment_slots[sheet.tokenId]["chain"] == EquipmentSlot.CARRIED
+    assert room.equipment_slots[sheet.tokenId]["sword"] == EquipmentSlot.CARRIED
+    assert server.valid_equipment_slots(EquipmentItem(id="gear", name="Gear", itemType=EquipmentType.GEAR, slot=EquipmentSlot.CARRIED)) == {EquipmentSlot.CARRIED}
+
+    history_roll = RollPayload("roll", "sheet", "token", "player", RollSource(SheetSectionType.ATTACKS, "a", "b"), "A", RollResolutionMode.NONE, "Roll", None, [], DiceType.D20, "d20", 0, [], 0, 1)
+    room.roll_history = [server.RollLogEntry(str(index), server.RollLogEntryType.ROLL_CREATED, index, history_roll) for index in range(server.ROLL_HISTORY_LIMIT + 3)]
+    server.append_roll_log_entry(room, server.RollLogEntry("last", server.RollLogEntryType.ROLL_CREATED, 999, history_roll))
+    assert len(room.roll_history) == server.ROLL_HISTORY_LIMIT
+    assert room.roll_history[-1].id == "last"
+
+    player.room_id = "missing-room"
+    asyncio.run(server.leave_room(player))
+    assert player.room_id is None
+
+
+def test_server_roll_resolution_helper_edges(monkeypatch) -> None:
+    rolls = iter([1, 20, 20, 1])
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    room = server.get_or_create_room("resolution-helper-test")
+    source = server.token_to_sheet(room.tokens["player-1"], room.id)
+    target = server.token_to_sheet(room.tokens["player-2"], room.id)
+    target.conditions = []
+    target.savingThrows = []
+    target.abilityScores.dexterity = 10
+    room.tokens.pop("player-1")
+
+    missing_source_roll = RollPayload(
+        "roll-missing-source",
+        source.id,
+        source.tokenId,
+        "player-1",
+        RollSource(SheetSectionType.ABILITIES, "ability", "action"),
+        "Effect",
+        RollResolutionMode.NONE,
+        "Effect",
+        None,
+        [1],
+        DiceType.D20,
+        "d20",
+        0,
+        [],
+        1,
+        1,
+        conditionEffects=[ConditionEffect(ConditionType.GRAPPLED, ConditionApplicationMode.SOURCE_CHECK, sourceCheck=AbilityType.STRENGTH, contestChecks=[AbilityType.STRENGTH, AbilityType.DEXTERITY])],
+    )
+    assert server.resolve_source_check_condition_effects(missing_source_roll, None, target) == []
+
+    save_fail_roll = RollPayload(
+        "roll-save-fail",
+        source.id,
+        source.tokenId,
+        "player-1",
+        RollSource(SheetSectionType.ABILITIES, "ability", "action"),
+        "Poison",
+        RollResolutionMode.NONE,
+        "Poison",
+        None,
+        [1],
+        DiceType.D20,
+        "d20",
+        0,
+        [],
+        1,
+        1,
+        conditionEffects=[ConditionEffect(ConditionType.POISONED, ConditionApplicationMode.TARGET_SAVE, savingThrow=AbilityType.DEXTERITY, saveDc=15)],
+    )
+    fail_outcomes = server.resolve_target_save_effects(save_fail_roll, target)
+    pass_outcomes = server.resolve_target_save_effects(save_fail_roll, target)
+    assert "fails DC 15 Dexterity save and gains Poisoned" in fail_outcomes[0][0]
+    assert "passes DC 15 Dexterity save against Poisoned" in pass_outcomes[0][0]
+
+    room.tokens["player-1"] = server.Token("player-1", server.TokenKind.CHARACTER, "Source", "player-1", server.DEFAULT_TOKEN_COLOR, 0, 0, 70, True)
+    grapple_roll = RollPayload(
+        "roll-grapple",
+        source.id,
+        source.tokenId,
+        "player-1",
+        RollSource(SheetSectionType.ABILITIES, "ability", "action"),
+        "Grapple",
+        RollResolutionMode.NONE,
+        "Grapple",
+        None,
+        [1],
+        DiceType.D20,
+        "d20",
+        0,
+        [],
+        1,
+        1,
+        conditionEffects=[ConditionEffect(ConditionType.GRAPPLED, ConditionApplicationMode.SOURCE_CHECK, sourceCheck=AbilityType.STRENGTH, contestChecks=[AbilityType.STRENGTH, AbilityType.DEXTERITY])],
+    )
+    outcomes = server.resolve_source_check_condition_effects(grapple_roll, source, target)
+    assert outcomes[0][1] == ConditionType.GRAPPLED
+    assert len(outcomes[0][2]) == 2
+
+
+def test_member_progression_helper_error_and_pruning_paths(monkeypatch) -> None:
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    no_asi_member = PartyMemberConfig(id="player-1", name="No ASI", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)]))
+    server.apply_member_ability_score_improvement(no_asi_member, ["strength"])
+    assert no_asi_member.sheet.abilityScoreImprovements is None
+
+    member = PartyMemberConfig(
+        id="player-1",
+        name="ASI Fighter",
+        maxHp=20,
+        abilityScores=AbilityScores(19, 10, 13, 10, 10, 10),
+        sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
+    )
+    server.apply_member_ability_score_improvement(member, ["strength"])
+    assert member.abilityScores.strength == 20
+    assert member.sheet.abilityScoreImprovements == ["strength:1"]
+
+    for values, detail in [
+        (["strength", "dexterity", "constitution"], "Choose one ability twice or two abilities once"),
+        (["luck"], "Invalid ability score"),
+        ([], "Choose one ability twice or two abilities once"),
+    ]:
+        with pytest.raises(Exception) as error:
+            server.apply_member_ability_score_improvement(
+                PartyMemberConfig(id="player-1", name="Bad ASI", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)])),
+                values,
+            )
+        assert error.value.status_code == 400
+        assert error.value.detail == detail
+
+    maxed = PartyMemberConfig(id="player-1", name="Maxed", abilityScores=AbilityScores(20, 20, 20, 20, 20, 20), sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]))
+    with pytest.raises(Exception) as max_error:
+        server.apply_member_ability_score_improvement(maxed, ["strength"])
+    assert max_error.value.detail == "Ability scores cannot be increased above 20"
+
+    feat_member = PartyMemberConfig(id="player-1", name="Feat", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]))
+    with pytest.raises(Exception) as invalid_feat:
+        server.apply_member_ability_score_improvement(feat_member, ["feat:not-real"])
+    assert invalid_feat.value.detail == "Invalid feat"
+    server.apply_member_ability_score_improvement(feat_member, ["feat:alert"])
+    with pytest.raises(Exception) as duplicate_feat:
+        server.apply_member_ability_score_improvement(PartyMemberConfig(id="player-1", name="Feat", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=8)], feats=feat_member.sheet.feats)), ["feat:alert"])
+    assert duplicate_feat.value.detail == "Feat is already selected"
+
+    member.sheet.abilityScoreImprovements = ["strength:1", "feat:alert", "constitution:2"]
+    member.sheet.feats = [general_feat_feature("alert")]
+    member.abilityScores.constitution = 15
+    server.prune_member_ability_score_improvements(member)
+    assert member.sheet.abilityScoreImprovements == ["strength:1"]
+    assert member.sheet.feats is None
+
+
+def test_member_spell_pruning_paths() -> None:
+    shield = eldritch_knight_catalog_spell("shield")
+    mage_hand = arcane_trickster_catalog_spell("mageHand")
+    assert shield is not None
+    assert mage_hand is not None
+    arcane_trickster_mage_hand = replace(mage_hand, source=SpellSource.ARCANE_TRICKSTER)
+
+    fighter_member = PartyMemberConfig(
+        id="player-1",
+        name="Not EK",
+        sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.CHAMPION)], spells=[shield]),
+    )
+    rogue_member = PartyMemberConfig(
+        id="player-1",
+        name="Not AT",
+        sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=3, subclass=RogueSubclassType.THIEF)], spells=[arcane_trickster_mage_hand]),
+    )
+
+    server.prune_member_eldritch_knight_spells(PartyMemberConfig(id="player-1", name="No Sheet"))
+    server.prune_member_arcane_trickster_spells(PartyMemberConfig(id="player-1", name="No Spells", sheet=PartyMemberSheet()))
+    server.prune_member_eldritch_knight_spells(fighter_member)
+    server.prune_member_arcane_trickster_spells(rogue_member)
+    assert fighter_member.sheet.spells is None
+    assert rogue_member.sheet.spells is None
+
+
+def test_saved_state_and_asset_parsing_fallbacks(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "SAVE_DIR", tmp_path / "saves")
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path / "campaigns")
+    save_dir = tmp_path / "saves"
+    save_dir.mkdir()
+    bad_path = save_dir / "bad.json"
+    bad_path.write_text("{bad", encoding="utf-8")
+
+    assert server.load_saved_tokens("missing") is None
+    assert server.load_saved_tokens("bad") is None
+    assert server.load_saved_fog("bad") == server.default_fog()
+    assert server.load_saved_board_id("bad") == "-"
+    assert server.load_saved_resource_uses("bad") == {}
+
+    resources_path = save_dir / "resources.json"
+    resources_path.write_text(json.dumps({"resources": {" Player 1! ": {"Second Wind": "2", "bad": "x"}, "bad": []}}), encoding="utf-8")
+    assert server.load_saved_resource_uses("resources") == {"player1": {"secondwind": 2}}
+
+    party_dir = tmp_path / "campaigns" / "party-fallback" / "party"
+    party_dir.mkdir(parents=True)
+    assert server.load_party_members_from_manifest(party_dir / "missing.json") == []
+    (party_dir / "bad.json").write_text("{bad", encoding="utf-8")
+    assert server.load_party_members_from_manifest(party_dir / "bad.json") == []
+
+    duplicate_manifest = PartyManifest(
+        members=[
+            PartyMemberConfig(id="player-1", name="First"),
+            PartyMemberConfig(id="player-1", name="Duplicate"),
+            PartyMemberConfig(id="not-player", name="Fallback"),
+        ]
+    )
+    (party_dir / "party.json").write_text(json.dumps(typed_json_from_value(duplicate_manifest)), encoding="utf-8")
+    members = server.load_party_members_from_manifest(party_dir / "party.json", "party-fallback")
+    assert [member.id for member in members] == ["player-1", "player-3"]
+
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "not-image.png").write_text("bad", encoding="utf-8")
+    (images / "notes.txt").write_text("skip", encoding="utf-8")
+    assert server.image_dimensions(images / "not-image.png") is None
+    assert server.list_assets_from_dir(server.TokenKind.ASSET, images) == [server.Asset(id="not-image", kind=server.TokenKind.ASSET, name="Not Image", avatarUrl="/shared/assets/not-image.png")]
+    assert server.get_asset("asset", "missing") is None
+    assert server.board_to_dict(server.Board("-", "-", None, 1, 1)) == {"id": "-", "name": "-", "width": 1, "height": 1}
+    assert server.fog_from_dict({"hideMode": True, "brushSize": "bad", "revealedAreas": [{"x": 9999, "y": -1, "radius": "bad"}, "skip"]}, server.Board("-", "-", None, 100, 50)).revealedAreas == [
+        server.RevealedArea(x=100, y=0, radius=20)
+    ]
+    assert server.next_dynamic_token_number(
+        [
+            server.Token("player-1", server.TokenKind.CHARACTER, "Character", "player-1", server.DEFAULT_TOKEN_COLOR, 0, 0, 70, False),
+            server.Token("asset-bad", server.TokenKind.ASSET, "Bad", "dm", server.DEFAULT_TOKEN_COLOR, 0, 0, 70, False),
+            server.Token("asset-7", server.TokenKind.ASSET, "Seven", "dm", server.DEFAULT_TOKEN_COLOR, 0, 0, 70, False),
+        ]
+    ) == 8
 
 
 def make_image(image_format: str) -> bytes:

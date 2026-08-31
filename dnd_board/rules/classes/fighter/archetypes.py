@@ -1856,6 +1856,8 @@ def eldritch_knight_catalog_spell(spell_id: str | SpellId) -> SpellEntry | None:
 
 
 def eldritch_knight_max_spell_level(fighter_level_value: int) -> int:
+    if fighter_level_value < 3:
+        return 0
     progression = eldritch_knight_spellcasting(fighter_level_value)
     if progression.fourth_level_slots:
         return 4

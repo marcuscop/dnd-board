@@ -44,9 +44,41 @@ from dnd_board.character_sheet import (
     enum_key,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
-from dnd_board.rules.feats import FIGHTING_STYLE_FEATS, FeatEffectType
-from dnd_board.rules.classes.fighter.archetypes import FighterSubclassRollActionType
+from dnd_board.rules.classes.fighter import archetypes as fighter_archetypes
+from dnd_board.rules.classes.fighter.base import fighter_features, fighter_resources, subclass_description
+from dnd_board.rules.feats import (
+    FIGHTING_STYLE_FEATS,
+    FeatEffect,
+    FeatEffectType,
+    armor_class_bonus,
+    armor_class_bonus_applies,
+    attack_roll_bonus_applies,
+    damage_ability_modifier_applies,
+    damage_dice_reroll_applies,
+    damage_roll_bonus_applies,
+    feat_abilities,
+    fighting_style_features,
+    general_feat_feature,
+    parse_general_feat,
+    selected_fighting_styles,
+    selected_general_feat_keys,
+)
+from dnd_board.rules.classes.fighter.archetypes import (
+    EldritchKnightSpellcastingProgression,
+    FighterSubclassRollActionType,
+    arcane_shot_roll_actions,
+    eldritch_knight_catalog_spell,
+    eldritch_knight_flexible_spell_limit,
+    eldritch_knight_max_spell_level,
+    fighter_subclass_abilities,
+    giants_might_die,
+    is_eldritch_knight_spell_selection_valid,
+    pruned_eldritch_knight_spells,
+    psionic_energy_die,
+)
 from dnd_board.rules.classes.fighter.battle_master import BATTLE_MASTER_2024_MANEUVERS, BATTLE_MASTER_MANEUVERS
+from dnd_board.rules.classes.fighter.battle_master import battle_master_features
+from dnd_board.rules.shared.combat_superiority import selected_battle_master_maneuvers
 
 
 def test_fighter_progression_resources_level_1_to_20() -> None:
@@ -136,6 +168,57 @@ def test_all_fighting_styles_expose_sheet_entries() -> None:
         sheet_entry_ids = {feature.id for feature in sheet.features} | {ability.id for ability in sheet.abilities} | {resource.id for resource in sheet.resources}
 
         assert any(entry_id == fighting_style_entry_id(fighting_style) for entry_id in sheet_entry_ids)
+
+
+def test_fighting_style_helpers_ignore_duplicate_or_missing_definitions(monkeypatch) -> None:
+    classes = [
+        CharacterClassLevel(
+            name=ClassType.FIGHTER,
+            level=1,
+            fightingStyle=FightingStyleType.DEFENSE,
+            fightingStyles=[FightingStyleType.DEFENSE, FightingStyleType.INTERCEPTION, FightingStyleType.INTERCEPTION],
+        )
+    ]
+
+    assert selected_fighting_styles(classes) == [FightingStyleType.DEFENSE, FightingStyleType.INTERCEPTION]
+
+    monkeypatch.delitem(FIGHTING_STYLE_FEATS, FightingStyleType.DEFENSE)
+    assert fighting_style_features(classes)[0].id == "interception"
+    assert feat_abilities(classes)[0].id == "interception"
+    assert armor_class_bonus(classes, [chain_mail()]) == 0
+
+
+def test_general_feat_helpers_parse_duplicates_and_invalid_values() -> None:
+    feats = [
+        type("FeatStub", (), {"id": "alert"})(),
+        type("FeatStub", (), {"id": "Alert"})(),
+        type("FeatStub", (), {"id": "not-a-feat"})(),
+    ]
+
+    assert selected_general_feat_keys(feats) == ["alert"]
+    assert general_feat_feature("alert").id == "alert"
+    assert parse_general_feat("not-a-feat") is None
+    assert general_feat_feature("not-a-feat") is None
+
+
+def test_feat_predicates_return_false_for_unscoped_effects() -> None:
+    attack = AttackAction(
+        id="club",
+        name="Club",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D4,
+    )
+    unscoped_attack_bonus = FeatEffect(FeatEffectType.ATTACK_ROLL_BONUS)
+    unscoped_damage_bonus = FeatEffect(FeatEffectType.DAMAGE_ROLL_BONUS)
+    unscoped_damage_ability = FeatEffect(FeatEffectType.DAMAGE_ABILITY_MODIFIER)
+    unscoped_dice_reroll = FeatEffect(FeatEffectType.DAMAGE_DICE_REROLL)
+
+    assert attack_roll_bonus_applies(unscoped_attack_bonus, attack) is False
+    assert damage_roll_bonus_applies(unscoped_damage_bonus, [], attack) is False
+    assert damage_ability_modifier_applies(unscoped_damage_ability, attack) is False
+    assert damage_dice_reroll_applies(unscoped_dice_reroll, attack) is False
+    assert armor_class_bonus_applies(FightingStyleType.PROTECTION, []) is True
 
 
 def test_fighting_style_archery_adds_attack_roll_bonus_with_breakdown(monkeypatch) -> None:
@@ -955,6 +1038,116 @@ def test_eldritch_knight_spell_progression_limits_flexible_school_choices() -> N
     assert "shield" in level_3_after_flexible
     assert "sleep" not in level_3_after_flexible
     assert "sleep" in level_8_after_flexible
+
+
+def test_eldritch_knight_spell_helpers_cover_low_level_and_pruning_branches() -> None:
+    spells = [
+        eldritch_knight_catalog_spell("fireBolt"),
+        eldritch_knight_catalog_spell("mageHand"),
+        eldritch_knight_catalog_spell("minorIllusion"),
+        eldritch_knight_catalog_spell("shield"),
+        eldritch_knight_catalog_spell("magicMissile"),
+        eldritch_knight_catalog_spell("findFamiliar"),
+        eldritch_knight_catalog_spell("sleep"),
+        eldritch_knight_catalog_spell("shatter"),
+    ]
+
+    assert eldritch_knight_max_spell_level(1) == 0
+    assert eldritch_knight_max_spell_level(7) == 2
+    assert eldritch_knight_max_spell_level(13) == 3
+    assert eldritch_knight_flexible_spell_limit(2) == 0
+    assert is_eldritch_knight_spell_selection_valid(2, []) is True
+    assert is_eldritch_knight_spell_selection_valid(2, [eldritch_knight_catalog_spell("fireBolt")]) is False
+    assert pruned_eldritch_knight_spells(2, [spell for spell in spells if spell is not None]) == []
+    assert [spell.id for spell in pruned_eldritch_knight_spells(3, [spell for spell in spells if spell is not None])] == [
+        SpellId.FIRE_BOLT,
+        SpellId.MAGE_HAND,
+        SpellId.SHIELD,
+        SpellId.MAGIC_MISSILE,
+        SpellId.FIND_FAMILIAR,
+    ]
+    assert [spell.id for spell in pruned_eldritch_knight_spells(3, [spell for spell in spells if spell is not None][:4])] == [
+        SpellId.FIRE_BOLT,
+        SpellId.MAGE_HAND,
+        SpellId.SHIELD,
+    ]
+    assert [spell.id for spell in pruned_eldritch_knight_spells(3, [spell for spell in spells if spell is not None][3:])] == [
+        SpellId.SHIELD,
+        SpellId.MAGIC_MISSILE,
+        SpellId.FIND_FAMILIAR,
+    ]
+    assert [spell.id for spell in pruned_eldritch_knight_spells(3, [spell for spell in [spells[3], spells[5], spells[6], spells[6]] if spell is not None])] == [
+        SpellId.SHIELD,
+        SpellId.FIND_FAMILIAR,
+    ]
+
+
+def test_fighter_helpers_handle_missing_or_nonstandard_fighter_state() -> None:
+    assert fighter_resources([]) == []
+    assert fighter_features([]) == []
+    assert battle_master_features(CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.CHAMPION), 3) == []
+    assert subclass_description(CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=ClassType.ROGUE)) == (
+        "Rogue subclass features are included up to your Fighter level."
+    )
+
+
+def test_eldritch_knight_selection_and_defensive_slot_fallback(monkeypatch) -> None:
+    shield = eldritch_knight_catalog_spell(SpellId.SHIELD)
+    magic_missile = eldritch_knight_catalog_spell(SpellId.MAGIC_MISSILE)
+    find_familiar = eldritch_knight_catalog_spell(SpellId.FIND_FAMILIAR)
+    fire_bolt = eldritch_knight_catalog_spell(SpellId.FIRE_BOLT)
+    mage_hand = eldritch_knight_catalog_spell(SpellId.MAGE_HAND)
+    assert all(spell is not None for spell in [shield, magic_missile, find_familiar, fire_bolt, mage_hand])
+
+    assert is_eldritch_knight_spell_selection_valid(3, [fire_bolt, mage_hand, shield, magic_missile, find_familiar]) is True
+
+    monkeypatch.setitem(
+        fighter_archetypes.ELDRITCH_KNIGHT_SPELLCASTING,
+        3,
+        EldritchKnightSpellcastingProgression(
+            fighter_level=3,
+            cantrips_known=0,
+            spells_known=0,
+            first_level_slots=0,
+            second_level_slots=0,
+            third_level_slots=0,
+            fourth_level_slots=0,
+        ),
+    )
+    assert eldritch_knight_max_spell_level(3) == 0
+
+
+def test_arcane_shot_roll_actions_skip_unavailable_low_level_banishing_arrow() -> None:
+    assert arcane_shot_roll_actions(ArcaneShotType.BANISHING_ARROW, 3) is None
+
+
+def test_fighter_subclass_and_superiority_helpers_handle_duplicate_or_missing_progression(monkeypatch) -> None:
+    monkeypatch.setattr(fighter_archetypes, "brute_force_die", lambda fighter_level_value: None)
+
+    brute_abilities = fighter_subclass_abilities([CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.BRUTE)])
+    selected_maneuvers = selected_battle_master_maneuvers(
+        [
+            CharacterClassLevel(
+                name=ClassType.FIGHTER,
+                level=3,
+                subclass=FighterSubclassType.BATTLE_MASTER,
+                maneuvers=[BattleMasterManeuverType.AMBUSH, BattleMasterManeuverType.AMBUSH, BattleMasterManeuverType.TRIP_ATTACK],
+            )
+        ]
+    )
+
+    assert all(ability.id != enum_key(FighterSubclassRollActionType.BRUTE_FORCE) for ability in brute_abilities)
+    assert selected_maneuvers == [BattleMasterManeuverType.AMBUSH, BattleMasterManeuverType.TRIP_ATTACK]
+
+
+def test_fighter_subclass_dice_helpers_cover_scaling_breakpoints() -> None:
+    assert giants_might_die(3) == DiceType.D6
+    assert giants_might_die(10) == DiceType.D8
+    assert giants_might_die(18) == DiceType.D10
+    assert psionic_energy_die(3) == DiceType.D6
+    assert psionic_energy_die(5) == DiceType.D8
+    assert psionic_energy_die(11) == DiceType.D10
+    assert psionic_energy_die(17) == DiceType.D12
 
 
 def test_eldritch_knight_uses_configured_spells_with_intelligence() -> None:

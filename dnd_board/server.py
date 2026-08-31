@@ -59,7 +59,7 @@ from dnd_board.character_sheet import (
     sheet_to_dict,
     typed_json_from_value,
 )
-from dnd_board.rules.progression import ProgressionChoiceId, apply_progression_choice, fighter_asi_levels_up_to, parse_progression_choice_id, prune_progression_choices, update_class_level
+from dnd_board.rules.progression import ProgressionChoiceId, apply_progression_choice, fighter_asi_levels_up_to, parse_progression_choice_id, prune_progression_choices, rogue_asi_levels_up_to, update_class_level
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -386,11 +386,23 @@ async def update_sheet_progression_choice(room_id: str, sheet_id: str, choice_id
             sanitize_asset_id(sheet_id),
             lambda member: apply_member_ability_score_improvement(member, [str(value) for value in values]),
         )
+    elif parsed_choice_id == ProgressionChoiceId.ROGUE_ABILITY_SCORE_IMPROVEMENT:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_ability_score_improvement(member, [str(value) for value in values]),
+        )
     elif parsed_choice_id == ProgressionChoiceId.ELDRITCH_KNIGHT_SPELLS:
         updated_member = update_party_member_config(
             room.id,
             sanitize_asset_id(sheet_id),
             lambda member: apply_member_eldritch_knight_spells(member, [str(value) for value in values]),
+        )
+    elif parsed_choice_id == ProgressionChoiceId.ARCANE_TRICKSTER_SPELLS:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_arcane_trickster_spells(member, [str(value) for value in values]),
         )
     elif parsed_choice_id is None:
         raise HTTPException(status_code=400, detail="Invalid progression choice")
@@ -1784,6 +1796,7 @@ def set_member_class_levels(member: PartyMemberConfig, classes: list[CharacterCl
     prune_member_hit_point_increases(member)
     prune_member_ability_score_improvements(member)
     prune_member_eldritch_knight_spells(member)
+    prune_member_arcane_trickster_spells(member)
 
 
 def set_member_condition(member: PartyMemberConfig, condition: ConditionType, active: bool) -> None:
@@ -1820,9 +1833,9 @@ def apply_member_hit_point_choice(member: PartyMemberConfig, choice: str) -> Non
     increases = member.sheet.hitPointIncreases or []
     if len(increases) >= expected_increases:
         return
-    bump = fighter_hit_point_bump(member, choice)
+    bump = class_hit_point_bump(member, classes[0].name if classes else ClassType.FIGHTER, choice)
     if member.maxHp is None:
-        member.maxHp = max(1, 10 + member_constitution_modifier(member))
+        member.maxHp = max(1, class_level_one_hit_points(classes[0].name if classes else ClassType.FIGHTER) + member_constitution_modifier(member))
     member.maxHp += bump
     member.sheet.hitPointIncreases = [*increases, bump]
     prune_member_hit_point_increases(member)
@@ -1852,11 +1865,49 @@ def apply_member_eldritch_knight_spells(member: PartyMemberConfig, values: list[
     member.sheet.spells = spells
 
 
-def fighter_hit_point_bump(member: PartyMemberConfig, choice: str) -> int:
+def apply_member_arcane_trickster_spells(member: PartyMemberConfig, values: list[str]) -> None:
+    from dnd_board.rules.classes.rogue.archetypes import arcane_trickster_catalog_spell, is_arcane_trickster_spell_selection_valid, normalized_arcane_trickster_spell
+    from dnd_board.rules.classes.rogue.base import RogueSubclassType
+
+    rogue = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.ROGUE), None)
+    if rogue is None or rogue.subclass != RogueSubclassType.ARCANE_TRICKSTER or rogue.level < 3:
+        raise HTTPException(status_code=400, detail="Arcane Trickster spellcasting is not available")
+
+    selected_ids = unique_clean_values(values)
+    spells = []
+    for spell_id in selected_ids:
+        spell = arcane_trickster_catalog_spell(spell_id)
+        if spell is None:
+            raise HTTPException(status_code=400, detail="Invalid Arcane Trickster spell")
+        spells.append(normalized_arcane_trickster_spell(spell))
+
+    if not is_arcane_trickster_spell_selection_valid(rogue.level, spells):
+        raise HTTPException(status_code=400, detail="Choose legal Arcane Trickster cantrips and wizard spells")
+
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[rogue])
+    other_spells = [
+        spell
+        for spell in member.sheet.spells or []
+        if spell.source.value != "Arcane Trickster"
+    ]
+    member.sheet.spells = [*other_spells, *spells]
+
+
+def class_hit_point_bump(member: PartyMemberConfig, class_name: ClassType, choice: str) -> int:
     constitution_modifier = member_constitution_modifier(member)
+    hit_die = class_hit_die(class_name)
     if normalize_choice_id(choice) == "roll":
-        return max(1, random.randint(1, 10) + constitution_modifier)
-    return max(1, 6 + constitution_modifier)
+        return max(1, random.randint(1, hit_die) + constitution_modifier)
+    return max(1, (hit_die // 2 + 1) + constitution_modifier)
+
+
+def class_hit_die(class_name: ClassType) -> int:
+    return 8 if class_name == ClassType.ROGUE else 10
+
+
+def class_level_one_hit_points(class_name: ClassType) -> int:
+    return class_hit_die(class_name)
 
 
 def member_constitution_modifier(member: PartyMemberConfig) -> int:
@@ -1879,11 +1930,7 @@ def prune_member_hit_point_increases(member: PartyMemberConfig) -> None:
 
 def apply_member_ability_score_improvement(member: PartyMemberConfig, values: list[str]) -> None:
     classes = member_sheet_classes(member)
-    fighter = next((character_class for character_class in classes if character_class.name == ClassType.FIGHTER), None)
-    if fighter is None:
-        return
-
-    expected_improvements = fighter_asi_levels_up_to(fighter.level)
+    expected_improvements = expected_member_ability_score_improvements(classes)
     if expected_improvements <= 0:
         return
     if member.sheet is None:
@@ -2000,8 +2047,7 @@ def parse_ability_score_improvement(value: str) -> dict[AbilityType, int]:
 def prune_member_ability_score_improvements(member: PartyMemberConfig) -> None:
     if member.sheet is None or not member.sheet.abilityScoreImprovements:
         return
-    fighter = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.FIGHTER), None)
-    expected_improvements = fighter_asi_levels_up_to(fighter.level) if fighter is not None else 0
+    expected_improvements = expected_member_ability_score_improvements(member_sheet_classes(member))
     improvements = member.sheet.abilityScoreImprovements
     if len(improvements) <= expected_improvements:
         return
@@ -2021,6 +2067,12 @@ def prune_member_ability_score_improvements(member: PartyMemberConfig) -> None:
             setattr(member.abilityScores, ability_key, next_score)
             if ability == AbilityType.CONSTITUTION:
                 apply_constitution_hp_delta(member, current_score, next_score)
+
+
+def expected_member_ability_score_improvements(classes: list[CharacterClassLevel]) -> int:
+    fighter = next((character_class for character_class in classes if character_class.name == ClassType.FIGHTER), None)
+    rogue = next((character_class for character_class in classes if character_class.name == ClassType.ROGUE), None)
+    return (fighter_asi_levels_up_to(fighter.level) if fighter is not None else 0) + (rogue_asi_levels_up_to(rogue.level) if rogue is not None else 0)
 
 
 def apply_constitution_hp_delta(member: PartyMemberConfig, previous_score: int, next_score: int) -> None:
@@ -2048,6 +2100,26 @@ def prune_member_eldritch_knight_spells(member: PartyMemberConfig) -> None:
     member.sheet.spells = [
         *other_spells,
         *pruned_eldritch_knight_spells(fighter.level, eldritch_knight_spells),
+    ] or None
+
+
+def prune_member_arcane_trickster_spells(member: PartyMemberConfig) -> None:
+    from dnd_board.rules.classes.rogue.archetypes import arcane_trickster_catalog_spell, pruned_arcane_trickster_spells
+    from dnd_board.rules.classes.rogue.base import RogueSubclassType
+
+    if member.sheet is None or not member.sheet.spells:
+        return
+
+    rogue = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.ROGUE), None)
+    if rogue is None or rogue.subclass != RogueSubclassType.ARCANE_TRICKSTER or rogue.level < 3:
+        member.sheet.spells = [spell for spell in member.sheet.spells if arcane_trickster_catalog_spell(spell.id) is None or spell.source.value != "Arcane Trickster"] or None
+        return
+
+    arcane_trickster_spells = [spell for spell in member.sheet.spells if spell.source.value == "Arcane Trickster"]
+    other_spells = [spell for spell in member.sheet.spells if spell.source.value != "Arcane Trickster"]
+    member.sheet.spells = [
+        *other_spells,
+        *pruned_arcane_trickster_spells(rogue.level, arcane_trickster_spells),
     ] or None
 
 

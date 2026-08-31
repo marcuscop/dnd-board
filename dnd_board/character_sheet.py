@@ -74,6 +74,16 @@ def api_field(method: Any) -> property:
     return property(method)
 
 
+class TypedJsonPrimitiveType(Enum):
+    NONE = "None"
+    STRING = "str"
+    INTEGER = "int"
+    FLOAT = "float"
+    BOOLEAN = "bool"
+    LIST = "list"
+    DICTIONARY = "dict"
+
+
 class AbilityType(Enum):
     STRENGTH = auto()
     DEXTERITY = auto()
@@ -118,21 +128,28 @@ class SpellComponent(Enum):
 
 class SpellId(Enum):
     ABSORB_ELEMENTS = "Absorb Elements"
+    AUGURY = "Augury"
+    BLADE_WARD = "Blade Ward"
     BOOMING_BLADE = "Booming Blade"
     BURNING_HANDS = "Burning Hands"
+    CHARM_PERSON = "Charm Person"
+    CHILL_TOUCH = "Chill Touch"
     CHROMATIC_ORB = "Chromatic Orb"
     COUNTERSPELL = "Counterspell"
     DETECT_MAGIC = "Detect Magic"
+    DISGUISE_SELF = "Disguise Self"
     FIND_FAMILIAR = "Find Familiar"
     FIRE_BOLT = "Fire Bolt"
     FIRE_SHIELD = "Fire Shield"
     FIREBALL = "Fireball"
+    FOG_CLOUD = "Fog Cloud"
     GREEN_FLAME_BLADE = "Green-Flame Blade"
     ICE_STORM = "Ice Storm"
     LIGHT = "Light"
     LIGHTNING_BOLT = "Lightning Bolt"
     MAGE_HAND = "Mage Hand"
     MAGIC_MISSILE = "Magic Missile"
+    MIND_SLIVER = "Mind Sliver"
     MINOR_ILLUSION = "Minor Illusion"
     PRESTIDIGITATION = "Prestidigitation"
     PROTECTION_FROM_EVIL_AND_GOOD = "Protection from Evil and Good"
@@ -142,15 +159,19 @@ class SpellId(Enum):
     SHIELD = "Shield"
     SHOCKING_GRASP = "Shocking Grasp"
     SLEEP = "Sleep"
+    SPEAK_WITH_DEAD = "Speak with Dead"
     TELEKINESIS = "Telekinesis"
     THUNDERWAVE = "Thunderwave"
     WARDING_WIND = "Warding Wind"
 
 
 class SpellSource(Enum):
+    ARCANE_TRICKSTER = "Arcane Trickster"
     ELDRITCH_KNIGHT = "Eldritch Knight"
     MONSTER_HUNTER = "Monster Hunter"
+    PHANTOM = "Phantom"
     PSI_WARRIOR = "Psi Warrior"
+    SCION_OF_THE_THREE = "Scion of the Three"
     WIZARD = "Wizard"
 
 
@@ -382,6 +403,7 @@ class ClassType(Enum):
     ADVENTURER = auto()
     CREATURE = auto()
     FIGHTER = auto()
+    ROGUE = auto()
 
 
 class FightingStyleType(Enum):
@@ -1331,9 +1353,14 @@ def proficiency_multiplier(level: ProficiencyLevel | None) -> int:
 
 def default_save_proficiencies(classes: list[CharacterClassLevel]) -> list[AbilityType]:
     primary = classes[0].name if classes else None
+    proficiencies: list[AbilityType] = []
     if primary == ClassType.FIGHTER:
-        return [AbilityType.STRENGTH, AbilityType.CONSTITUTION]
-    return []
+        proficiencies.extend([AbilityType.STRENGTH, AbilityType.CONSTITUTION])
+    if primary == ClassType.ROGUE:
+        proficiencies.extend([AbilityType.DEXTERITY, AbilityType.INTELLIGENCE])
+    if any(character_class.name == ClassType.ROGUE and character_class.level >= 15 for character_class in classes):
+        proficiencies.extend([AbilityType.WISDOM, AbilityType.CHARISMA])
+    return list(dict.fromkeys(proficiencies))
 
 
 def default_attacks(kind: TokenKind) -> list[AttackAction]:
@@ -1352,10 +1379,18 @@ def default_attacks(kind: TokenKind) -> list[AttackAction]:
 def default_resources(classes: list[CharacterClassLevel], ability_scores: AbilityScores | None = None) -> list[ResourceTracker]:
     from dnd_board.rules.classes.fighter.archetypes import fighter_subclass_resources
     from dnd_board.rules.classes.fighter.base import fighter_resources
+    from dnd_board.rules.classes.rogue.archetypes import rogue_subclass_resources
+    from dnd_board.rules.classes.rogue.base import rogue_resources
     from dnd_board.rules.feats import feat_resources
     from dnd_board.rules.shared.combat_superiority import combat_superiority_resource
 
-    resources = [*fighter_resources(classes), *fighter_subclass_resources(classes, ability_scores), *feat_resources(classes)]
+    resources = [
+        *fighter_resources(classes),
+        *fighter_subclass_resources(classes, ability_scores),
+        *rogue_resources(classes),
+        *rogue_subclass_resources(classes, ability_scores),
+        *feat_resources(classes),
+    ]
     superiority_dice = combat_superiority_resource(classes)
     if superiority_dice is not None:
         resources.append(superiority_dice)
@@ -1418,8 +1453,9 @@ def apply_equipment_slot_overrides(equipment: list[EquipmentItem], overrides: di
 
 def default_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
     from dnd_board.rules.classes.fighter.base import fighter_features
+    from dnd_board.rules.classes.rogue.base import rogue_features
 
-    return fighter_features(classes)
+    return [*fighter_features(classes), *rogue_features(classes)]
 
 
 def default_feat_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbility]:
@@ -1430,20 +1466,24 @@ def default_feat_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbil
 
 def default_subclass_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbility]:
     from dnd_board.rules.classes.fighter.archetypes import fighter_subclass_abilities
+    from dnd_board.rules.classes.rogue.archetypes import rogue_subclass_abilities
+    from dnd_board.rules.classes.rogue.base import rogue_abilities
 
-    return fighter_subclass_abilities(classes)
+    return [*fighter_subclass_abilities(classes), *rogue_abilities(classes), *rogue_subclass_abilities(classes)]
 
 
 def default_spells(classes: list[CharacterClassLevel]) -> list[SpellEntry]:
     from dnd_board.rules.classes.fighter.archetypes import fighter_subclass_spells
+    from dnd_board.rules.classes.rogue.archetypes import rogue_subclass_spells
 
-    return fighter_subclass_spells(classes)
+    return [*fighter_subclass_spells(classes), *rogue_subclass_spells(classes)]
 
 
 def default_spellcasting_spells(classes: list[CharacterClassLevel], spells: list[SpellEntry]) -> list[SpellEntry]:
     from dnd_board.rules.classes.fighter.archetypes import normalized_spellcasting_spells
+    from dnd_board.rules.classes.rogue.archetypes import normalized_arcane_trickster_spells
 
-    return normalized_spellcasting_spells(classes, spells)
+    return normalized_arcane_trickster_spells(classes, normalized_spellcasting_spells(classes, spells))
 
 
 def default_progression_choices(
@@ -1465,9 +1505,10 @@ def default_armor_class_bonus(classes: list[CharacterClassLevel], equipment: lis
 
 
 def default_feat_attacks(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], attacks: list[AttackAction]) -> list[AttackAction]:
+    from dnd_board.rules.classes.rogue.archetypes import rogue_subclass_attacks
     from dnd_board.rules.feats import feat_attacks
 
-    return feat_attacks(classes, equipment, attacks)
+    return rogue_subclass_attacks(classes, feat_attacks(classes, equipment, attacks))
 
 
 def attack_roll_modifier_breakdown(classes: list[CharacterClassLevel], action: AttackAction) -> list[RollModifierBreakdown]:
@@ -1499,9 +1540,9 @@ def typed_json_to_value(node: Any, expected_type: Any = Any) -> Any:
 
     expected_type = non_null_type(expected_type)
     type_name = str(node.get(TYPE_KEY))
-    if type_name == "None":
+    if type_name == typed_json_primitive_type_key(TypedJsonPrimitiveType.NONE):
         return None
-    if type_name == "list":
+    if type_name == typed_json_primitive_type_key(TypedJsonPrimitiveType.LIST):
         expected_item_type = Any
         if get_origin(expected_type) is list:
             expected_args = get_args(expected_type)
@@ -1510,7 +1551,7 @@ def typed_json_to_value(node: Any, expected_type: Any = Any) -> Any:
         if not isinstance(items, list):
             return None
         return [typed_json_to_value(item, expected_item_type) for item in items]
-    if type_name.startswith("dict"):
+    if type_name.startswith(typed_json_primitive_type_key(TypedJsonPrimitiveType.DICTIONARY)):
         expected_value_type = Any
         if get_origin(expected_type) is dict:
             expected_args = get_args(expected_type)
@@ -1519,7 +1560,7 @@ def typed_json_to_value(node: Any, expected_type: Any = Any) -> Any:
         if not isinstance(raw_items, dict):
             return None
         return {str(key): typed_json_to_value(item, expected_value_type) for key, item in raw_items.items()}
-    if type_name in {"str", "int", "float", "bool"}:
+    if type_name in typed_json_scalar_type_keys():
         value = typed_primitive_value(type_name, node.get(VALUE_KEY))
         if isinstance(expected_type, type) and issubclass(expected_type, Enum):
             return enum_value(expected_type, value)
@@ -1574,10 +1615,6 @@ def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> An
     raw_fields = node.get(FIELDS_KEY)
     if not isinstance(raw_fields, dict):
         return None
-    if model_type is SpellEntry:
-        raw_fields = migrated_spell_entry_fields(raw_fields)
-    if model_type is SpellTargeting:
-        raw_fields = migrated_spell_targeting_fields(raw_fields)
 
     type_hints = get_type_hints(model_type)
     kwargs: dict[str, Any] = {}
@@ -1595,107 +1632,27 @@ def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> An
         return None
 
 
-def migrated_spell_entry_fields(raw_fields: dict[str, Any]) -> dict[str, Any]:
-    migrated = dict(raw_fields)
-    if "targeting" not in migrated and "range" in migrated:
-        migrated["targeting"] = typed_json_from_value(spell_targeting_from_legacy_range(legacy_typed_string(migrated["range"])))
-    if "duration" in migrated and legacy_typed_string(migrated["duration"]) is not None:
-        migrated["duration"] = typed_json_from_value(spell_duration_from_legacy_text(legacy_typed_string(migrated["duration"])))
-    return migrated
+def typed_json_primitive_type_key(primitive_type: TypedJsonPrimitiveType) -> str:
+    return primitive_type.value
 
 
-def migrated_spell_targeting_fields(raw_fields: dict[str, Any]) -> dict[str, Any]:
-    migrated = dict(raw_fields)
-    if "area" not in migrated:
-        migrated["area"] = typed_json_from_value(
-            spell_area_from_legacy_fields(
-                legacy_typed_enum(SpellAreaShape, migrated.get("areaShape")),
-                legacy_typed_int(migrated.get("areaSizeFeet")),
-                legacy_typed_int(migrated.get("areaWidthFeet")),
-                legacy_typed_int(migrated.get("areaHeightFeet")),
-            )
-        )
-    for field_name in ["areaShape", "areaSizeFeet", "areaWidthFeet", "areaHeightFeet"]:
-        migrated.pop(field_name, None)
-    return migrated
-
-
-def legacy_typed_string(node: Any) -> str | None:
-    if not isinstance(node, dict) or node.get(TYPE_KEY) != "str":
-        return None
-    value = node.get(VALUE_KEY)
-    return value if isinstance(value, str) else None
-
-
-def legacy_typed_int(node: Any) -> int:
-    if not isinstance(node, dict) or node.get(TYPE_KEY) != "int":
-        return 0
-    value = node.get(VALUE_KEY)
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
-
-
-def legacy_typed_enum(enum_type: type[Enum], node: Any) -> Any:
-    if not isinstance(node, dict):
-        return None
-    return enum_value(enum_type, node.get(VALUE_KEY))
-
-
-def spell_targeting_from_legacy_range(value: str | None) -> SpellTargeting:
-    if value is None:
-        return SpellTargeting(rangeType=SpellRangeType.SELF)
-    normalized = value.strip().lower()
-    if normalized == "self":
-        return SpellTargeting(rangeType=SpellRangeType.SELF)
-    if normalized == "touch":
-        return SpellTargeting(rangeType=SpellRangeType.TOUCH)
-    distance_text = normalized.split()[0]
-    try:
-        distance = int(distance_text)
-    except ValueError:
-        distance = 0
-    return SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=distance)
-
-
-def spell_area_from_legacy_fields(shape: SpellAreaShape | None, size_feet: int, width_feet: int, height_feet: int) -> SpellArea:
-    if shape == SpellAreaShape.RADIUS:
-        return SpellRadiusArea(radiusFeet=size_feet)
-    if shape == SpellAreaShape.CONE:
-        return SpellConeArea(lengthFeet=size_feet)
-    if shape == SpellAreaShape.CUBE:
-        return SpellCubeArea(sizeFeet=size_feet)
-    if shape == SpellAreaShape.LINE:
-        return SpellLineArea(lengthFeet=size_feet, widthFeet=width_feet)
-    if shape == SpellAreaShape.CYLINDER:
-        return SpellCylinderArea(radiusFeet=size_feet, heightFeet=height_feet)
-    return SpellNoArea()
-
-
-def spell_duration_from_legacy_text(value: str | None) -> SpellDuration:
-    if value is None:
-        return SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS)
-    normalized = value.strip().lower()
-    if normalized == "instantaneous":
-        return SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS)
-    maximum = normalized.startswith("up to ")
-    parts = normalized.removeprefix("up to ").split()
-    if len(parts) < 2:
-        return SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS)
-    try:
-        amount = int(parts[0])
-    except ValueError:
-        amount = 0
-    unit = enum_value(SpellDurationUnit, parts[1])
-    return SpellDuration(unit=unit or SpellDurationUnit.INSTANTANEOUS, amount=amount, maximum=maximum)
+def typed_json_scalar_type_keys() -> set[str]:
+    return {
+        typed_json_primitive_type_key(TypedJsonPrimitiveType.STRING),
+        typed_json_primitive_type_key(TypedJsonPrimitiveType.INTEGER),
+        typed_json_primitive_type_key(TypedJsonPrimitiveType.FLOAT),
+        typed_json_primitive_type_key(TypedJsonPrimitiveType.BOOLEAN),
+    }
 
 
 def typed_primitive_value(type_name: str, value: Any) -> Any:
-    if type_name == "str" and isinstance(value, str):
+    if type_name == typed_json_primitive_type_key(TypedJsonPrimitiveType.STRING) and isinstance(value, str):
         return value
-    if type_name == "int" and isinstance(value, int) and not isinstance(value, bool):
+    if type_name == typed_json_primitive_type_key(TypedJsonPrimitiveType.INTEGER) and isinstance(value, int) and not isinstance(value, bool):
         return value
-    if type_name == "float" and isinstance(value, float):
+    if type_name == typed_json_primitive_type_key(TypedJsonPrimitiveType.FLOAT) and isinstance(value, float):
         return value
-    if type_name == "bool" and isinstance(value, bool):
+    if type_name == typed_json_primitive_type_key(TypedJsonPrimitiveType.BOOLEAN) and isinstance(value, bool):
         return value
     return None
 
@@ -1703,6 +1660,8 @@ def typed_primitive_value(type_name: str, value: Any) -> Any:
 def typed_json_registry() -> dict[str, type[Any]]:
     from dnd_board.rules.classes.fighter.archetypes import FighterSubclassResourceType, FighterSubclassRollActionType
     from dnd_board.rules.classes.fighter.base import FighterSubclassType
+    from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, RogueSubclassAttackType, RogueSubclassResourceType, RogueSubclassRollActionType
+    from dnd_board.rules.classes.rogue.base import RogueAbilityType, RogueFeatureType, RogueResourceType, RogueSubclassType
     from dnd_board.rules.shared.combat_superiority import BattleMasterResourceType, MonsterHunterSuperiorityActionType, ScoutSuperiorityActionType
 
     return {
@@ -1736,6 +1695,14 @@ def typed_json_registry() -> dict[str, type[Any]]:
             EquipmentItem,
             FightingStyleType,
             FighterSubclassType,
+            RogueAbilityType,
+            RogueFeatureType,
+            RogueResourceType,
+            RogueSubclassAbilityType,
+            RogueSubclassAttackType,
+            RogueSubclassResourceType,
+            RogueSubclassRollActionType,
+            RogueSubclassType,
             PartyManifest,
             PartyMemberConfig,
             PartyMemberSheet,
@@ -1781,24 +1748,24 @@ def typed_json_registry() -> dict[str, type[Any]]:
 
 def typed_json_from_value(value: Any) -> dict[str, Any]:
     if value is None:
-        return {TYPE_KEY: "None", VALUE_KEY: None}
+        return {TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.NONE), VALUE_KEY: None}
     if isinstance(value, Enum):
         return {TYPE_KEY: value.__class__.__name__, VALUE_KEY: value.name}
     if isinstance(value, list):
-        return {TYPE_KEY: "list", ITEMS_KEY: [typed_json_from_value(item) for item in value]}
+        return {TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.LIST), ITEMS_KEY: [typed_json_from_value(item) for item in value]}
     if isinstance(value, dict):
         return {
-            TYPE_KEY: "dict",
+            TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.DICTIONARY),
             VALUE_KEY: {str(key): typed_json_from_value(item) for key, item in value.items()},
         }
     if isinstance(value, str):
-        return {TYPE_KEY: "str", VALUE_KEY: value}
+        return {TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.STRING), VALUE_KEY: value}
     if isinstance(value, bool):
-        return {TYPE_KEY: "bool", VALUE_KEY: value}
+        return {TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.BOOLEAN), VALUE_KEY: value}
     if isinstance(value, int):
-        return {TYPE_KEY: "int", VALUE_KEY: value}
+        return {TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.INTEGER), VALUE_KEY: value}
     if isinstance(value, float):
-        return {TYPE_KEY: "float", VALUE_KEY: value}
+        return {TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.FLOAT), VALUE_KEY: value}
     if is_dataclass(value):
         return {
             TYPE_KEY: value.__class__.__name__,

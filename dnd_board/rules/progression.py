@@ -18,8 +18,10 @@ from dnd_board.character_sheet import (
     enum_label,
     enum_value,
 )
-from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_spell_options, eldritch_knight_spellcasting, rune_minimum_level
+from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell, eldritch_knight_spell_options, eldritch_knight_spellcasting, rune_minimum_level
 from dnd_board.rules.classes.fighter.base import FighterSubclassType, fighter_subclass_label
+from dnd_board.rules.classes.rogue.archetypes import arcane_trickster_spell_options, arcane_trickster_spellcasting
+from dnd_board.rules.classes.rogue.base import RogueSubclassType, rogue_subclass_label
 from dnd_board.rules.shared.combat_superiority import combat_superiority_subclass_progression
 
 
@@ -30,12 +32,62 @@ MAX_CHARACTER_LEVEL = 20
 class ProgressionChoiceId(Enum):
     HIT_POINT_INCREASE = "hitPointIncrease"
     FIGHTER_ABILITY_SCORE_IMPROVEMENT = "fighterAbilityScoreImprovement"
+    ROGUE_ABILITY_SCORE_IMPROVEMENT = "rogueAbilityScoreImprovement"
     FIGHTER_SUBCLASS = "fighterSubclass"
+    ROGUE_SUBCLASS = "rogueSubclass"
     FIGHTER_FIGHTING_STYLES = "fighterFightingStyles"
     BATTLE_MASTER_MANEUVERS = "battleMasterManeuvers"
     ARCANE_ARCHER_SHOTS = "arcaneArcherShots"
     RUNE_KNIGHT_RUNES = "runeKnightRunes"
     ELDRITCH_KNIGHT_SPELLS = "eldritchKnightSpells"
+    ARCANE_TRICKSTER_SPELLS = "arcaneTricksterSpells"
+
+
+class ProgressionChoiceLabel(Enum):
+    HIT_POINTS = "Hit Points"
+    ABILITY_SCORE_IMPROVEMENT = "Ability Score Improvement"
+    FIGHTER_SUBCLASS = "Martial Archetype"
+    ROGUE_SUBCLASS = "Roguish Archetype"
+    FIGHTING_STYLE = "Fighting Style"
+    BATTLE_MASTER_MANEUVERS = "Battle Master Maneuvers"
+    ARCANE_SHOT_OPTIONS = "Arcane Shot Options"
+    RUNE_KNIGHT_RUNES = "Rune Knight Runes"
+    ELDRITCH_KNIGHT_SPELLS = "Eldritch Knight Spells"
+    ARCANE_TRICKSTER_SPELLS = "Arcane Trickster Spells"
+
+
+class ProgressionChoiceDescription(Enum):
+    HIT_POINTS = "Choose fixed HP or roll the {hit_die_label} for this level. Constitution modifier is applied by the server."
+    FIGHTER_ABILITY_SCORE_IMPROVEMENT = "Increase one ability score by 2, increase two ability scores by 1, or choose a feat. Optional Martial Versatility changes are not built yet."
+    ROGUE_ABILITY_SCORE_IMPROVEMENT = "Increase one ability score by 2, increase two ability scores by 1, or choose a feat."
+    FIGHTER_SUBCLASS = "Choose a Fighter Martial Archetype."
+    ROGUE_SUBCLASS = "Choose a Rogue archetype."
+    FIGHTING_STYLE = "Choose Fighter Fighting Style feats. These are not repeatable."
+    BATTLE_MASTER_MANEUVERS = "Choose maneuvers known for Battle Master or Superior Technique."
+    ARCANE_SHOT_OPTIONS = "Choose Arcane Shot options known."
+    RUNE_KNIGHT_RUNES = "Choose runes known. Hill and Storm require Fighter level 7."
+    ELDRITCH_KNIGHT_SPELLS = "Choose known Eldritch Knight cantrips and wizard spells from the curated starter catalog."
+    ARCANE_TRICKSTER_SPELLS = "Choose Arcane Trickster cantrips and wizard spells from the curated starter catalog. Mage Hand is required."
+
+
+class HitPointChoiceOption(Enum):
+    FIXED = "fixed"
+    ROLL = "roll"
+
+
+class HitPointChoiceOptionLabel(Enum):
+    FIXED = "Fixed"
+    ROLL = "Roll"
+
+
+class HitDieLabel(Enum):
+    FIGHTER = "Fighter d10"
+    ROGUE = "Rogue d8"
+
+
+class SpellOptionLabel(Enum):
+    CANTRIP = "Cantrip"
+    LEVEL = "Level {level}"
 
 
 def progression_choices(
@@ -46,48 +98,77 @@ def progression_choices(
     feats: list[SheetFeature] | None = None,
 ) -> list[ProgressionChoice]:
     fighter = fighter_class(classes)
-    if fighter is None:
-        return []
+    rogue = rogue_class(classes)
 
     choices: list[ProgressionChoice] = []
     expected_hit_point_increases = max(0, total_character_level(classes) - 1)
     if len(hit_point_increases) < expected_hit_point_increases:
+        primary_class = classes[0].name if classes else ClassType.FIGHTER
         choices.append(single_choice(
             choice_id=ProgressionChoiceId.HIT_POINT_INCREASE,
             choice_type=ProgressionChoiceType.HIT_POINTS,
-            label="Hit Points",
-            description="Choose fixed HP or roll the Fighter d10 for this level. Constitution modifier is applied by the server.",
+            label=progression_choice_label(ProgressionChoiceLabel.HIT_POINTS),
+            description=hit_point_choice_description(primary_class),
             selected=[],
-            options=[
-                ProgressionChoiceOption(value="fixed", label="Fixed"),
-                ProgressionChoiceOption(value="roll", label="Roll"),
-            ],
+            options=hit_point_choice_options(),
         ))
 
-    asi_count = fighter_asi_levels_up_to(fighter.level)
-    if len(ability_score_improvements) < asi_count:
+    fighter_asi_count = fighter_asi_levels_up_to(fighter.level) if fighter is not None else 0
+    rogue_asi_count = rogue_asi_levels_up_to(rogue.level) if rogue is not None else 0
+    asi_count = fighter_asi_count + rogue_asi_count
+    if fighter is not None and len(ability_score_improvements) < fighter_asi_count:
         from dnd_board.rules.feats import general_feat_options, selected_general_feat_keys
 
         choices.append(ProgressionChoice(
             id=choice_id_value(ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT),
             choiceType=ProgressionChoiceType.ABILITY_SCORE_IMPROVEMENT,
-            label="Ability Score Improvement",
-            description="Increase one ability score by 2, increase two ability scores by 1, or choose a feat. Optional Martial Versatility changes are not built yet.",
+            label=progression_choice_label(ProgressionChoiceLabel.ABILITY_SCORE_IMPROVEMENT),
+            description=progression_choice_description(ProgressionChoiceDescription.FIGHTER_ABILITY_SCORE_IMPROVEMENT),
             minimum=asi_count,
             maximum=asi_count,
             selected=[*ability_score_improvements, *selected_general_feat_keys(feats)],
             options=general_feat_options(feats),
         ))
 
-    if fighter.level >= 3 and fighter.subclass is None:
+    if rogue is not None and len(ability_score_improvements) < asi_count and len(ability_score_improvements) >= fighter_asi_count:
+        from dnd_board.rules.feats import general_feat_options, selected_general_feat_keys
+
+        choices.append(ProgressionChoice(
+            id=choice_id_value(ProgressionChoiceId.ROGUE_ABILITY_SCORE_IMPROVEMENT),
+            choiceType=ProgressionChoiceType.ABILITY_SCORE_IMPROVEMENT,
+            label=progression_choice_label(ProgressionChoiceLabel.ABILITY_SCORE_IMPROVEMENT),
+            description=progression_choice_description(ProgressionChoiceDescription.ROGUE_ABILITY_SCORE_IMPROVEMENT),
+            minimum=asi_count,
+            maximum=asi_count,
+            selected=[*ability_score_improvements, *selected_general_feat_keys(feats)],
+            options=general_feat_options(feats),
+        ))
+
+    if fighter is not None and fighter.level >= 3 and fighter.subclass is None:
         choices.append(single_choice(
             choice_id=ProgressionChoiceId.FIGHTER_SUBCLASS,
             choice_type=ProgressionChoiceType.SUBCLASS,
-            label="Martial Archetype",
-            description="Choose a Fighter Martial Archetype.",
+            label=progression_choice_label(ProgressionChoiceLabel.FIGHTER_SUBCLASS),
+            description=progression_choice_description(ProgressionChoiceDescription.FIGHTER_SUBCLASS),
             selected=[],
             options=fighter_subclass_options(),
         ))
+
+    if rogue is not None and rogue.level >= 3 and rogue.subclass is None:
+        choices.append(single_choice(
+            choice_id=ProgressionChoiceId.ROGUE_SUBCLASS,
+            choice_type=ProgressionChoiceType.SUBCLASS,
+            label=progression_choice_label(ProgressionChoiceLabel.ROGUE_SUBCLASS),
+            description=progression_choice_description(ProgressionChoiceDescription.ROGUE_SUBCLASS),
+            selected=[],
+            options=rogue_subclass_options(),
+        ))
+
+    if fighter is None:
+        return [
+            *choices,
+            *arcane_trickster_progression_choices(rogue, spells),
+        ]
 
     fighting_style_count = fighter_fighting_style_count(fighter)
     selected_styles = selected_enum_keys(fighter.fightingStyles or ([fighter.fightingStyle] if fighter.fightingStyle else []))
@@ -95,8 +176,8 @@ def progression_choices(
         choices.append(multi_choice(
             choice_id=ProgressionChoiceId.FIGHTER_FIGHTING_STYLES,
             choice_type=ProgressionChoiceType.FIGHTING_STYLE,
-            label="Fighting Style",
-            description="Choose Fighter Fighting Style feats. These are not repeatable.",
+            label=progression_choice_label(ProgressionChoiceLabel.FIGHTING_STYLE),
+            description=progression_choice_description(ProgressionChoiceDescription.FIGHTING_STYLE),
             minimum=fighting_style_count,
             maximum=fighting_style_count,
             selected=selected_styles,
@@ -109,8 +190,8 @@ def progression_choices(
         choices.append(multi_choice(
             choice_id=ProgressionChoiceId.BATTLE_MASTER_MANEUVERS,
             choice_type=ProgressionChoiceType.BATTLE_MASTER_MANEUVERS,
-            label="Battle Master Maneuvers",
-            description="Choose maneuvers known for Battle Master or Superior Technique.",
+            label=progression_choice_label(ProgressionChoiceLabel.BATTLE_MASTER_MANEUVERS),
+            description=progression_choice_description(ProgressionChoiceDescription.BATTLE_MASTER_MANEUVERS),
             minimum=maneuver_count,
             maximum=maneuver_count,
             selected=selected_maneuvers,
@@ -123,8 +204,8 @@ def progression_choices(
         choices.append(multi_choice(
             choice_id=ProgressionChoiceId.ARCANE_ARCHER_SHOTS,
             choice_type=ProgressionChoiceType.ARCANE_SHOTS,
-            label="Arcane Shot Options",
-            description="Choose Arcane Shot options known.",
+            label=progression_choice_label(ProgressionChoiceLabel.ARCANE_SHOT_OPTIONS),
+            description=progression_choice_description(ProgressionChoiceDescription.ARCANE_SHOT_OPTIONS),
             minimum=arcane_shot_count,
             maximum=arcane_shot_count,
             selected=selected_shots,
@@ -137,8 +218,8 @@ def progression_choices(
         choices.append(multi_choice(
             choice_id=ProgressionChoiceId.RUNE_KNIGHT_RUNES,
             choice_type=ProgressionChoiceType.RUNES,
-            label="Rune Knight Runes",
-            description="Choose runes known. Hill and Storm require Fighter level 7.",
+            label=progression_choice_label(ProgressionChoiceLabel.RUNE_KNIGHT_RUNES),
+            description=progression_choice_description(ProgressionChoiceDescription.RUNE_KNIGHT_RUNES),
             minimum=rune_count,
             maximum=rune_count,
             selected=selected_runes,
@@ -150,12 +231,13 @@ def progression_choices(
         ))
 
     spell_count = fighter_configured_spell_count(fighter)
-    if len(spells) < spell_count:
+    fighter_spell_count = len([spell for spell in spells if eldritch_knight_catalog_spell(spell.id) is not None])
+    if fighter_spell_count < spell_count:
         choices.append(ProgressionChoice(
             id=choice_id_value(ProgressionChoiceId.ELDRITCH_KNIGHT_SPELLS),
             choiceType=ProgressionChoiceType.SPELLS,
-            label="Eldritch Knight Spells",
-            description="Choose known Eldritch Knight cantrips and wizard spells from the curated starter catalog.",
+            label=progression_choice_label(ProgressionChoiceLabel.ELDRITCH_KNIGHT_SPELLS),
+            description=progression_choice_description(ProgressionChoiceDescription.ELDRITCH_KNIGHT_SPELLS),
             minimum=spell_count,
             maximum=spell_count,
             selected=[enum_key(spell.id) for spell in spells],
@@ -165,27 +247,31 @@ def progression_choices(
             ],
         ))
 
-    return choices
+    return [
+        *choices,
+        *arcane_trickster_progression_choices(rogue, spells),
+    ]
 
 
 def apply_progression_choice(classes: list[CharacterClassLevel], choice_id: ProgressionChoiceId, values: list[str]) -> list[CharacterClassLevel]:
     next_classes = [copy_character_class(character_class) for character_class in classes]
     fighter = fighter_class(next_classes)
-    if fighter is None:
-        return next_classes
+    rogue = rogue_class(next_classes)
 
     clean_values = unique_values(values)
-    if choice_id == ProgressionChoiceId.FIGHTER_SUBCLASS and fighter.level >= 3:
+    if fighter is not None and choice_id == ProgressionChoiceId.FIGHTER_SUBCLASS and fighter.level >= 3:
         fighter.subclass = enum_value(FighterSubclassType, clean_values[0]) if clean_values else None
-    elif choice_id == ProgressionChoiceId.FIGHTER_FIGHTING_STYLES:
+    elif rogue is not None and choice_id == ProgressionChoiceId.ROGUE_SUBCLASS and rogue.level >= 3:
+        rogue.subclass = enum_value(RogueSubclassType, clean_values[0]) if clean_values else None
+    elif fighter is not None and choice_id == ProgressionChoiceId.FIGHTER_FIGHTING_STYLES:
         styles = parse_enum_values(FightingStyleType, clean_values)[: fighter_fighting_style_count(fighter)]
         fighter.fightingStyle = None
         fighter.fightingStyles = styles
-    elif choice_id == ProgressionChoiceId.BATTLE_MASTER_MANEUVERS:
+    elif fighter is not None and choice_id == ProgressionChoiceId.BATTLE_MASTER_MANEUVERS:
         fighter.maneuvers = parse_enum_values(BattleMasterManeuverType, clean_values)[: fighter_maneuver_count(fighter)]
-    elif choice_id == ProgressionChoiceId.ARCANE_ARCHER_SHOTS:
+    elif fighter is not None and choice_id == ProgressionChoiceId.ARCANE_ARCHER_SHOTS:
         fighter.arcaneShots = parse_enum_values(ArcaneShotType, clean_values)[: fighter_arcane_shot_count(fighter)]
-    elif choice_id == ProgressionChoiceId.RUNE_KNIGHT_RUNES:
+    elif fighter is not None and choice_id == ProgressionChoiceId.RUNE_KNIGHT_RUNES:
         options = {rune for rune in RuneType if rune_minimum_level(rune) <= fighter.level}
         fighter.runes = [rune for rune in parse_enum_values(RuneType, clean_values) if rune in options][: fighter_rune_count(fighter)]
 
@@ -203,9 +289,11 @@ def update_class_level(classes: list[CharacterClassLevel], class_name: ClassType
 
 def prune_progression_choices(classes: list[CharacterClassLevel]) -> list[CharacterClassLevel]:
     for character_class in classes:
+        character_class.level = max(MIN_CHARACTER_LEVEL, min(MAX_CHARACTER_LEVEL, character_class.level))
+        if character_class.name == ClassType.ROGUE and character_class.level < 3:
+            character_class.subclass = None
         if character_class.name != ClassType.FIGHTER:
             continue
-        character_class.level = max(MIN_CHARACTER_LEVEL, min(MAX_CHARACTER_LEVEL, character_class.level))
         if character_class.level < 3:
             character_class.subclass = None
             character_class.arcaneShots = None
@@ -232,12 +320,20 @@ def fighter_class(classes: list[CharacterClassLevel]) -> CharacterClassLevel | N
     return next((character_class for character_class in classes if character_class.name == ClassType.FIGHTER), None)
 
 
+def rogue_class(classes: list[CharacterClassLevel]) -> CharacterClassLevel | None:
+    return next((character_class for character_class in classes if character_class.name == ClassType.ROGUE), None)
+
+
 def total_character_level(classes: list[CharacterClassLevel]) -> int:
     return sum(character_class.level for character_class in classes)
 
 
 def fighter_asi_levels_up_to(fighter_level: int) -> int:
     return sum(1 for level in [4, 6, 8, 12, 14, 16, 19] if fighter_level >= level)
+
+
+def rogue_asi_levels_up_to(rogue_level: int) -> int:
+    return sum(1 for level in [4, 8, 10, 12, 16] if rogue_level >= level)
 
 
 def fighter_fighting_style_count(fighter: CharacterClassLevel) -> int:
@@ -294,9 +390,80 @@ def fighter_configured_spell_count(fighter: CharacterClassLevel) -> int:
     return progression.cantrips_known + progression.spells_known
 
 
+def rogue_configured_spell_count(rogue: CharacterClassLevel) -> int:
+    if rogue.subclass != RogueSubclassType.ARCANE_TRICKSTER or rogue.level < 3:
+        return 0
+    progression = arcane_trickster_spellcasting(rogue.level)
+    return progression.cantrips_known + progression.spells_known
+
+
+def arcane_trickster_progression_choices(rogue: CharacterClassLevel | None, spells: list[SpellEntry]) -> list[ProgressionChoice]:
+    if rogue is None:
+        return []
+    spell_count = rogue_configured_spell_count(rogue)
+    arcane_trickster_spells = [spell for spell in spells if spell.source.value == "Arcane Trickster"]
+    if len(arcane_trickster_spells) >= spell_count:
+        return []
+    return [
+        ProgressionChoice(
+            id=choice_id_value(ProgressionChoiceId.ARCANE_TRICKSTER_SPELLS),
+            choiceType=ProgressionChoiceType.SPELLS,
+            label=progression_choice_label(ProgressionChoiceLabel.ARCANE_TRICKSTER_SPELLS),
+            description=progression_choice_description(ProgressionChoiceDescription.ARCANE_TRICKSTER_SPELLS),
+            minimum=spell_count,
+            maximum=spell_count,
+            selected=[enum_key(spell.id) for spell in arcane_trickster_spells],
+            options=[
+                ProgressionChoiceOption(value=enum_key(spell.id), label=spell_option_label(spell))
+                for spell in arcane_trickster_spell_options(rogue.level, [enum_key(spell.id) for spell in arcane_trickster_spells])
+            ],
+        )
+    ]
+
+
 def spell_option_label(spell: SpellEntry) -> str:
-    level_label = "Cantrip" if spell.level == 0 else f"Level {spell.level}"
+    level_label = progression_spell_option_label(SpellOptionLabel.CANTRIP) if spell.level == 0 else progression_spell_option_label(SpellOptionLabel.LEVEL, level=spell.level)
     return f"{level_label}: {enum_label(spell.name)}"
+
+
+def progression_choice_label(label: ProgressionChoiceLabel) -> str:
+    return label.value
+
+
+def progression_choice_description(description: ProgressionChoiceDescription, **format_values: object) -> str:
+    return description.value.format(**format_values)
+
+
+def hit_point_choice_description(class_name: ClassType) -> str:
+    return progression_choice_description(
+        ProgressionChoiceDescription.HIT_POINTS,
+        hit_die_label=hit_die_label(class_name),
+    )
+
+
+def hit_die_label(class_name: ClassType) -> str:
+    if class_name == ClassType.ROGUE:
+        return HitDieLabel.ROGUE.value
+    return HitDieLabel.FIGHTER.value
+
+
+def hit_point_choice_options() -> list[ProgressionChoiceOption]:
+    return [
+        ProgressionChoiceOption(value=hit_point_choice_option_value(HitPointChoiceOption.FIXED), label=hit_point_choice_option_label(HitPointChoiceOptionLabel.FIXED)),
+        ProgressionChoiceOption(value=hit_point_choice_option_value(HitPointChoiceOption.ROLL), label=hit_point_choice_option_label(HitPointChoiceOptionLabel.ROLL)),
+    ]
+
+
+def hit_point_choice_option_value(option: HitPointChoiceOption) -> str:
+    return option.value
+
+
+def hit_point_choice_option_label(label: HitPointChoiceOptionLabel) -> str:
+    return label.value
+
+
+def progression_spell_option_label(label: SpellOptionLabel, **format_values: object) -> str:
+    return label.value.format(**format_values)
 
 
 def has_fighting_style(fighter: CharacterClassLevel, style: FightingStyleType) -> bool:
@@ -338,6 +505,10 @@ def enum_options(enum_type: type[Enum]) -> list[ProgressionChoiceOption]:
 
 def fighter_subclass_options() -> list[ProgressionChoiceOption]:
     return [ProgressionChoiceOption(value=enum_key(option), label=fighter_subclass_label(option)) for option in FighterSubclassType]
+
+
+def rogue_subclass_options() -> list[ProgressionChoiceOption]:
+    return [ProgressionChoiceOption(value=enum_key(option), label=rogue_subclass_label(option)) for option in RogueSubclassType]
 
 
 def fighting_style_options() -> list[ProgressionChoiceOption]:
