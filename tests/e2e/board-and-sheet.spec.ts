@@ -12,6 +12,27 @@ test("board view loads the table, party, and DM controls", async ({ page }) => {
   await expect(page.getByText(/connected .* connected/)).toBeVisible();
 });
 
+test("room state updates do not rewrite the browser URL", async ({ page }) => {
+  await page.addInitScript(() => {
+    const originalReplaceState = window.history.replaceState.bind(window.history);
+    let replaceStateCount = 0;
+    window.history.replaceState = (...args) => {
+      replaceStateCount += 1;
+      return originalReplaceState(...args);
+    };
+    Object.defineProperty(window, "__replaceStateCount", {
+      get: () => replaceStateCount
+    });
+  });
+
+  await page.goto("/test-campaign/player=Marina");
+  await expect(page.getByRole("heading", { name: "DnD Board" })).toBeVisible();
+  await page.waitForTimeout(1800);
+
+  await expect.poll(async () => page.evaluate(() => (window as Window & { __replaceStateCount?: number }).__replaceStateCount ?? 0)).toBe(0);
+  await expect(page).toHaveURL(/\/test-campaign\/player=Marina$/);
+});
+
 test("sheet view opens a character and creates roll cards", async ({ page }) => {
   await page.goto("/test-campaign/player=Marina/sheet");
 

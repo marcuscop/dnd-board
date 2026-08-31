@@ -20,6 +20,9 @@ from dnd_board.character_sheet import (
     CharacterSheet,
     CharacterClassLevel,
     ClassType,
+    ConditionApplicationMode,
+    ConditionType,
+    DiceType,
     EquipmentSlot,
     PartyMemberConfig,
     PartyMemberSheet,
@@ -28,6 +31,7 @@ from dnd_board.character_sheet import (
     RollPayload,
     RollLogEntry,
     RollLogEntryType,
+    RollModifierBreakdown,
     RollResolutionMode,
     RollResourceSpend,
     RollResolution,
@@ -44,6 +48,7 @@ from dnd_board.character_sheet import (
     ability_modifier,
     enum_value,
     enum_key,
+    enum_label,
     party_manifest_from_dict,
     positive_int,
     resolve_roll_against_target as resolve_dnd_roll_against_target,
@@ -53,7 +58,7 @@ from dnd_board.character_sheet import (
     sheet_to_dict,
     typed_json_from_value,
 )
-from dnd_board.rules.progression import apply_progression_choice, fighter_asi_levels_up_to, prune_progression_choices, update_class_level
+from dnd_board.rules.progression import ProgressionChoiceId, apply_progression_choice, fighter_asi_levels_up_to, parse_progression_choice_id, prune_progression_choices, update_class_level
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -154,6 +159,8 @@ class Room:
     pending_rolls: dict[tuple[str, str, str, str], RollPayload]
     roll_history: list[RollLogEntry]
     hit_points: dict[str, int]
+    temporary_hit_points: dict[str, int]
+    condition_overrides: dict[str, list[ConditionType]]
     resource_uses: dict[str, dict[str, int]]
     equipment_slots: dict[str, dict[str, EquipmentSlot]]
 
@@ -315,7 +322,7 @@ async def update_sheet_level(room_id: str, sheet_id: str, playerKey: str, delta:
         raise HTTPException(status_code=404, detail="Sheet not found")
     level_delta = clamp_int(delta, -1, 1)
     if level_delta > 0 and current_sheet.pendingChoices:
-        raise HTTPException(status_code=400, detail="Resolve pending level choices before leveling up")
+        raise HTTPException(status_code=400, detail=f"Resolve pending level choices before leveling up: {pending_choice_summary(current_sheet)}")
 
     updated_member = update_party_member_config(
         room.id,
@@ -327,6 +334,8 @@ async def update_sheet_level(room_id: str, sheet_id: str, playerKey: str, delta:
 
     room.resource_uses.pop(updated_member.id, None)
     room.hit_points.pop(updated_member.id, None)
+    room.temporary_hit_points.pop(updated_member.id, None)
+    room.condition_overrides.pop(updated_member.id, None)
     sheet = get_visible_sheet(room, player, updated_member.id)
     return {"roomId": room.id, "sheet": sheet_to_dict(sheet) if sheet else None}
 
@@ -346,30 +355,32 @@ async def update_sheet_progression_choice(room_id: str, sheet_id: str, choice_id
     if not isinstance(values, list):
         raise HTTPException(status_code=400, detail="Choice values must be a list")
 
-    normalized_choice_id = normalize_choice_id(choice_id)
-    if normalized_choice_id == "hitpointincrease":
+    parsed_choice_id = parse_progression_choice_id(choice_id)
+    if parsed_choice_id == ProgressionChoiceId.HIT_POINT_INCREASE:
         updated_member = update_party_member_config(
             room.id,
             sanitize_asset_id(sheet_id),
             lambda member: apply_member_hit_point_choice(member, str(values[0]) if values else "fixed"),
         )
-    elif normalized_choice_id == "fighterabilityscoreimprovement":
+    elif parsed_choice_id == ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT:
         updated_member = update_party_member_config(
             room.id,
             sanitize_asset_id(sheet_id),
             lambda member: apply_member_ability_score_improvement(member, [str(value) for value in values]),
         )
-    elif normalized_choice_id == "eldritchknightspells":
+    elif parsed_choice_id == ProgressionChoiceId.ELDRITCH_KNIGHT_SPELLS:
         updated_member = update_party_member_config(
             room.id,
             sanitize_asset_id(sheet_id),
             lambda member: apply_member_eldritch_knight_spells(member, [str(value) for value in values]),
         )
+    elif parsed_choice_id is None:
+        raise HTTPException(status_code=400, detail="Invalid progression choice")
     else:
         updated_member = update_party_member_config(
             room.id,
             sanitize_asset_id(sheet_id),
-            lambda member: set_member_class_levels(member, apply_progression_choice(member_sheet_classes(member), choice_id, [str(value) for value in values])),
+            lambda member: set_member_class_levels(member, apply_progression_choice(member_sheet_classes(member), parsed_choice_id, [str(value) for value in values])),
         )
     if updated_member is None:
         raise HTTPException(status_code=404, detail="Sheet not found")
@@ -421,6 +432,35 @@ async def update_sheet_equipment_slot(room_id: str, sheet_id: str, item_id: str,
     set_equipment_slot(room, sheet, item.id, equipment_slot)
     updated = get_visible_sheet(room, player, sheet.id)
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else sheet_to_dict(sheet)}
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/conditions/{condition}")
+async def update_sheet_condition(room_id: str, sheet_id: str, condition: str, playerKey: str, active: bool) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-condition", name="Sheet Condition", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    sheet = get_visible_sheet(room, player, sanitize_asset_id(sheet_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    if not can_control_sheet_roll(player, sheet):
+        raise HTTPException(status_code=403, detail="Cannot update this sheet")
+
+    condition_type = enum_value(ConditionType, condition)
+    if condition_type is None:
+        raise HTTPException(status_code=400, detail="Invalid condition")
+
+    next_conditions = updated_conditions(sheet.conditions, condition_type, active)
+    updated_member = update_party_member_config(
+        room.id,
+        sanitize_asset_id(sheet_id),
+        lambda member: set_member_conditions(member, next_conditions),
+    )
+    if updated_member is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+
+    room.condition_overrides[updated_member.id] = next_conditions
+    updated = get_visible_sheet(room, player, updated_member.id)
+    return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else None}
 
 
 @app.post("/api/rooms/{room_id}/rolls/{roll_id}/resolve")
@@ -793,6 +833,8 @@ async def delete_token(room: Room, player: Player, token_id: str) -> None:
     room.tokens.pop(token_id)
     remove_pending_rolls_for_token(room, token_id)
     room.hit_points.pop(token_id, None)
+    room.temporary_hit_points.pop(token_id, None)
+    room.condition_overrides.pop(token_id, None)
     await broadcast(room, {"type": "token_deleted", "tokenId": token_id})
 
 
@@ -825,6 +867,8 @@ def get_or_create_room(room_id: str) -> Room:
         pending_rolls={},
         roll_history=[],
         hit_points={},
+        temporary_hit_points={},
+        condition_overrides={},
         resource_uses=load_saved_resource_uses(room_id),
         equipment_slots={},
     )
@@ -948,7 +992,7 @@ def token_to_sheet(token: Token, campaign_id: str | None = None, current_hp: int
     room = rooms.get(campaign_id or "")
     resource_overrides = room.resource_uses.get(token.id, {}) if room is not None else {}
     equipment_slot_overrides = room.equipment_slots.get(token.id, {}) if room is not None else {}
-    return build_character_sheet(
+    sheet = build_character_sheet(
         token_id=token.id,
         kind=token.kind,
         name=token.name,
@@ -959,6 +1003,10 @@ def token_to_sheet(token: Token, campaign_id: str | None = None, current_hp: int
         resource_overrides=resource_overrides,
         equipment_slot_overrides=equipment_slot_overrides,
     )
+    if room is not None:
+        sheet.hp.temporary = room.temporary_hit_points.get(token.id, sheet.hp.temporary)
+        sheet.conditions = room.condition_overrides.get(token.id, sheet.conditions)
+    return sheet
 
 
 async def create_attack_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str) -> dict[str, Any]:
@@ -1163,9 +1211,201 @@ def remove_pending_rolls_for_token(room: Room, token_id: str) -> None:
 
 def resolve_roll_against_target(room: Room, roll: RollPayload, target: CharacterSheet) -> RollResolution:
     resolution = resolve_dnd_roll_against_target(roll, target)
-    if roll.resolution in {RollResolutionMode.APPLY_DAMAGE, RollResolutionMode.HEAL_SELF}:
+    source = source_sheet_for_roll(room, roll)
+    target_save_outcomes = resolve_target_save_effects(roll, target)
+    source_check_outcomes = resolve_source_check_condition_effects(roll, source, target)
+    response_rolls = [response_roll for _outcome, _condition, response_roll in target_save_outcomes]
+    response_rolls.extend(response_roll for _outcome, _condition, response_rolls_for_effect in source_check_outcomes for response_roll in response_rolls_for_effect)
+    if target_save_outcomes:
+        resolution.targetConditions = apply_response_roll_conditions(
+            resolution.targetConditions,
+            [(outcome, condition) for outcome, condition, _response_roll in target_save_outcomes],
+        )
+        resolution.outcome = f"{resolution.outcome}; {'; '.join(outcome for outcome, _condition, _response_roll in target_save_outcomes)}"
+    if source_check_outcomes:
+        resolution.targetConditions = apply_response_roll_conditions(
+            resolution.targetConditions,
+            [(outcome, condition) for outcome, condition, _response_rolls in source_check_outcomes],
+        )
+        resolution.outcome = f"{resolution.outcome}; {'; '.join(outcome for outcome, _condition, _response_rolls in source_check_outcomes)}"
+    if response_rolls:
+        for response_roll in response_rolls:
+            room.pending_rolls[roll_queue_key(response_roll)] = response_roll
+        resolution.responseRolls = response_rolls
+    if roll.resolution in {RollResolutionMode.APPLY_DAMAGE, RollResolutionMode.HEAL_SELF, RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS}:
         room.hit_points[target.tokenId] = resolution.targetHp.current
+        room.temporary_hit_points[target.tokenId] = resolution.targetHp.temporary
+    apply_resolved_conditions(room, target.id, resolution.targetConditions)
     return resolution
+
+
+def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> list[tuple[str, ConditionType | None, RollPayload]]:
+    outcomes: list[tuple[str, ConditionType | None, RollPayload]] = []
+    for effect in roll.conditionEffects or []:
+        if effect.mode != ConditionApplicationMode.TARGET_SAVE or effect.savingThrow is None or effect.saveDc is None:
+            continue
+        response_roll = response_ability_roll(
+            sheet=target,
+            ability=effect.savingThrow,
+            action_id="save",
+            label=f"{enum_label(effect.savingThrow)} Save",
+            source_label=roll.label,
+            modifier=save_modifier(target, effect.savingThrow),
+        )
+        if response_roll.total < effect.saveDc:
+            if effect.condition is None:
+                outcomes.append((f"{target.name} fails DC {effect.saveDc} {enum_label(effect.savingThrow)} save", None, response_roll))
+            else:
+                outcomes.append(
+                    (
+                        f"{target.name} fails DC {effect.saveDc} {enum_label(effect.savingThrow)} save and gains {enum_label(effect.condition)}",
+                        effect.condition,
+                        response_roll,
+                    )
+                )
+        else:
+            effect_label = enum_label(effect.condition) if effect.condition is not None else "effect"
+            outcomes.append((f"{target.name} passes DC {effect.saveDc} {enum_label(effect.savingThrow)} save against {effect_label}", None, response_roll))
+    return outcomes
+
+
+def source_sheet_for_roll(room: Room, roll: RollPayload) -> CharacterSheet | None:
+    token = room.tokens.get(roll.tokenId)
+    if token is None:
+        return None
+    return token_to_sheet(token, room.id, room.hit_points.get(token.id))
+
+
+def resolve_source_check_condition_effects(
+    roll: RollPayload,
+    source: CharacterSheet | None,
+    target: CharacterSheet,
+) -> list[tuple[str, ConditionType | None, list[RollPayload]]]:
+    if source is None:
+        return []
+    outcomes: list[tuple[str, ConditionType | None, list[RollPayload]]] = []
+    for effect in roll.conditionEffects or []:
+        if effect.mode != ConditionApplicationMode.SOURCE_CHECK or effect.sourceCheck is None or not effect.contestChecks:
+            continue
+        source_check = condition_source_check(source, effect)
+        target_check = condition_target_contest_check(target, effect)
+        source_response_roll = response_ability_roll(
+            sheet=source,
+            ability=effect.sourceCheck,
+            action_id="check",
+            label=source_check[0],
+            source_label=roll.label,
+            modifier=source_check[1] + max(0, roll.total),
+        )
+        target_response_roll = response_ability_roll(
+            sheet=target,
+            ability=target_check[2],
+            action_id="check",
+            label=target_check[0],
+            source_label=roll.label,
+            modifier=target_check[1],
+        )
+        response_rolls = [source_response_roll, target_response_roll]
+        if source_response_roll.total > target_response_roll.total:
+            outcomes.append(
+                (
+                    f"{source.name} wins {source_check[0]} {source_response_roll.total} vs {target.name} {target_check[0]} {target_response_roll.total}; {target.name} gains {enum_label(effect.condition)}",
+                    effect.condition,
+                    response_rolls,
+                )
+            )
+        else:
+            outcomes.append(
+                (
+                    f"{source.name} fails {source_check[0]} {source_response_roll.total} vs {target.name} {target_check[0]} {target_response_roll.total}; no {enum_label(effect.condition)}",
+                    None,
+                    response_rolls,
+                )
+            )
+    return outcomes
+
+
+def condition_source_check(source: CharacterSheet, effect) -> tuple[str, int]:
+    if effect.condition == ConditionType.GRAPPLED and effect.sourceCheck == AbilityType.STRENGTH:
+        return ("Strength (Athletics)", skill_modifier(source, "athletics", AbilityType.STRENGTH))
+    return (f"{enum_label(effect.sourceCheck)} check", ability_check_modifier(source, effect.sourceCheck))
+
+
+def condition_target_contest_check(target: CharacterSheet, effect) -> tuple[str, int, AbilityType]:
+    options = [condition_target_check(target, effect.condition, ability) for ability in effect.contestChecks or []]
+    return max(options, key=lambda option: option[1])
+
+
+def condition_target_check(target: CharacterSheet, condition: ConditionType | None, ability: AbilityType) -> tuple[str, int, AbilityType]:
+    if condition == ConditionType.GRAPPLED and ability == AbilityType.STRENGTH:
+        return ("Strength (Athletics)", skill_modifier(target, "athletics", AbilityType.STRENGTH), ability)
+    if condition == ConditionType.GRAPPLED and ability == AbilityType.DEXTERITY:
+        return ("Dexterity (Acrobatics)", skill_modifier(target, "acrobatics", AbilityType.DEXTERITY), ability)
+    return (f"{enum_label(ability)} check", ability_check_modifier(target, ability), ability)
+
+
+def response_ability_roll(
+    *,
+    sheet: CharacterSheet,
+    ability: AbilityType,
+    action_id: str,
+    label: str,
+    source_label: str,
+    modifier: int,
+) -> RollPayload:
+    die_roll = random.randint(1, 20)
+    created_at = time_ns()
+    return RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=sheet.owner,
+        source=RollSource(section=SheetSectionType.ABILITY_SCORES, sourceId=enum_key(ability), actionId=action_id),
+        sourceLabel=source_label,
+        resolution=RollResolutionMode.NONE,
+        label=label,
+        iconUrl=None,
+        dice=[die_roll],
+        diceType=DiceType.D20,
+        die=enum_key(DiceType.D20),
+        modifier=modifier,
+        modifierBreakdown=[RollModifierBreakdown(source=label, value=modifier)] if modifier else [],
+        total=die_roll + modifier,
+        createdAt=created_at,
+    )
+
+
+def skill_modifier(sheet: CharacterSheet, skill_name: str, fallback_ability: AbilityType) -> int:
+    skill = next((candidate for candidate in sheet.skills if candidate.name == skill_name), None)
+    return skill.modifier if skill is not None else ability_check_modifier(sheet, fallback_ability)
+
+
+def ability_check_modifier(sheet: CharacterSheet, ability: AbilityType) -> int:
+    return ability_modifier(getattr(sheet.abilityScores, enum_key(ability)))
+
+
+def save_modifier(sheet: CharacterSheet, ability: AbilityType) -> int:
+    saving_throw = next((save for save in sheet.savingThrows if save.ability == ability), None)
+    modifier = ability_check_modifier(sheet, ability)
+    if saving_throw is not None and saving_throw.proficient:
+        modifier += sheet.proficiencyBonus
+    return modifier
+
+
+def apply_response_roll_conditions(
+    current_conditions: list[ConditionType],
+    outcomes: list[tuple[str, ConditionType | None]],
+) -> list[ConditionType]:
+    next_conditions = list(current_conditions)
+    for _outcome, condition in outcomes:
+        if condition is not None and condition not in next_conditions:
+            next_conditions.append(condition)
+    return next_conditions
+
+
+def apply_resolved_conditions(room: Room, sheet_id: str, conditions: list[ConditionType]) -> None:
+    room.condition_overrides[sheet_id] = list(conditions)
+    update_party_member_config(room.id, sheet_id, lambda updated: set_member_conditions(updated, conditions))
 
 
 def party_member_by_id(member_id: str, campaign_id: str | None = None) -> PartyMember | None:
@@ -1259,6 +1499,8 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.pending_rolls = {}
     room.roll_history = []
     room.hit_points = {}
+    room.temporary_hit_points = {}
+    room.condition_overrides = {}
     room.resource_uses = load_saved_resource_uses(room.id)
     room.equipment_slots = {}
     await broadcast_room_state(room)
@@ -1450,6 +1692,30 @@ def set_member_class_levels(member: PartyMemberConfig, classes: list[CharacterCl
     prune_member_hit_point_increases(member)
     prune_member_ability_score_improvements(member)
     prune_member_eldritch_knight_spells(member)
+
+
+def set_member_condition(member: PartyMemberConfig, condition: ConditionType, active: bool) -> None:
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet()
+    member.sheet.conditions = updated_conditions(member.sheet.conditions or [], condition, active) or None
+
+
+def updated_conditions(conditions: list[ConditionType], condition: ConditionType, active: bool) -> list[ConditionType]:
+    if active and condition not in conditions:
+        return [*conditions, condition]
+    if not active:
+        return [candidate for candidate in conditions if candidate != condition]
+    return list(conditions)
+
+
+def set_member_conditions(member: PartyMemberConfig, conditions: list[ConditionType]) -> None:
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet()
+    member.sheet.conditions = conditions or None
+
+
+def pending_choice_summary(sheet: CharacterSheet) -> str:
+    return ", ".join(choice.label for choice in sheet.pendingChoices)
 
 
 def apply_member_hit_point_choice(member: PartyMemberConfig, choice: str) -> None:

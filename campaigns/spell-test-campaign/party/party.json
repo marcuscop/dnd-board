@@ -7,35 +7,89 @@
         {
           "$type": "PartyMemberConfig",
           "fields": {
-            "id": { "$type": "str", "value": "player-1" },
-            "name": { "$type": "str", "value": "Voss" },
-            "maxHp": { "$type": "int", "value": 31 },
+            "id": {
+              "$type": "str",
+              "value": "player-1"
+            },
+            "name": {
+              "$type": "str",
+              "value": "Voss"
+            },
+            "maxHp": {
+              "$type": "int",
+              "value": 31
+            },
             "abilityScores": {
               "$type": "AbilityScores",
               "fields": {
-                "strength": { "$type": "int", "value": 14 },
-                "dexterity": { "$type": "int", "value": 16 },
-                "constitution": { "$type": "int", "value": 14 },
-                "intelligence": { "$type": "int", "value": 12 },
-                "wisdom": { "$type": "int", "value": 15 },
-                "charisma": { "$type": "int", "value": 10 }
+                "strength": {
+                  "$type": "int",
+                  "value": 14
+                },
+                "dexterity": {
+                  "$type": "int",
+                  "value": 16
+                },
+                "constitution": {
+                  "$type": "int",
+                  "value": 14
+                },
+                "intelligence": {
+                  "$type": "int",
+                  "value": 12
+                },
+                "wisdom": {
+                  "$type": "int",
+                  "value": 15
+                },
+                "charisma": {
+                  "$type": "int",
+                  "value": 10
+                }
               }
             },
             "sheet": {
               "$type": "PartyMemberSheet",
               "fields": {
-                "race": { "$type": "str", "value": "Human" },
-                "background": { "$type": "str", "value": "Investigator" },
-                "alignment": { "$type": "str", "value": "Neutral Good" },
+                "race": {
+                  "$type": "str",
+                  "value": "Human"
+                },
+                "background": {
+                  "$type": "str",
+                  "value": "Investigator"
+                },
+                "alignment": {
+                  "$type": "str",
+                  "value": "Neutral Good"
+                },
                 "classes": {
                   "$type": "list",
                   "items": [
                     {
                       "$type": "CharacterClassLevel",
                       "fields": {
-                        "name": { "$type": "ClassType", "value": "FIGHTER" },
-                        "level": { "$type": "int", "value": 3 },
-                        "subclass": { "$type": "FighterSubclassType", "value": "MONSTER_HUNTER" }
+                        "name": {
+                          "$type": "ClassType",
+                          "value": "FIGHTER"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 3
+                        },
+                        "subclass": {
+                          "$type": "FighterSubclassType",
+                          "value": "MONSTER_HUNTER"
+                        },
+                        "fightingStyles": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "FightingStyleType",
+                              "value": "ARCHERY"
+                            }
+                          ]
+                        }
                       }
                     }
                   ]

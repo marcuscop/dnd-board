@@ -18,6 +18,7 @@ class RollResolutionMode(Enum):
     ATTACK_VS_ARMOR_CLASS = auto()
     APPLY_DAMAGE = auto()
     HEAL_SELF = auto()
+    APPLY_TEMPORARY_HIT_POINTS = auto()
 
 
 class RollLogEntryType(Enum):
@@ -29,6 +30,7 @@ class RollModifierType(Enum):
     NONE = auto()
     CLASS_LEVEL = auto()
     PROFICIENCY_BONUS = auto()
+    ABILITY_MODIFIER = auto()
 
 
 class SheetSectionType(Enum):
@@ -107,6 +109,31 @@ class SpellComponent(Enum):
     VERBAL = auto()
     SOMATIC = auto()
     MATERIAL = auto()
+
+
+class ConditionType(Enum):
+    BLINDED = auto()
+    CHARMED = auto()
+    DEAFENED = auto()
+    EXHAUSTION = auto()
+    FRIGHTENED = auto()
+    GRAPPLED = auto()
+    INCAPACITATED = auto()
+    INVISIBLE = auto()
+    PARALYZED = auto()
+    PETRIFIED = auto()
+    POISONED = auto()
+    PRONE = auto()
+    RESTRAINED = auto()
+    STUNNED = auto()
+    UNCONSCIOUS = auto()
+
+
+class ConditionApplicationMode(Enum):
+    TARGET_SAVE = auto()
+    SOURCE_CHECK = auto()
+    DIRECT = auto()
+    MANUAL = auto()
 
 
 class WeaponProperty(Enum):
@@ -287,6 +314,18 @@ class HitPoints:
     temporary: int
 
 
+@dataclass(frozen=True)
+class ConditionEffect:
+    condition: ConditionType | None
+    mode: ConditionApplicationMode
+    savingThrow: AbilityType | None = None
+    saveDcAbility: AbilityType | None = None
+    saveDc: int | None = None
+    sourceCheck: AbilityType | None = None
+    contestChecks: list[AbilityType] | None = None
+    description: str = ""
+
+
 @dataclass
 class AttackAction:
     id: str
@@ -318,6 +357,7 @@ class RollAction:
     diceCount: int
     diceType: DiceType
     modifier: RollModifierType = RollModifierType.NONE
+    modifierAbility: AbilityType | None = None
     staticModifier: int = 0
     resolution: RollResolutionMode = RollResolutionMode.NONE
     consumesResource: Enum | None = None
@@ -325,6 +365,7 @@ class RollAction:
     activation: TimeEconomy | None = None
     source: str | None = None
     damageType: DamageType | None = None
+    conditionEffects: list[ConditionEffect] | None = None
 
     @api_field
     def dice(self) -> str:
@@ -413,6 +454,7 @@ class SheetAbility:
     description: str
     resourceId: str | None = None
     rollActions: list[RollAction] | None = None
+    conditionEffects: list[ConditionEffect] | None = None
 
 
 @dataclass
@@ -423,6 +465,7 @@ class SheetFeature:
     activation: TimeEconomy
     description: str
     rollActions: list[RollAction] | None = None
+    conditionEffects: list[ConditionEffect] | None = None
 
 
 @dataclass
@@ -477,6 +520,7 @@ class PartyMemberSheet:
     spells: list[SpellEntry] | None = None
     hitPointIncreases: list[int] | None = None
     abilityScoreImprovements: list[str] | None = None
+    conditions: list[ConditionType] | None = None
     attacks: list[AttackAction] | None = None
     equipment: list[EquipmentItem] | None = None
 
@@ -531,7 +575,7 @@ class CharacterSheet:
     features: list[SheetFeature]
     spells: list[SpellEntry]
     proficiencies: list[str]
-    conditions: list[str]
+    conditions: list[ConditionType]
     attacks: list[AttackAction]
     equipment: list[EquipmentItem]
 
@@ -555,6 +599,7 @@ class RollPayload:
     total: int
     createdAt: int
     damageType: DamageType | None = None
+    conditionEffects: list[ConditionEffect] | None = None
     resourceSpent: RollResourceSpend | None = None
 
 
@@ -575,8 +620,10 @@ class RollResolution:
     targetName: str
     targetArmorClass: int
     targetHp: HitPoints
+    targetConditions: list[ConditionType]
     outcome: str
     createdAt: int
+    responseRolls: list[RollPayload] | None = None
 
 
 @dataclass
@@ -704,7 +751,7 @@ def build_character_sheet(
         features=features,
         spells=spells,
         proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
-        conditions=[],
+        conditions=sheet_config.conditions if sheet_config and sheet_config.conditions else [],
         attacks=attacks,
         equipment=equipment,
     )
@@ -873,6 +920,41 @@ def build_roll_action_payload(sheet: CharacterSheet, roller: str, source: RollSo
         modifierBreakdown=modifier_breakdown,
         total=sum(dice) + modifier,
         createdAt=created_at,
+        damageType=action.damageType,
+        conditionEffects=roll_condition_effects(sheet, action),
+    )
+
+
+def roll_condition_effects(sheet: CharacterSheet, action: RollAction) -> list[ConditionEffect] | None:
+    if not action.conditionEffects:
+        return None
+    return [
+        ConditionEffect(
+            condition=effect.condition,
+            mode=effect.mode,
+            savingThrow=effect.savingThrow,
+            saveDcAbility=effect.saveDcAbility,
+            saveDc=condition_effect_save_dc(sheet, effect),
+            sourceCheck=effect.sourceCheck,
+            contestChecks=effect.contestChecks,
+            description=effect.description,
+        )
+        for effect in action.conditionEffects
+    ]
+
+
+def condition_effect_save_dc(sheet: CharacterSheet, effect: ConditionEffect) -> int | None:
+    if effect.mode != ConditionApplicationMode.TARGET_SAVE:
+        return None
+    dc_ability = effect.saveDcAbility or strongest_save_dc_ability(sheet)
+    ability_score = getattr(sheet.abilityScores, enum_key(dc_ability))
+    return 8 + sheet.proficiencyBonus + ability_modifier(ability_score)
+
+
+def strongest_save_dc_ability(sheet: CharacterSheet) -> AbilityType:
+    return max(
+        (AbilityType.STRENGTH, AbilityType.DEXTERITY),
+        key=lambda ability: ability_modifier(getattr(sheet.abilityScores, enum_key(ability))),
     )
 
 
@@ -881,6 +963,8 @@ def roll_action_modifier(sheet: CharacterSheet, action: RollAction) -> int:
         return sheet.characterClass.level + action.staticModifier
     if action.modifier == RollModifierType.PROFICIENCY_BONUS:
         return sheet.proficiencyBonus + action.staticModifier
+    if action.modifier == RollModifierType.ABILITY_MODIFIER and action.modifierAbility is not None:
+        return ability_modifier(getattr(sheet.abilityScores, enum_key(action.modifierAbility))) + action.staticModifier
     return action.staticModifier
 
 
@@ -889,24 +973,44 @@ def roll_action_modifier_label(action: RollAction) -> str:
         return "Class Level"
     if action.modifier == RollModifierType.PROFICIENCY_BONUS:
         return "Proficiency"
+    if action.modifier == RollModifierType.ABILITY_MODIFIER and action.modifierAbility is not None:
+        return enum_label(action.modifierAbility)
     return "Modifier"
 
 
 def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> RollResolution:
+    target_conditions = list(target.conditions)
     if roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
         outcome = "hits" if roll.total >= target.armorClass else "misses"
         target_hp = target.hp
     elif roll.resolution == RollResolutionMode.APPLY_DAMAGE:
-        next_hp = max(0, target.hp.current - max(0, roll.total))
-        target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=target.hp.temporary)
+        remaining_damage = max(0, roll.total)
+        next_temporary = max(0, target.hp.temporary - remaining_damage)
+        remaining_damage = max(0, remaining_damage - target.hp.temporary)
+        next_hp = max(0, target.hp.current - remaining_damage)
+        target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=next_temporary)
         outcome = f"deals {roll.total} damage"
     elif roll.resolution == RollResolutionMode.HEAL_SELF:
         next_hp = min(target.hp.max, target.hp.current + max(0, roll.total))
         target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=target.hp.temporary)
         outcome = f"heals {roll.total} hit points"
+    elif roll.resolution == RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS:
+        rolled_temporary = max(0, roll.total)
+        next_temporary = max(target.hp.temporary, rolled_temporary)
+        target_hp = HitPoints(current=target.hp.current, max=target.hp.max, temporary=next_temporary)
+        outcome = (
+            f"gains {rolled_temporary} temporary hit points"
+            if rolled_temporary >= target.hp.temporary
+            else f"keeps {target.hp.temporary} temporary hit points"
+        )
     else:
         target_hp = target.hp
         outcome = f"rolls {roll.total}"
+
+    condition_outcomes = resolve_condition_effects(roll, target)
+    if condition_outcomes:
+        target_conditions = apply_condition_outcomes(target_conditions, condition_outcomes)
+        outcome = f"{outcome}; {'; '.join(condition_outcomes)}"
 
     return RollResolution(
         id=f"resolution-{time_ns()}",
@@ -916,9 +1020,37 @@ def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> Ro
         targetName=target.name,
         targetArmorClass=target.armorClass,
         targetHp=target_hp,
+        targetConditions=target_conditions,
         outcome=outcome,
         createdAt=time_ns(),
     )
+
+
+def resolve_condition_effects(roll: RollPayload, target: CharacterSheet) -> list[str]:
+    outcomes: list[str] = []
+    for effect in roll.conditionEffects or []:
+        if effect.mode == ConditionApplicationMode.DIRECT and effect.condition is not None:
+            outcomes.append(f"{target.name} gains {enum_label(effect.condition)}")
+        elif effect.mode == ConditionApplicationMode.MANUAL and effect.condition is not None:
+            outcomes.append(f"{enum_label(effect.condition)} requires manual resolution")
+    return outcomes
+
+
+def saving_throw_total(target: CharacterSheet, ability: AbilityType) -> int:
+    saving_throw = next((save for save in target.savingThrows if save.ability == ability), None)
+    ability_score = getattr(target.abilityScores, enum_key(ability))
+    total = random.randint(1, 20) + ability_modifier(ability_score)
+    if saving_throw is not None and saving_throw.proficient:
+        total += target.proficiencyBonus
+    return total
+
+
+def apply_condition_outcomes(current_conditions: list[ConditionType], outcomes: list[str]) -> list[ConditionType]:
+    next_conditions = list(current_conditions)
+    for condition in ConditionType:
+        if any(f"gains {enum_label(condition)}" in outcome for outcome in outcomes) and condition not in next_conditions:
+            next_conditions.append(condition)
+    return next_conditions
 
 
 def generated_ability_scores(seed: str) -> AbilityScores:
@@ -1304,6 +1436,9 @@ def typed_json_registry() -> dict[str, type[Any]]:
             ClassType,
             DamageType,
             DiceType,
+            ConditionType,
+            ConditionApplicationMode,
+            ConditionEffect,
             EquipmentSlot,
             EquipmentType,
             EquipmentItem,

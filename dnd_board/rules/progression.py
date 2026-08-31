@@ -27,6 +27,17 @@ MIN_CHARACTER_LEVEL = 1
 MAX_CHARACTER_LEVEL = 20
 
 
+class ProgressionChoiceId(Enum):
+    HIT_POINT_INCREASE = "hitPointIncrease"
+    FIGHTER_ABILITY_SCORE_IMPROVEMENT = "fighterAbilityScoreImprovement"
+    FIGHTER_SUBCLASS = "fighterSubclass"
+    FIGHTER_FIGHTING_STYLES = "fighterFightingStyles"
+    BATTLE_MASTER_MANEUVERS = "battleMasterManeuvers"
+    ARCANE_ARCHER_SHOTS = "arcaneArcherShots"
+    RUNE_KNIGHT_RUNES = "runeKnightRunes"
+    ELDRITCH_KNIGHT_SPELLS = "eldritchKnightSpells"
+
+
 def progression_choices(
     classes: list[CharacterClassLevel],
     spells: list[SpellEntry],
@@ -42,7 +53,7 @@ def progression_choices(
     expected_hit_point_increases = max(0, total_character_level(classes) - 1)
     if len(hit_point_increases) < expected_hit_point_increases:
         choices.append(single_choice(
-            choice_id="hitPointIncrease",
+            choice_id=ProgressionChoiceId.HIT_POINT_INCREASE,
             choice_type=ProgressionChoiceType.HIT_POINTS,
             label="Hit Points",
             description="Choose fixed HP or roll the Fighter d10 for this level. Constitution modifier is applied by the server.",
@@ -58,7 +69,7 @@ def progression_choices(
         from dnd_board.rules.feats import general_feat_options, selected_general_feat_keys
 
         choices.append(ProgressionChoice(
-            id="fighterAbilityScoreImprovement",
+            id=choice_id_value(ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT),
             choiceType=ProgressionChoiceType.ABILITY_SCORE_IMPROVEMENT,
             label="Ability Score Improvement",
             description="Increase one ability score by 2, increase two ability scores by 1, or choose a feat. Optional Martial Versatility changes are not built yet.",
@@ -70,7 +81,7 @@ def progression_choices(
 
     if fighter.level >= 3 and fighter.subclass is None:
         choices.append(single_choice(
-            choice_id="fighterSubclass",
+            choice_id=ProgressionChoiceId.FIGHTER_SUBCLASS,
             choice_type=ProgressionChoiceType.SUBCLASS,
             label="Martial Archetype",
             description="Choose a Fighter Martial Archetype.",
@@ -82,7 +93,7 @@ def progression_choices(
     selected_styles = selected_enum_keys(fighter.fightingStyles or ([fighter.fightingStyle] if fighter.fightingStyle else []))
     if len(selected_styles) < fighting_style_count:
         choices.append(multi_choice(
-            choice_id="fighterFightingStyles",
+            choice_id=ProgressionChoiceId.FIGHTER_FIGHTING_STYLES,
             choice_type=ProgressionChoiceType.FIGHTING_STYLE,
             label="Fighting Style",
             description="Choose Fighter Fighting Style feats. These are not repeatable.",
@@ -96,7 +107,7 @@ def progression_choices(
     selected_maneuvers = selected_enum_keys(fighter.maneuvers or [])
     if len(selected_maneuvers) < maneuver_count:
         choices.append(multi_choice(
-            choice_id="battleMasterManeuvers",
+            choice_id=ProgressionChoiceId.BATTLE_MASTER_MANEUVERS,
             choice_type=ProgressionChoiceType.BATTLE_MASTER_MANEUVERS,
             label="Battle Master Maneuvers",
             description="Choose maneuvers known for Battle Master or Superior Technique.",
@@ -110,7 +121,7 @@ def progression_choices(
     selected_shots = selected_enum_keys(fighter.arcaneShots or [])
     if len(selected_shots) < arcane_shot_count:
         choices.append(multi_choice(
-            choice_id="arcaneArcherShots",
+            choice_id=ProgressionChoiceId.ARCANE_ARCHER_SHOTS,
             choice_type=ProgressionChoiceType.ARCANE_SHOTS,
             label="Arcane Shot Options",
             description="Choose Arcane Shot options known.",
@@ -124,7 +135,7 @@ def progression_choices(
     selected_runes = selected_enum_keys(fighter.runes or [])
     if len(selected_runes) < rune_count:
         choices.append(multi_choice(
-            choice_id="runeKnightRunes",
+            choice_id=ProgressionChoiceId.RUNE_KNIGHT_RUNES,
             choice_type=ProgressionChoiceType.RUNES,
             label="Rune Knight Runes",
             description="Choose runes known. Hill and Storm require Fighter level 7.",
@@ -141,7 +152,7 @@ def progression_choices(
     spell_count = fighter_configured_spell_count(fighter)
     if len(spells) < spell_count:
         choices.append(ProgressionChoice(
-            id="eldritchKnightSpells",
+            id=choice_id_value(ProgressionChoiceId.ELDRITCH_KNIGHT_SPELLS),
             choiceType=ProgressionChoiceType.SPELLS,
             label="Eldritch Knight Spells",
             description="Choose known Eldritch Knight cantrips and wizard spells from the curated starter catalog.",
@@ -157,25 +168,24 @@ def progression_choices(
     return choices
 
 
-def apply_progression_choice(classes: list[CharacterClassLevel], choice_id: str, values: list[str]) -> list[CharacterClassLevel]:
+def apply_progression_choice(classes: list[CharacterClassLevel], choice_id: ProgressionChoiceId, values: list[str]) -> list[CharacterClassLevel]:
     next_classes = [copy_character_class(character_class) for character_class in classes]
     fighter = fighter_class(next_classes)
     if fighter is None:
         return next_classes
 
-    normalized_choice_id = choice_id.strip().replace("-", "").replace("_", "").lower()
     clean_values = unique_values(values)
-    if normalized_choice_id == "fightersubclass" and fighter.level >= 3:
+    if choice_id == ProgressionChoiceId.FIGHTER_SUBCLASS and fighter.level >= 3:
         fighter.subclass = enum_value(FighterSubclassType, clean_values[0]) if clean_values else None
-    elif normalized_choice_id == "fighterfightingstyles":
+    elif choice_id == ProgressionChoiceId.FIGHTER_FIGHTING_STYLES:
         styles = parse_enum_values(FightingStyleType, clean_values)[: fighter_fighting_style_count(fighter)]
         fighter.fightingStyle = None
         fighter.fightingStyles = styles
-    elif normalized_choice_id == "battlemastermaneuvers":
+    elif choice_id == ProgressionChoiceId.BATTLE_MASTER_MANEUVERS:
         fighter.maneuvers = parse_enum_values(BattleMasterManeuverType, clean_values)[: fighter_maneuver_count(fighter)]
-    elif normalized_choice_id == "arcanearchershots":
+    elif choice_id == ProgressionChoiceId.ARCANE_ARCHER_SHOTS:
         fighter.arcaneShots = parse_enum_values(ArcaneShotType, clean_values)[: fighter_arcane_shot_count(fighter)]
-    elif normalized_choice_id == "runeknightrunes":
+    elif choice_id == ProgressionChoiceId.RUNE_KNIGHT_RUNES:
         options = {rune for rune in RuneType if rune_minimum_level(rune) <= fighter.level}
         fighter.runes = [rune for rune in parse_enum_values(RuneType, clean_values) if rune in options][: fighter_rune_count(fighter)]
 
@@ -293,12 +303,12 @@ def has_fighting_style(fighter: CharacterClassLevel, style: FightingStyleType) -
     return style == fighter.fightingStyle or style in (fighter.fightingStyles or [])
 
 
-def single_choice(choice_id: str, choice_type: ProgressionChoiceType, label: str, description: str, selected: list[str], options: list[ProgressionChoiceOption]) -> ProgressionChoice:
-    return ProgressionChoice(choice_id, choice_type, label, description, 1, 1, selected, options)
+def single_choice(choice_id: ProgressionChoiceId, choice_type: ProgressionChoiceType, label: str, description: str, selected: list[str], options: list[ProgressionChoiceOption]) -> ProgressionChoice:
+    return ProgressionChoice(choice_id_value(choice_id), choice_type, label, description, 1, 1, selected, options)
 
 
 def multi_choice(
-    choice_id: str,
+    choice_id: ProgressionChoiceId,
     choice_type: ProgressionChoiceType,
     label: str,
     description: str,
@@ -307,7 +317,19 @@ def multi_choice(
     selected: list[str],
     options: list[ProgressionChoiceOption],
 ) -> ProgressionChoice:
-    return ProgressionChoice(choice_id, choice_type, label, description, minimum, maximum, selected, options)
+    return ProgressionChoice(choice_id_value(choice_id), choice_type, label, description, minimum, maximum, selected, options)
+
+
+def parse_progression_choice_id(value: str) -> ProgressionChoiceId | None:
+    normalized = value.strip().replace("-", "").replace("_", "").lower()
+    for choice_id in ProgressionChoiceId:
+        if normalized in {choice_id.value.lower(), choice_id.name.replace("_", "").lower()}:
+            return choice_id
+    return None
+
+
+def choice_id_value(choice_id: ProgressionChoiceId) -> str:
+    return choice_id.value
 
 
 def enum_options(enum_type: type[Enum]) -> list[ProgressionChoiceOption]:

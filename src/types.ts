@@ -7,7 +7,8 @@ export enum RollResolutionMode {
   NONE = "none",
   ATTACK_VS_ARMOR_CLASS = "attackVsArmorClass",
   APPLY_DAMAGE = "applyDamage",
-  HEAL_SELF = "healSelf"
+  HEAL_SELF = "healSelf",
+  APPLY_TEMPORARY_HIT_POINTS = "applyTemporaryHitPoints"
 }
 
 export enum RollLogEntryType {
@@ -18,7 +19,8 @@ export enum RollLogEntryType {
 export enum RollModifierType {
   NONE = "none",
   CLASS_LEVEL = "classLevel",
-  PROFICIENCY_BONUS = "proficiencyBonus"
+  PROFICIENCY_BONUS = "proficiencyBonus",
+  ABILITY_MODIFIER = "abilityModifier"
 }
 
 export enum SheetSectionType {
@@ -77,6 +79,39 @@ export type Asset = {
 };
 
 export type AbilityType = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
+export type ConditionType =
+  | "blinded"
+  | "charmed"
+  | "deafened"
+  | "exhaustion"
+  | "frightened"
+  | "grappled"
+  | "incapacitated"
+  | "invisible"
+  | "paralyzed"
+  | "petrified"
+  | "poisoned"
+  | "prone"
+  | "restrained"
+  | "stunned"
+  | "unconscious";
+export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
+export type ConditionEffect = {
+  condition?: ConditionType;
+  conditionLabel?: string;
+  mode: ConditionApplicationMode;
+  modeLabel: string;
+  savingThrow?: AbilityType;
+  savingThrowLabel?: string;
+  saveDcAbility?: AbilityType;
+  saveDcAbilityLabel?: string;
+  saveDc?: number;
+  sourceCheck?: AbilityType;
+  sourceCheckLabel?: string;
+  contestChecks?: AbilityType[];
+  contestChecksLabel?: string[];
+  description: string;
+};
 export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
 export type DamageType =
   | "acid"
@@ -144,6 +179,8 @@ export type RollAction = {
   diceType: DiceType;
   dice: string;
   modifier: RollModifierType;
+  modifierAbility?: AbilityType;
+  modifierAbilityLabel?: string;
   staticModifier: number;
   resolution: RollResolutionMode;
   consumesResource?: string;
@@ -151,6 +188,7 @@ export type RollAction = {
   activation?: TimeEconomy;
   damageType?: DamageType;
   damageTypeLabel?: string;
+  conditionEffects?: ConditionEffect[];
 };
 
 export type AbilityScores = {
@@ -237,6 +275,7 @@ export type CharacterSheet = {
     description: string;
     resourceId?: string;
     rollActions?: RollAction[];
+    conditionEffects?: ConditionEffect[];
   }[];
   resources: {
     id: string;
@@ -259,6 +298,7 @@ export type CharacterSheet = {
     activationLabel: string;
     description: string;
     rollActions?: RollAction[];
+    conditionEffects?: ConditionEffect[];
   }[];
   spells: {
     id: string;
@@ -280,7 +320,7 @@ export type CharacterSheet = {
     resourceId?: string;
   }[];
   proficiencies: string[];
-  conditions: string[];
+  conditions: ConditionType[];
   attacks: AttackAction[];
   equipment: {
     id: string;
@@ -328,6 +368,7 @@ export type RollPayload = {
   createdAt: number;
   damageType?: DamageType;
   damageTypeLabel?: string;
+  conditionEffects?: ConditionEffect[];
   resourceSpent?: {
     resourceId: string;
     resourceName: string;
@@ -348,8 +389,10 @@ export type RollResolution = {
     max: number;
     temporary: number;
   };
+  targetConditions: ConditionType[];
   outcome: string;
   createdAt: number;
+  responseRolls?: RollPayload[];
 };
 
 export type RollLogEntry = {

@@ -83,14 +83,31 @@
                         },
                         "subclass": {
                           "$type": "FighterSubclassType",
-                          "value": "ELDRITCH_KNIGHT"
+                          "value": "BATTLE_MASTER"
                         },
                         "fightingStyles": {
                           "$type": "list",
                           "items": [
                             {
                               "$type": "FightingStyleType",
-                              "value": "ARCHERY"
+                              "value": "UNARMED_FIGHTING"
+                            }
+                          ]
+                        },
+                        "maneuvers": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "BattleMasterManeuverType",
+                              "value": "MENACING_ATTACK"
+                            },
+                            {
+                              "$type": "BattleMasterManeuverType",
+                              "value": "TRIP_ATTACK"
+                            },
+                            {
+                              "$type": "BattleMasterManeuverType",
+                              "value": "PUSHING_ATTACK"
                             }
                           ]
                         }
@@ -169,341 +186,6 @@
                     }
                   ]
                 },
-                "spells": {
-                  "$type": "list",
-                  "items": [
-                    {
-                      "$type": "SpellEntry",
-                      "fields": {
-                        "id": {
-                          "$type": "str",
-                          "value": "boomingBlade"
-                        },
-                        "name": {
-                          "$type": "str",
-                          "value": "Booming Blade"
-                        },
-                        "source": {
-                          "$type": "str",
-                          "value": "Wizard"
-                        },
-                        "level": {
-                          "$type": "int",
-                          "value": 0
-                        },
-                        "school": {
-                          "$type": "SpellSchool",
-                          "value": "EVOCATION"
-                        },
-                        "castingAbility": {
-                          "$type": "AbilityType",
-                          "value": "INTELLIGENCE"
-                        },
-                        "castingTime": {
-                          "$type": "str",
-                          "value": "1 action"
-                        },
-                        "range": {
-                          "$type": "str",
-                          "value": "Self"
-                        },
-                        "duration": {
-                          "$type": "str",
-                          "value": "1 round"
-                        },
-                        "components": {
-                          "$type": "list",
-                          "items": [
-                            {
-                              "$type": "SpellComponent",
-                              "value": "SOMATIC"
-                            },
-                            {
-                              "$type": "SpellComponent",
-                              "value": "MATERIAL"
-                            }
-                          ]
-                        },
-                        "description": {
-                          "$type": "str",
-                          "value": "Make a melee weapon attack; on a hit, the target takes the weapon's normal effects and is sheathed in booming energy."
-                        },
-                        "concentration": {
-                          "$type": "bool",
-                          "value": false
-                        },
-                        "ritual": {
-                          "$type": "bool",
-                          "value": false
-                        }
-                      }
-                    },
-                    {
-                      "$type": "SpellEntry",
-                      "fields": {
-                        "id": {
-                          "$type": "str",
-                          "value": "rayOfFrost"
-                        },
-                        "name": {
-                          "$type": "str",
-                          "value": "Ray of Frost"
-                        },
-                        "source": {
-                          "$type": "str",
-                          "value": "Wizard"
-                        },
-                        "level": {
-                          "$type": "int",
-                          "value": 0
-                        },
-                        "school": {
-                          "$type": "SpellSchool",
-                          "value": "EVOCATION"
-                        },
-                        "castingAbility": {
-                          "$type": "AbilityType",
-                          "value": "INTELLIGENCE"
-                        },
-                        "castingTime": {
-                          "$type": "str",
-                          "value": "1 action"
-                        },
-                        "range": {
-                          "$type": "str",
-                          "value": "60 feet"
-                        },
-                        "duration": {
-                          "$type": "str",
-                          "value": "Instantaneous"
-                        },
-                        "components": {
-                          "$type": "list",
-                          "items": [
-                            {
-                              "$type": "SpellComponent",
-                              "value": "VERBAL"
-                            },
-                            {
-                              "$type": "SpellComponent",
-                              "value": "SOMATIC"
-                            }
-                          ]
-                        },
-                        "description": {
-                          "$type": "str",
-                          "value": "Make a ranged spell attack that deals cold damage and slows the target."
-                        },
-                        "concentration": {
-                          "$type": "bool",
-                          "value": false
-                        },
-                        "ritual": {
-                          "$type": "bool",
-                          "value": false
-                        }
-                      }
-                    },
-                    {
-                      "$type": "SpellEntry",
-                      "fields": {
-                        "id": {
-                          "$type": "str",
-                          "value": "protectionFromEvilAndGood"
-                        },
-                        "name": {
-                          "$type": "str",
-                          "value": "Protection from Evil and Good"
-                        },
-                        "source": {
-                          "$type": "str",
-                          "value": "Wizard"
-                        },
-                        "level": {
-                          "$type": "int",
-                          "value": 1
-                        },
-                        "school": {
-                          "$type": "SpellSchool",
-                          "value": "ABJURATION"
-                        },
-                        "castingAbility": {
-                          "$type": "AbilityType",
-                          "value": "INTELLIGENCE"
-                        },
-                        "castingTime": {
-                          "$type": "str",
-                          "value": "1 action"
-                        },
-                        "range": {
-                          "$type": "str",
-                          "value": "Touch"
-                        },
-                        "duration": {
-                          "$type": "str",
-                          "value": "Up to 10 minutes"
-                        },
-                        "components": {
-                          "$type": "list",
-                          "items": [
-                            {
-                              "$type": "SpellComponent",
-                              "value": "VERBAL"
-                            },
-                            {
-                              "$type": "SpellComponent",
-                              "value": "SOMATIC"
-                            },
-                            {
-                              "$type": "SpellComponent",
-                              "value": "MATERIAL"
-                            }
-                          ]
-                        },
-                        "description": {
-                          "$type": "str",
-                          "value": "Protect a willing creature against several supernatural creature types."
-                        },
-                        "concentration": {
-                          "$type": "bool",
-                          "value": true
-                        },
-                        "ritual": {
-                          "$type": "bool",
-                          "value": false
-                        }
-                      }
-                    },
-                    {
-                      "$type": "SpellEntry",
-                      "fields": {
-                        "id": {
-                          "$type": "str",
-                          "value": "shield"
-                        },
-                        "name": {
-                          "$type": "str",
-                          "value": "Shield"
-                        },
-                        "source": {
-                          "$type": "str",
-                          "value": "Wizard"
-                        },
-                        "level": {
-                          "$type": "int",
-                          "value": 1
-                        },
-                        "school": {
-                          "$type": "SpellSchool",
-                          "value": "ABJURATION"
-                        },
-                        "castingAbility": {
-                          "$type": "AbilityType",
-                          "value": "INTELLIGENCE"
-                        },
-                        "castingTime": {
-                          "$type": "str",
-                          "value": "1 reaction"
-                        },
-                        "range": {
-                          "$type": "str",
-                          "value": "Self"
-                        },
-                        "duration": {
-                          "$type": "str",
-                          "value": "1 round"
-                        },
-                        "components": {
-                          "$type": "list",
-                          "items": [
-                            {
-                              "$type": "SpellComponent",
-                              "value": "VERBAL"
-                            },
-                            {
-                              "$type": "SpellComponent",
-                              "value": "SOMATIC"
-                            }
-                          ]
-                        },
-                        "description": {
-                          "$type": "str",
-                          "value": "Gain +5 AC until the start of your next turn, including against the triggering attack."
-                        },
-                        "concentration": {
-                          "$type": "bool",
-                          "value": false
-                        },
-                        "ritual": {
-                          "$type": "bool",
-                          "value": false
-                        }
-                      }
-                    },
-                    {
-                      "$type": "SpellEntry",
-                      "fields": {
-                        "id": {
-                          "$type": "str",
-                          "value": "absorbElements"
-                        },
-                        "name": {
-                          "$type": "str",
-                          "value": "Absorb Elements"
-                        },
-                        "source": {
-                          "$type": "str",
-                          "value": "Wizard"
-                        },
-                        "level": {
-                          "$type": "int",
-                          "value": 1
-                        },
-                        "school": {
-                          "$type": "SpellSchool",
-                          "value": "ABJURATION"
-                        },
-                        "castingAbility": {
-                          "$type": "AbilityType",
-                          "value": "INTELLIGENCE"
-                        },
-                        "castingTime": {
-                          "$type": "str",
-                          "value": "1 reaction"
-                        },
-                        "range": {
-                          "$type": "str",
-                          "value": "Self"
-                        },
-                        "duration": {
-                          "$type": "str",
-                          "value": "1 round"
-                        },
-                        "components": {
-                          "$type": "list",
-                          "items": [
-                            {
-                              "$type": "SpellComponent",
-                              "value": "SOMATIC"
-                            }
-                          ]
-                        },
-                        "description": {
-                          "$type": "str",
-                          "value": "Gain resistance to incoming acid, cold, fire, lightning, or thunder damage and empower your next melee attack."
-                        },
-                        "concentration": {
-                          "$type": "bool",
-                          "value": false
-                        },
-                        "ritual": {
-                          "$type": "bool",
-                          "value": false
-                        }
-                      }
-                    }
-                  ]
-                },
                 "hitPointIncreases": {
                   "$type": "list",
                   "items": [
@@ -514,6 +196,27 @@
                     {
                       "$type": "int",
                       "value": 8
+                    }
+                  ]
+                },
+                "conditions": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "ConditionType",
+                      "value": "STUNNED"
+                    },
+                    {
+                      "$type": "ConditionType",
+                      "value": "UNCONSCIOUS"
+                    },
+                    {
+                      "$type": "ConditionType",
+                      "value": "POISONED"
+                    },
+                    {
+                      "$type": "ConditionType",
+                      "value": "EXHAUSTION"
                     }
                   ]
                 },
@@ -885,6 +588,10 @@
             "image": {
               "$type": "str",
               "value": "ex2.png"
+            },
+            "sheet": {
+              "$type": "PartyMemberSheet",
+              "fields": {}
             }
           }
         },
@@ -902,6 +609,10 @@
             "image": {
               "$type": "str",
               "value": "ex3.png"
+            },
+            "sheet": {
+              "$type": "PartyMemberSheet",
+              "fields": {}
             }
           }
         },

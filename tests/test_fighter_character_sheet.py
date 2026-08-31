@@ -11,6 +11,7 @@ from dnd_board.character_sheet import (
     BattleMasterManeuverType,
     CharacterClassLevel,
     ClassType,
+    ConditionApplicationMode,
     DamageType,
     DiceType,
     EquipmentItem,
@@ -19,6 +20,8 @@ from dnd_board.character_sheet import (
     FightingStyleType,
     PartyMember,
     PartyMemberSheet,
+    RollModifierType,
+    RollResolutionMode,
     TokenKind,
     RuneType,
     SpellComponent,
@@ -600,6 +603,150 @@ def test_battle_master_superiority_dice_scale_by_fighter_level() -> None:
         assert resource.rollActions[0].diceType == expected_die
 
 
+def test_fighter_roll_actions_encode_condition_effects() -> None:
+    battle_master = fighter_sheet(
+        3,
+        subclass=FighterSubclassType.BATTLE_MASTER,
+        maneuvers=[
+            BattleMasterManeuverType.GRAPPLING_STRIKE,
+            BattleMasterManeuverType.MENACING_ATTACK,
+            BattleMasterManeuverType.TRIP_ATTACK,
+        ],
+    )
+    superiority = next(resource for resource in battle_master.resources if resource.id == "superiorityDice")
+    actions = {action.id: action for action in superiority.rollActions or []}
+    arcane_archer = fighter_sheet(
+        3,
+        subclass=FighterSubclassType.ARCANE_ARCHER,
+        arcane_shots=[ArcaneShotType.BEGUILING_ARROW, ArcaneShotType.SHADOW_ARROW],
+    )
+    arcane_actions = {
+        action.id: action
+        for ability in arcane_archer.abilities
+        for action in ability.rollActions or []
+    }
+    rune_knight = fighter_sheet(3, subclass=FighterSubclassType.RUNE_KNIGHT, runes=[RuneType.FIRE_RUNE])
+    rune_actions = {
+        action.id: action
+        for ability in rune_knight.abilities
+        for action in ability.rollActions or []
+    }
+
+    grappling_effect = actions[BattleMasterManeuverType.GRAPPLING_STRIKE].conditionEffects[0]
+    assert grappling_effect.condition.name == "GRAPPLED"
+    assert grappling_effect.mode == ConditionApplicationMode.SOURCE_CHECK
+    assert grappling_effect.sourceCheck == AbilityType.STRENGTH
+    assert grappling_effect.contestChecks == [AbilityType.STRENGTH, AbilityType.DEXTERITY]
+    assert actions[BattleMasterManeuverType.MENACING_ATTACK].conditionEffects[0].condition.name == "FRIGHTENED"
+    assert actions[BattleMasterManeuverType.MENACING_ATTACK].conditionEffects[0].mode == ConditionApplicationMode.TARGET_SAVE
+    assert actions[BattleMasterManeuverType.MENACING_ATTACK].conditionEffects[0].savingThrow == AbilityType.WISDOM
+    assert actions[BattleMasterManeuverType.TRIP_ATTACK].conditionEffects[0].condition.name == "PRONE"
+    assert actions[BattleMasterManeuverType.TRIP_ATTACK].conditionEffects[0].mode == ConditionApplicationMode.TARGET_SAVE
+    assert actions[BattleMasterManeuverType.TRIP_ATTACK].conditionEffects[0].savingThrow == AbilityType.STRENGTH
+    assert arcane_actions[ArcaneShotType.BEGUILING_ARROW].conditionEffects[0].condition.name == "CHARMED"
+    assert arcane_actions[ArcaneShotType.SHADOW_ARROW].conditionEffects[0].condition.name == "BLINDED"
+    assert rune_actions[FighterSubclassRollActionType.FIRE_RUNE_SHACKLES].conditionEffects[0].condition.name == "RESTRAINED"
+
+
+def test_fighter_features_and_abilities_encode_condition_effects() -> None:
+    cavalier_features = {feature.id: feature for feature in fighter_sheet(15, subclass=FighterSubclassType.CAVALIER).features}
+    echo_features = {feature.id: feature for feature in fighter_sheet(7, subclass=FighterSubclassType.ECHO_KNIGHT).features}
+    psi_features = {feature.id: feature for feature in fighter_sheet(7, subclass=FighterSubclassType.PSI_WARRIOR).features}
+    rune_abilities = {
+        ability.id: ability
+        for ability in fighter_sheet(3, subclass=FighterSubclassType.RUNE_KNIGHT, runes=[RuneType.STONE_RUNE]).abilities
+    }
+
+    ferocious_charger = cavalier_features["ferociousCharger"].conditionEffects[0]
+    assert ferocious_charger.condition.name == "PRONE"
+    assert ferocious_charger.mode == ConditionApplicationMode.TARGET_SAVE
+    assert ferocious_charger.savingThrow == AbilityType.STRENGTH
+
+    echo_avatar_effects = {effect.condition.name: effect for effect in echo_features["echoAvatar"].conditionEffects}
+    assert echo_avatar_effects["BLINDED"].mode == ConditionApplicationMode.MANUAL
+    assert echo_avatar_effects["DEAFENED"].mode == ConditionApplicationMode.MANUAL
+
+    telekinetic_thrust = psi_features["telekineticAdept"].conditionEffects[0]
+    assert telekinetic_thrust.condition.name == "PRONE"
+    assert telekinetic_thrust.mode == ConditionApplicationMode.TARGET_SAVE
+    assert telekinetic_thrust.savingThrow == AbilityType.STRENGTH
+
+    stone_rune_effects = {effect.condition.name: effect for effect in rune_abilities["stoneRune"].conditionEffects}
+    assert stone_rune_effects["CHARMED"].mode == ConditionApplicationMode.TARGET_SAVE
+    assert stone_rune_effects["INCAPACITATED"].savingThrow == AbilityType.WISDOM
+
+
+def test_fighter_roll_condition_effects_are_automatable() -> None:
+    automated_modes = {
+        ConditionApplicationMode.TARGET_SAVE,
+        ConditionApplicationMode.SOURCE_CHECK,
+        ConditionApplicationMode.DIRECT,
+    }
+
+    for subclass in FighterSubclassType:
+        sheet = fighter_sheet(20, subclass=subclass)
+        roll_actions = [
+            *(action for resource in sheet.resources for action in resource.rollActions or []),
+            *(action for ability in sheet.abilities for action in ability.rollActions or []),
+            *(action for feature in sheet.features for action in feature.rollActions or []),
+        ]
+
+        for action in roll_actions:
+            assert all(effect.mode in automated_modes for effect in action.conditionEffects or [])
+
+
+def test_battle_master_rally_roll_applies_temporary_hp_with_charisma_modifier() -> None:
+    sheet = fighter_sheet(3, subclass=FighterSubclassType.BATTLE_MASTER, maneuvers=[BattleMasterManeuverType.RALLY])
+    superiority = next(resource for resource in sheet.resources if resource.id == "superiorityDice")
+    rally = superiority.rollActions[0]
+
+    assert rally.id == BattleMasterManeuverType.RALLY
+    assert rally.resolution == RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS
+    assert rally.modifier == RollModifierType.ABILITY_MODIFIER
+    assert rally.modifierAbility == AbilityType.CHARISMA
+
+
+def test_roll_backed_damage_features_resolve_as_damage() -> None:
+    damage_maneuvers = {
+        BattleMasterManeuverType.BRACE,
+        BattleMasterManeuverType.COMMANDERS_STRIKE,
+        BattleMasterManeuverType.DISARMING_ATTACK,
+        BattleMasterManeuverType.DISTRACTING_STRIKE,
+        BattleMasterManeuverType.FEINTING_ATTACK,
+        BattleMasterManeuverType.GOADING_ATTACK,
+        BattleMasterManeuverType.LUNGING_ATTACK,
+        BattleMasterManeuverType.MANEUVERING_ATTACK,
+        BattleMasterManeuverType.MENACING_ATTACK,
+        BattleMasterManeuverType.PUSHING_ATTACK,
+        BattleMasterManeuverType.QUICK_TOSS,
+        BattleMasterManeuverType.RIPOSTE,
+        BattleMasterManeuverType.SWEEPING_ATTACK,
+        BattleMasterManeuverType.TRIP_ATTACK,
+    }
+    battle_master = fighter_sheet(
+        3,
+        subclass=FighterSubclassType.BATTLE_MASTER,
+        maneuvers=list(damage_maneuvers),
+    )
+    battle_master_actions = {
+        action.id: action
+        for resource in battle_master.resources
+        for action in resource.rollActions or []
+    }
+    arcane_archer = fighter_sheet(3, subclass=FighterSubclassType.ARCANE_ARCHER, arcane_shots=[ArcaneShotType.SHADOW_ARROW])
+    brute = fighter_sheet(3, subclass=FighterSubclassType.BRUTE)
+    monster_hunter = fighter_sheet(3, subclass=FighterSubclassType.MONSTER_HUNTER)
+    psi_warrior = fighter_sheet(3, subclass=FighterSubclassType.PSI_WARRIOR)
+    rune_knight = fighter_sheet(3, subclass=FighterSubclassType.RUNE_KNIGHT, runes=[RuneType.FIRE_RUNE])
+
+    assert {action_id for action_id, action in battle_master_actions.items() if action.resolution == RollResolutionMode.APPLY_DAMAGE} == damage_maneuvers
+    assert next(action for ability in arcane_archer.abilities for action in ability.rollActions or [] if action.id == ArcaneShotType.SHADOW_ARROW).resolution == RollResolutionMode.APPLY_DAMAGE
+    assert next(action for ability in brute.abilities if ability.id == "bruteForce" for action in ability.rollActions or []).resolution == RollResolutionMode.APPLY_DAMAGE
+    assert next(action for resource in monster_hunter.resources for action in resource.rollActions or [] if action.id.name == "HUNTERS_DAMAGE").resolution == RollResolutionMode.APPLY_DAMAGE
+    assert next(action for resource in psi_warrior.resources for action in resource.rollActions or [] if action.id == FighterSubclassRollActionType.PSIONIC_STRIKE).resolution == RollResolutionMode.APPLY_DAMAGE
+    assert next(action for ability in rune_knight.abilities for action in ability.rollActions or [] if action.id == FighterSubclassRollActionType.FIRE_RUNE_SHACKLES).resolution == RollResolutionMode.APPLY_DAMAGE
+
+
 def test_simple_fighter_archetypes_expose_level_gated_features() -> None:
     cases = {
         FighterSubclassType.BANNERET: {"rallyingCry", "royalEnvoy", "inspiringSurge", "bulwark"},
@@ -854,6 +1001,7 @@ def fighter_sheet(
     equipment: list[EquipmentItem] | None = None,
     arcane_shots: list[ArcaneShotType] | None = None,
     runes: list[RuneType] | None = None,
+    maneuvers: list[BattleMasterManeuverType] | None = None,
     spells: list[SpellEntry] | None = None,
 ):
     return build_character_sheet(
@@ -876,6 +1024,7 @@ def fighter_sheet(
                         level=level,
                         subclass=subclass,
                         fightingStyle=fighting_style,
+                        maneuvers=maneuvers,
                         arcaneShots=arcane_shots,
                         runes=runes,
                     )

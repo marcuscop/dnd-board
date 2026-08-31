@@ -11,11 +11,16 @@ from dnd_board.rules.feats import general_feat_feature
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
+    ArcaneShotType,
     ArmorCategory,
     AttackAction,
     AttackRangeType,
+    BattleMasterManeuverType,
     CharacterClassLevel,
     ClassType,
+    ConditionApplicationMode,
+    ConditionEffect,
+    ConditionType,
     DamageType,
     DiceType,
     EquipmentItem,
@@ -25,6 +30,11 @@ from dnd_board.character_sheet import (
     PartyManifest,
     PartyMemberConfig,
     PartyMemberSheet,
+    ProficiencyLevel,
+    RollPayload,
+    RollResolutionMode,
+    RollSource,
+    SheetSectionType,
     WeaponCategory,
     WeaponProperty,
     typed_json_from_value,
@@ -1138,7 +1148,23 @@ def test_player_can_roll_ability_check_and_saving_throw(tmp_path, monkeypatch) -
     assert save_roll["total"] == 17
 
 
-def test_player_can_update_owned_sheet_resource() -> None:
+def test_player_can_update_owned_sheet_resource(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "resource-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Resource Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4, fightingStyles=[FightingStyleType.DEFENSE])],
+                hitPointIncreases=[8, 8, 8],
+                abilityScoreImprovements=["strength:2"],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
 
     response = client.post("/api/rooms/resource-test/sheet/player-1/resources/actionSurge?playerKey=player-1&currentUses=0")
@@ -1147,6 +1173,62 @@ def test_player_can_update_owned_sheet_resource() -> None:
 
     assert response.status_code == 200
     assert action_surge["currentUses"] == 0
+
+
+def test_player_can_update_owned_sheet_conditions(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "condition-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Condition Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Other Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    denied = client.post("/api/rooms/condition-test/sheet/player-1/conditions/prone?playerKey=player-2&active=true")
+    applied = client.post("/api/rooms/condition-test/sheet/player-1/conditions/prone?playerKey=player-1&active=true")
+    cleared = client.post("/api/rooms/condition-test/sheet/player-1/conditions/prone?playerKey=player-1&active=false")
+
+    assert denied.status_code == 403
+    assert applied.status_code == 200
+    assert applied.json()["sheet"]["conditions"] == ["prone"]
+    assert cleared.status_code == 200
+    assert cleared.json()["sheet"]["conditions"] == []
+
+
+def test_sheet_conditions_are_loaded_from_party_manifest(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "condition-load-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Condition Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                conditions=[ConditionType.FRIGHTENED, ConditionType.PRONE],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    sheet = client.get("/api/rooms/condition-load-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+
+    assert sheet["conditions"] == ["frightened", "prone"]
 
 
 def test_only_dm_can_level_sheet(tmp_path, monkeypatch) -> None:
@@ -1187,7 +1269,28 @@ def test_dm_cannot_level_up_with_unresolved_level_choices(tmp_path, monkeypatch)
     response = client.post("/api/rooms/level-gate-test/sheet/player-1/level?playerKey=dm&delta=1")
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Resolve pending level choices before leveling up"
+    assert response.json()["detail"] == "Resolve pending level choices before leveling up: Hit Points, Ability Score Improvement, Martial Archetype, Fighting Style"
+
+
+def test_level_one_fighter_must_choose_starting_fighting_style_before_level_up(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "level-one-style-gate-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Level Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/level-one-style-gate-test/sheet/player-1/level?playerKey=dm&delta=1")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Resolve pending level choices before leveling up: Fighting Style"
 
 
 def test_player_can_apply_own_level_choice_but_not_other_sheets(tmp_path, monkeypatch) -> None:
@@ -1754,7 +1857,22 @@ def test_tactical_mind_roll_consumes_second_wind_and_has_own_pending_slot(tmp_pa
     assert {pending_roll["id"] for pending_roll in pending} == {attack.json()["roll"]["id"], roll["id"]}
 
 
-def test_fighter_sheet_exposes_tactical_mind_roll_action() -> None:
+def test_fighter_sheet_exposes_tactical_mind_roll_action(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "tactical-mind-action-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Tactical Fighter",
+            maxHp=28,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=2, fightingStyles=[FightingStyleType.DEFENSE])],
+                hitPointIncreases=[8],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
 
     sheet = client.get("/api/rooms/tactical-mind-action-test/sheet/player-1?playerKey=player-1").json()["sheet"]
@@ -1873,6 +1991,318 @@ def test_damage_roll_resolution_reduces_target_hp(monkeypatch) -> None:
     assert resolution.status_code == 200
     assert resolution.json()["resolution"]["targetHp"]["current"] == max(0, target_starting_hp - damage["total"])
     assert target_sheet["hp"]["current"] == max(0, target_starting_hp - damage["total"])
+
+
+def test_damage_roll_resolution_consumes_temporary_hp_first(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 6)
+    room = server.get_or_create_room("sheet-temp-damage-test")
+    room.temporary_hit_points["player-2"] = 4
+    target_starting_hp = server.token_to_sheet(room.tokens["player-2"], room.id).hp.max
+
+    damage = client.post("/api/rooms/sheet-temp-damage-test/sheet/player-1/rolls/damage?playerKey=player-1").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-temp-damage-test/rolls/{damage['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target_sheet = client.get("/api/rooms/sheet-temp-damage-test/sheet/player-2?playerKey=player-1").json()["sheet"]
+
+    assert resolution.status_code == 200
+    expected_current = target_starting_hp - max(0, damage["total"] - 4)
+    assert resolution.json()["resolution"]["targetHp"] == {"current": expected_current, "max": target_starting_hp, "temporary": 0}
+    assert target_sheet["hp"] == {"current": expected_current, "max": target_starting_hp, "temporary": 0}
+
+
+def test_second_wind_roll_resolution_heals_target(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 5)
+    room = server.get_or_create_room("sheet-healing-test")
+    room.hit_points["player-1"] = 10
+    starting_sheet = server.token_to_sheet(room.tokens["player-1"], room.id)
+
+    roll = client.post("/api/rooms/sheet-healing-test/sheet/player-1/resources/secondWind/rolls/secondWindHeal?playerKey=player-1").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-healing-test/rolls/{roll['id']}/resolve?playerKey=dm&targetSheetId=player-1")
+    healed_sheet = client.get("/api/rooms/sheet-healing-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert roll["resolution"] == "healSelf"
+    assert healed_sheet["hp"]["current"] == min(starting_sheet.hp.max, 10 + roll["total"])
+
+
+def test_reclaim_potential_roll_resolution_adds_temporary_hp(tmp_path, monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 4)
+    write_party_campaign(
+        tmp_path,
+        "sheet-temporary-healing-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Echo",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=14, dexterity=14, constitution=16, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=15, subclass=FighterSubclassType.ECHO_KNIGHT)]
+            ),
+        ),
+    )
+
+    roll = client.post("/api/rooms/sheet-temporary-healing-test/sheet/player-1/resources/reclaimPotential/rolls/reclaimPotential?playerKey=player-1").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-temporary-healing-test/rolls/{roll['id']}/resolve?playerKey=dm&targetSheetId=player-1")
+    sheet = client.get("/api/rooms/sheet-temporary-healing-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert roll["resolution"] == "applyTemporaryHitPoints"
+    assert sheet["hp"] == {"current": 40, "max": 40, "temporary": 11}
+
+
+def test_battle_master_rally_roll_resolution_adds_temporary_hp_to_ally(tmp_path, monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 5)
+    write_party_campaign(
+        tmp_path,
+        "sheet-rally-drop-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Commander",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=14, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=16),
+            sheet=PartyMemberSheet(
+                classes=[
+                    CharacterClassLevel(
+                        name=ClassType.FIGHTER,
+                        level=3,
+                        subclass=FighterSubclassType.BATTLE_MASTER,
+                        maneuvers=[BattleMasterManeuverType.RALLY],
+                    )
+                ],
+            ),
+        ),
+        PartyMemberConfig(id="player-2", name="Ally", maxHp=22, abilityScores=AbilityScores(10, 10, 10, 10, 10, 10), sheet=PartyMemberSheet()),
+    )
+
+    roll = client.post("/api/rooms/sheet-rally-drop-test/sheet/player-1/resources/superiorityDice/rolls/rally?playerKey=player-1").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-rally-drop-test/rolls/{roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    ally = client.get("/api/rooms/sheet-rally-drop-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert roll["resolution"] == "applyTemporaryHitPoints"
+    assert roll["total"] == 8
+    assert roll["modifierBreakdown"] == [{"source": "Charisma", "value": 3, "description": ""}]
+    assert ally["hp"] == {"current": 22, "max": 22, "temporary": 8}
+
+
+def test_condition_roll_resolution_applies_condition_on_failed_save(tmp_path, monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([4, 4, 1])
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    write_party_campaign(
+        tmp_path,
+        "sheet-condition-drop-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Archer",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=10, dexterity=14, constitution=12, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[
+                    CharacterClassLevel(
+                        name=ClassType.FIGHTER,
+                        level=3,
+                        subclass=FighterSubclassType.ARCANE_ARCHER,
+                        arcaneShots=[ArcaneShotType.SHADOW_ARROW],
+                    )
+                ]
+            ),
+        ),
+        PartyMemberConfig(id="player-2", name="Target", maxHp=30, abilityScores=AbilityScores(10, 10, 10, 10, 8, 10), sheet=PartyMemberSheet()),
+    )
+
+    roll = client.post("/api/rooms/sheet-condition-drop-test/sheet/player-1/abilities/shadowArrow/rolls/shadowArrow?playerKey=player-1").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-condition-drop-test/rolls/{roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    sheet = client.get("/api/rooms/sheet-condition-drop-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert roll["conditionEffects"][0]["saveDc"] == 14
+    assert resolution.json()["resolution"]["responseRolls"][0]["label"] == "Wisdom Save"
+    assert resolution.json()["resolution"]["responseRolls"][0]["sourceLabel"] == "Shadow Arrow"
+    assert resolution.json()["resolution"]["targetConditions"] == ["blinded"]
+    assert sheet["conditions"] == ["blinded"]
+    pending = client.get("/api/rooms/sheet-condition-drop-test/sheet?playerKey=dm").json()["pendingRolls"]
+    assert any(response_roll["tokenId"] == "player-2" and response_roll["label"] == "Wisdom Save" for response_roll in pending)
+
+
+def test_condition_roll_resolution_survives_sheet_poll_without_manifest(tmp_path, monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    room = server.get_or_create_room("generated-condition-drop-test")
+    roll = RollPayload(
+        id="test-prone-roll",
+        sheetId="player-1",
+        tokenId="player-1",
+        roller="player-1",
+        source=RollSource(section=SheetSectionType.ABILITIES, sourceId="test-trip", actionId="test-trip"),
+        sourceLabel="Test Trip",
+        resolution=RollResolutionMode.NONE,
+        label="Test Trip",
+        iconUrl=None,
+        dice=[1],
+        diceType=DiceType.D6,
+        die="1d6",
+        modifier=0,
+        modifierBreakdown=[],
+        total=1,
+        createdAt=1,
+        conditionEffects=[
+            ConditionEffect(
+                condition=ConditionType.PRONE,
+                mode=ConditionApplicationMode.TARGET_SAVE,
+                savingThrow=AbilityType.STRENGTH,
+                saveDc=30,
+            )
+        ],
+    )
+    room.pending_rolls[server.roll_queue_key(roll)] = roll
+
+    resolution = client.post("/api/rooms/generated-condition-drop-test/rolls/test-prone-roll/resolve?playerKey=dm&targetSheetId=player-2")
+    sheet = client.get("/api/rooms/generated-condition-drop-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetConditions"] == ["prone"]
+    assert sheet["conditions"] == ["prone"]
+
+
+def test_pushing_attack_triggers_visible_strength_save_without_condition(tmp_path, monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([4, 1])
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    write_party_campaign(
+        tmp_path,
+        "sheet-pushing-drop-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Pusher",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=18, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[
+                    CharacterClassLevel(
+                        name=ClassType.FIGHTER,
+                        level=3,
+                        subclass=FighterSubclassType.BATTLE_MASTER,
+                        maneuvers=[BattleMasterManeuverType.PUSHING_ATTACK],
+                    )
+                ],
+            ),
+        ),
+        PartyMemberConfig(id="player-2", name="Target", maxHp=30, abilityScores=AbilityScores(8, 10, 10, 10, 10, 10), sheet=PartyMemberSheet()),
+    )
+
+    roll = client.post("/api/rooms/sheet-pushing-drop-test/sheet/player-1/resources/superiorityDice/rolls/pushingAttack?playerKey=player-1").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-pushing-drop-test/rolls/{roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    pending = client.get("/api/rooms/sheet-pushing-drop-test/sheet?playerKey=dm").json()["pendingRolls"]
+
+    assert resolution.status_code == 200
+    assert roll["conditionEffects"][0]["savingThrow"] == "strength"
+    assert "Target fails DC 14 Strength save" in resolution.json()["resolution"]["outcome"]
+    assert resolution.json()["resolution"]["targetConditions"] == []
+    assert resolution.json()["resolution"]["responseRolls"][0]["label"] == "Strength Save"
+    assert resolution.json()["resolution"]["responseRolls"][0]["sourceLabel"] == "Pushing Attack"
+    assert any(response_roll["tokenId"] == "player-2" and response_roll["label"] == "Strength Save" for response_roll in pending)
+
+
+def test_grappling_strike_resolves_contested_check_and_applies_grappled(tmp_path, monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([3, 10, 4])
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    write_party_campaign(
+        tmp_path,
+        "sheet-grapple-drop-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Grappler",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=18, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                skills={"athletics": ProficiencyLevel.PROFICIENT},
+                classes=[
+                    CharacterClassLevel(
+                        name=ClassType.FIGHTER,
+                        level=3,
+                        subclass=FighterSubclassType.BATTLE_MASTER,
+                        maneuvers=[BattleMasterManeuverType.GRAPPLING_STRIKE],
+                    )
+                ],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Escaper",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(skills={"acrobatics": ProficiencyLevel.PROFICIENT}),
+        ),
+    )
+
+    roll = client.post("/api/rooms/sheet-grapple-drop-test/sheet/player-1/resources/superiorityDice/rolls/grapplingStrike?playerKey=player-1").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-grapple-drop-test/rolls/{roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    sheet = client.get("/api/rooms/sheet-grapple-drop-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert roll["conditionEffects"][0]["mode"] == "sourceCheck"
+    assert {response_roll["label"] for response_roll in resolution.json()["resolution"]["responseRolls"]} == {
+        "Strength (Athletics)",
+        "Dexterity (Acrobatics)",
+    }
+    assert "Grappler wins Strength (Athletics)" in resolution.json()["resolution"]["outcome"]
+    assert "Escaper Dexterity (Acrobatics)" in resolution.json()["resolution"]["outcome"]
+    assert resolution.json()["resolution"]["targetConditions"] == ["grappled"]
+    assert sheet["conditions"] == ["grappled"]
+
+
+def test_grappling_strike_does_not_apply_grappled_when_target_wins_contest(tmp_path, monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([1, 2, 18])
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    write_party_campaign(
+        tmp_path,
+        "sheet-grapple-fail-drop-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Grappler",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=14, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[
+                    CharacterClassLevel(
+                        name=ClassType.FIGHTER,
+                        level=3,
+                        subclass=FighterSubclassType.BATTLE_MASTER,
+                        maneuvers=[BattleMasterManeuverType.GRAPPLING_STRIKE],
+                    )
+                ],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Escaper",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=18, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(skills={"acrobatics": ProficiencyLevel.PROFICIENT}),
+        ),
+    )
+
+    roll = client.post("/api/rooms/sheet-grapple-fail-drop-test/sheet/player-1/resources/superiorityDice/rolls/grapplingStrike?playerKey=player-1").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-grapple-fail-drop-test/rolls/{roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    sheet = client.get("/api/rooms/sheet-grapple-fail-drop-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert "no Grappled" in resolution.json()["resolution"]["outcome"]
+    assert resolution.json()["resolution"]["targetConditions"] == []
+    assert sheet["conditions"] == []
 
 
 def test_sheet_endpoint_uses_party_manifest_stats(tmp_path, monkeypatch) -> None:

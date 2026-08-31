@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from dnd_board.character_sheet import (
+    AbilityType,
     BattleMasterManeuverType,
     CharacterClassLevel,
     ClassType,
@@ -11,8 +12,10 @@ from dnd_board.character_sheet import (
     FightingStyleType,
     ResourceTracker,
     RestType,
+    RollModifierType,
     RollAction,
     RollResolutionMode,
+    ConditionEffect,
     TimeEconomy,
     enum_key,
     enum_label,
@@ -42,6 +45,10 @@ class SuperiorityActionDefinition:
     activation: TimeEconomy
     source: Enum
     description: str
+    resolution: RollResolutionMode = RollResolutionMode.NONE
+    modifier: RollModifierType = RollModifierType.NONE
+    modifierAbility: AbilityType | None = None
+    conditionEffects: tuple[ConditionEffect, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -83,11 +90,14 @@ def combat_superiority_resource(classes: list[CharacterClassLevel]) -> ResourceT
                 name=definition.name,
                 diceCount=1,
                 diceType=dice_type,
-                resolution=RollResolutionMode.NONE,
+                resolution=definition.resolution,
+                modifier=definition.modifier,
+                modifierAbility=definition.modifierAbility,
                 consumesResource=BattleMasterResourceType.SUPERIORITY_DICE,
                 description=definition.description,
                 activation=definition.activation,
                 source=enum_label(definition.source),
+                conditionEffects=list(definition.conditionEffects) or None,
             )
             for definition in superiority_action_definitions(classes)
         ],
@@ -166,6 +176,10 @@ def superiority_action_definitions(classes: list[CharacterClassLevel]) -> list[S
                 activation=definition.activation,
                 source=FighterSubclassType.BATTLE_MASTER,
                 description=definition.description,
+                resolution=definition.resolution,
+                modifier=definition.modifier,
+                modifierAbility=definition.modifierAbility,
+                conditionEffects=definition.conditionEffects,
             )
             for definition in (BATTLE_MASTER_MANEUVERS[maneuver] for maneuver in selected_battle_master_maneuvers(classes))
         )
@@ -210,6 +224,7 @@ def monster_hunter_superiority_actions() -> list[SuperiorityActionDefinition]:
             activation=TimeEconomy.SPECIAL,
             source=FighterSubclassType.MONSTER_HUNTER,
             description="When you damage a creature with a weapon attack, expend one superiority die and add it to the damage roll. If the attack causes a concentration save, the target has Disadvantage on that save.",
+            resolution=RollResolutionMode.APPLY_DAMAGE,
         ),
         SuperiorityActionDefinition(
             actionType=MonsterHunterSuperiorityActionType.HUNTERS_WILL,
