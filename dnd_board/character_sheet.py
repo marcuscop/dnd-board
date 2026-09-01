@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum, auto
 from time import time_ns
-from types import UnionType
+from types import SimpleNamespace, UnionType
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
 
@@ -74,6 +74,16 @@ def api_field(method: Any) -> property:
     return property(method)
 
 
+def enum_key(member: Enum) -> str:
+    return UIStringFormatter.lower_camel(member.name)
+
+
+def enum_label(member: Enum) -> str:
+    if isinstance(member.value, str):
+        return member.value
+    return UIStringFormatter.clean_name(member.name)
+
+
 class TypedJsonPrimitiveType(Enum):
     NONE = "None"
     STRING = "str"
@@ -91,6 +101,27 @@ class AbilityType(Enum):
     INTELLIGENCE = auto()
     WISDOM = auto()
     CHARISMA = auto()
+
+
+class SkillType(Enum):
+    ATHLETICS = auto()
+    ACROBATICS = auto()
+    SLEIGHT_OF_HAND = auto()
+    STEALTH = auto()
+    ARCANA = auto()
+    HISTORY = auto()
+    INVESTIGATION = auto()
+    NATURE = auto()
+    RELIGION = auto()
+    ANIMAL_HANDLING = auto()
+    INSIGHT = auto()
+    MEDICINE = auto()
+    PERCEPTION = auto()
+    SURVIVAL = auto()
+    DECEPTION = auto()
+    INTIMIDATION = auto()
+    PERFORMANCE = auto()
+    PERSUASION = auto()
 
 
 class DamageType(Enum):
@@ -837,24 +868,24 @@ ABILITY_NAMES = [
     AbilityType.CHARISMA,
 ]
 SKILL_ABILITIES = {
-    "athletics": AbilityType.STRENGTH,
-    "acrobatics": AbilityType.DEXTERITY,
-    "sleightOfHand": AbilityType.DEXTERITY,
-    "stealth": AbilityType.DEXTERITY,
-    "arcana": AbilityType.INTELLIGENCE,
-    "history": AbilityType.INTELLIGENCE,
-    "investigation": AbilityType.INTELLIGENCE,
-    "nature": AbilityType.INTELLIGENCE,
-    "religion": AbilityType.INTELLIGENCE,
-    "animalHandling": AbilityType.WISDOM,
-    "insight": AbilityType.WISDOM,
-    "medicine": AbilityType.WISDOM,
-    "perception": AbilityType.WISDOM,
-    "survival": AbilityType.WISDOM,
-    "deception": AbilityType.CHARISMA,
-    "intimidation": AbilityType.CHARISMA,
-    "performance": AbilityType.CHARISMA,
-    "persuasion": AbilityType.CHARISMA,
+    enum_key(SkillType.ATHLETICS): AbilityType.STRENGTH,
+    enum_key(SkillType.ACROBATICS): AbilityType.DEXTERITY,
+    enum_key(SkillType.SLEIGHT_OF_HAND): AbilityType.DEXTERITY,
+    enum_key(SkillType.STEALTH): AbilityType.DEXTERITY,
+    enum_key(SkillType.ARCANA): AbilityType.INTELLIGENCE,
+    enum_key(SkillType.HISTORY): AbilityType.INTELLIGENCE,
+    enum_key(SkillType.INVESTIGATION): AbilityType.INTELLIGENCE,
+    enum_key(SkillType.NATURE): AbilityType.INTELLIGENCE,
+    enum_key(SkillType.RELIGION): AbilityType.INTELLIGENCE,
+    enum_key(SkillType.ANIMAL_HANDLING): AbilityType.WISDOM,
+    enum_key(SkillType.INSIGHT): AbilityType.WISDOM,
+    enum_key(SkillType.MEDICINE): AbilityType.WISDOM,
+    enum_key(SkillType.PERCEPTION): AbilityType.WISDOM,
+    enum_key(SkillType.SURVIVAL): AbilityType.WISDOM,
+    enum_key(SkillType.DECEPTION): AbilityType.CHARISMA,
+    enum_key(SkillType.INTIMIDATION): AbilityType.CHARISMA,
+    enum_key(SkillType.PERFORMANCE): AbilityType.CHARISMA,
+    enum_key(SkillType.PERSUASION): AbilityType.CHARISMA,
 }
 
 TYPE_KEY = "$type"
@@ -895,7 +926,18 @@ def build_character_sheet(
     configured_feats = sheet_config.feats if sheet_config and sheet_config.feats else []
     hit_point_increases = sheet_config.hitPointIncreases if sheet_config and sheet_config.hitPointIncreases else []
     ability_score_improvements = sheet_config.abilityScoreImprovements if sheet_config and sheet_config.abilityScoreImprovements else []
-    pending_choices = default_progression_choices(classes, configured_spells, hit_point_increases, ability_score_improvements, configured_feats)
+    feat_eligibility_sheet = SimpleNamespace(
+        race=sheet_config.race if sheet_config and sheet_config.race else "",
+        background=sheet_config.background if sheet_config and sheet_config.background else "",
+        abilityScores=ability_scores,
+        classes=classes,
+        proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
+        feats=configured_feats,
+        features=[*features, *(sheet_config.features if sheet_config and sheet_config.features else [])],
+        abilities=abilities,
+        spells=configured_spells,
+    )
+    pending_choices = default_progression_choices(classes, configured_spells, hit_point_increases, ability_score_improvements, configured_feats, feat_eligibility_sheet)
     spells = [*default_spells(classes), *default_spellcasting_spells(classes, configured_spells)]
     if sheet_config:
         features = [*(sheet_config.traits or []), *features, *(sheet_config.features or []), *(sheet_config.feats or [])]
@@ -1342,7 +1384,8 @@ def build_skills(ability_modifiers: dict[str, int], skill_proficiencies: dict[st
 
 def build_passive_checks(ability_modifiers: dict[str, int], skill_proficiencies: dict[str, ProficiencyLevel], proficiency_bonus: int) -> dict[str, int]:
     skills = build_skills(ability_modifiers, skill_proficiencies, proficiency_bonus)
-    return {skill.name: skill.passive for skill in skills if skill.name in {"perception", "investigation", "insight"}}
+    passive_skill_keys = {enum_key(SkillType.PERCEPTION), enum_key(SkillType.INVESTIGATION), enum_key(SkillType.INSIGHT)}
+    return {skill.name: skill.passive for skill in skills if skill.name in passive_skill_keys}
 
 
 def proficiency_multiplier(level: ProficiencyLevel | None) -> int:
@@ -1492,10 +1535,11 @@ def default_progression_choices(
     hit_point_increases: list[int],
     ability_score_improvements: list[str],
     feats: list[SheetFeature] | None = None,
+    feat_eligibility_sheet=None,
 ) -> list[ProgressionChoice]:
     from dnd_board.rules.progression import progression_choices
 
-    return progression_choices(classes, spells, hit_point_increases, ability_score_improvements, feats)
+    return progression_choices(classes, spells, hit_point_increases, ability_score_improvements, feats, feat_eligibility_sheet)
 
 
 def default_armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:
@@ -1719,6 +1763,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             RollResolutionMode,
             ResourceTracker,
             RuneType,
+            SkillType,
             SpellAreaShape,
             SpellCastingTime,
             SpellComponent,
@@ -1871,16 +1916,6 @@ def enum_value(enum_type: type[Enum], value: Any) -> Any:
         if normalized in {member.name, enum_key(member).upper(), enum_label(member).replace(" ", "_").upper(), normalized_member_value}:
             return member
     return None
-
-
-def enum_key(member: Enum) -> str:
-    return UIStringFormatter.lower_camel(member.name)
-
-
-def enum_label(member: Enum) -> str:
-    if isinstance(member.value, str):
-        return member.value
-    return UIStringFormatter.clean_name(member.name)
 
 
 def damage_die_formula(attack: AttackAction) -> str:

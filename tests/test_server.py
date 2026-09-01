@@ -13,6 +13,7 @@ from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, RogueSubclassAttackType, RogueSubclassRollActionType, arcane_trickster_catalog_spell
 from dnd_board.rules.classes.rogue.base import RogueSubclassType
 from dnd_board.rules.feats import general_feat_feature
+from dnd_board.rules.sources import RuleSource, rule_source_label
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -44,11 +45,13 @@ from dnd_board.character_sheet import (
     RollSource,
     RestType,
     SheetSectionType,
+    SkillType,
     SpellSource,
     TimeEconomy,
     WeaponCategory,
     WeaponProperty,
     enum_key,
+    enum_label,
     typed_json_from_value,
 )
 
@@ -105,10 +108,10 @@ def test_room_starts_with_four_owned_player_characters() -> None:
         state = websocket.receive_json()
 
     assert state["type"] == "room_state"
-    assert [token["id"] for token in state["tokens"]] == ["player-1", "player-2", "player-3", "player-4"]
-    assert [token["owner"] for token in state["tokens"]] == ["player-1", "player-2", "player-3", "player-4"]
+    assert [token["id"] for token in state["tokens"][:4]] == ["player-1", "player-2", "player-3", "player-4"]
+    assert [token["owner"] for token in state["tokens"][:4]] == ["player-1", "player-2", "player-3", "player-4"]
     assert all(token["kind"] == "character" for token in state["tokens"])
-    assert [token["avatarUrl"] for token in state["tokens"]] == [
+    assert [token["avatarUrl"] for token in state["tokens"][:4]] == [
         "/campaigns/test-campaign/party/ex1.png",
         "/campaigns/test-campaign/party/ex2.png",
         "/campaigns/test-campaign/party/ex3.png",
@@ -1594,7 +1597,7 @@ def test_player_can_choose_feat_for_fighter_ability_score_improvement(tmp_path, 
 
     assert response.status_code == 200
     assert feats["alert"]["name"] == "Alert"
-    assert feats["alert"]["source"] == "Player's Handbook"
+    assert feats["alert"]["source"] == rule_source_label(RuleSource.PLAYERS_HANDBOOK_2024)
     assert "fighterAbilityScoreImprovement" not in {choice["id"] for choice in sheet["pendingChoices"]}
 
 
@@ -2698,7 +2701,7 @@ def test_grappling_strike_resolves_contested_check_and_applies_grappled(tmp_path
             maxHp=40,
             abilityScores=AbilityScores(strength=18, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
             sheet=PartyMemberSheet(
-                skills={"athletics": ProficiencyLevel.PROFICIENT},
+                skills={enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT},
                 classes=[
                     CharacterClassLevel(
                         name=ClassType.FIGHTER,
@@ -2714,7 +2717,7 @@ def test_grappling_strike_resolves_contested_check_and_applies_grappled(tmp_path
             name="Escaper",
             maxHp=30,
             abilityScores=AbilityScores(strength=10, dexterity=16, constitution=10, intelligence=10, wisdom=10, charisma=10),
-            sheet=PartyMemberSheet(skills={"acrobatics": ProficiencyLevel.PROFICIENT}),
+            sheet=PartyMemberSheet(skills={enum_key(SkillType.ACROBATICS): ProficiencyLevel.PROFICIENT}),
         ),
     )
 
@@ -2724,12 +2727,14 @@ def test_grappling_strike_resolves_contested_check_and_applies_grappled(tmp_path
 
     assert resolution.status_code == 200
     assert roll["conditionEffects"][0]["mode"] == "sourceCheck"
+    strength_athletics = f"{enum_label(AbilityType.STRENGTH)} ({enum_label(SkillType.ATHLETICS)})"
+    dexterity_acrobatics = f"{enum_label(AbilityType.DEXTERITY)} ({enum_label(SkillType.ACROBATICS)})"
     assert {response_roll["label"] for response_roll in resolution.json()["resolution"]["responseRolls"]} == {
-        "Strength (Athletics)",
-        "Dexterity (Acrobatics)",
+        strength_athletics,
+        dexterity_acrobatics,
     }
-    assert "Grappler wins Strength (Athletics)" in resolution.json()["resolution"]["outcome"]
-    assert "Escaper Dexterity (Acrobatics)" in resolution.json()["resolution"]["outcome"]
+    assert f"Grappler wins {strength_athletics}" in resolution.json()["resolution"]["outcome"]
+    assert f"Escaper {dexterity_acrobatics}" in resolution.json()["resolution"]["outcome"]
     assert resolution.json()["resolution"]["targetConditions"] == ["grappled"]
     assert sheet["conditions"] == ["grappled"]
 
@@ -2763,7 +2768,7 @@ def test_grappling_strike_does_not_apply_grappled_when_target_wins_contest(tmp_p
             name="Escaper",
             maxHp=30,
             abilityScores=AbilityScores(strength=10, dexterity=18, constitution=10, intelligence=10, wisdom=10, charisma=10),
-            sheet=PartyMemberSheet(skills={"acrobatics": ProficiencyLevel.PROFICIENT}),
+            sheet=PartyMemberSheet(skills={enum_key(SkillType.ACROBATICS): ProficiencyLevel.PROFICIENT}),
         ),
     )
 

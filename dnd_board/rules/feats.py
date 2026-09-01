@@ -30,6 +30,7 @@ from dnd_board.character_sheet import (
     enum_label,
 )
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
+from dnd_board.rules.species import SpeciesType
 
 
 class FeatCategory(Enum):
@@ -46,6 +47,7 @@ class GeneralFeatType(Enum):
     CHARGER = auto()
     CHEF = auto()
     CROSSBOW_EXPERT = auto()
+    CRAFTER = auto()
     CRUSHER = auto()
     DEFENSIVE_DUELIST = auto()
     DRAGON_FEAR = auto()
@@ -90,6 +92,7 @@ class GeneralFeatType(Enum):
     MOBILE = auto()
     MODERATELY_ARMORED = auto()
     MOUNTED_COMBATANT = auto()
+    MUSICIAN = auto()
     OBSERVANT = auto()
     ORCISH_FURY = auto()
     PIERCER = auto()
@@ -153,6 +156,63 @@ class FeatDamageDiceRerollScope(Enum):
     TWO_HANDED_OR_VERSATILE_MELEE_WEAPON_ATTACK = auto()
 
 
+class FeatPrerequisiteType(Enum):
+    ABILITY_SCORE = auto()
+    ARMOR_PROFICIENCY = auto()
+    BACKGROUND = auto()
+    CHARACTER_LEVEL = auto()
+    CHARACTER_FEATURE = auto()
+    FEAT = auto()
+    SPECIES = auto()
+    SPECIES_SIZE = auto()
+    SPELLCASTING = auto()
+    WEAPON_PROFICIENCY = auto()
+
+
+class FeatCharacterFeatureType(Enum):
+    FIGHTING_STYLE = "Fighting Style Feature"
+    PACT_MAGIC = "Pact Magic Feature"
+    RUNE_CARVER = "Rune Carver Background"
+    SPELLCASTING = "Spellcasting Feature"
+
+
+class FeatSpeciesSize(Enum):
+    SMALL = "Small"
+
+
+class WeaponProficiencyType(Enum):
+    MARTIAL = "Martial Weapon"
+
+
+class GiantStrikeType(Enum):
+    CLOUD_STRIKE = "Cloud Strike"
+    FIRE_STRIKE = "Fire Strike"
+    FROST_STRIKE = "Frost Strike"
+    HILL_STRIKE = "Hill Strike"
+    STONE_STRIKE = "Stone Strike"
+    STORM_STRIKE = "Storm Strike"
+
+
+class BackgroundPrerequisiteType(Enum):
+    GIANT_FOUNDLING = "Giant Foundling"
+
+
+@dataclass(frozen=True)
+class FeatPrerequisite:
+    prerequisiteType: FeatPrerequisiteType
+    minimumLevel: int = 0
+    minimumScore: int = 0
+    abilities: tuple[AbilityType, ...] = ()
+    species: tuple[SpeciesType, ...] = ()
+    speciesSizes: tuple[FeatSpeciesSize, ...] = ()
+    armorCategories: tuple[ArmorCategory, ...] = ()
+    weaponProficiencies: tuple[WeaponProficiencyType, ...] = ()
+    features: tuple[FeatCharacterFeatureType, ...] = ()
+    feats: tuple[GeneralFeatType, ...] = ()
+    giantStrikes: tuple[GiantStrikeType, ...] = ()
+    backgrounds: tuple[BackgroundPrerequisiteType, ...] = ()
+
+
 @dataclass(frozen=True)
 class FeatEffect:
     effectType: FeatEffectType
@@ -204,100 +264,150 @@ def fighting_style_source(style: FightingStyleType) -> RuleSource:
 @dataclass(frozen=True)
 class GeneralFeatDefinition:
     featType: GeneralFeatType
-    source: str
-    prerequisite: str
+    source: RuleSource
+    prerequisites: tuple[FeatPrerequisite, ...]
     description: str
     repeatable: bool = False
 
 
-def general_feat(feat_type: GeneralFeatType, source: str, description: str, prerequisite: str = "-", repeatable: bool = False) -> GeneralFeatDefinition:
-    return GeneralFeatDefinition(featType=feat_type, source=source, prerequisite=prerequisite, description=description, repeatable=repeatable)
+def general_feat(feat_type: GeneralFeatType, source: RuleSource, description: str, prerequisites: tuple[FeatPrerequisite, ...] = (), repeatable: bool = False) -> GeneralFeatDefinition:
+    return GeneralFeatDefinition(featType=feat_type, source=source, prerequisites=prerequisites, description=description, repeatable=repeatable)
+
+
+def level_prerequisite(minimum_level: int) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.CHARACTER_LEVEL, minimumLevel=minimum_level)
+
+
+def ability_prerequisite(minimum_score: int, *abilities: AbilityType) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.ABILITY_SCORE, minimumScore=minimum_score, abilities=abilities)
+
+
+def species_prerequisite(*species: SpeciesType) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.SPECIES, species=species)
+
+
+def small_species_prerequisite() -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.SPECIES_SIZE, speciesSizes=(FeatSpeciesSize.SMALL,))
+
+
+def species_or_size_prerequisite(*species: SpeciesType, sizes: tuple[FeatSpeciesSize, ...]) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.SPECIES, species=species, speciesSizes=sizes)
+
+
+def armor_prerequisite(*armor_categories: ArmorCategory) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.ARMOR_PROFICIENCY, armorCategories=armor_categories)
+
+
+def weapon_prerequisite(*weapon_proficiencies: WeaponProficiencyType) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=weapon_proficiencies)
+
+
+def feature_prerequisite(*features: FeatCharacterFeatureType) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.CHARACTER_FEATURE, features=features)
+
+
+def spellcasting_prerequisite() -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.SPELLCASTING, features=(FeatCharacterFeatureType.SPELLCASTING, FeatCharacterFeatureType.PACT_MAGIC))
+
+
+def feat_prerequisite(feat_type: GeneralFeatType, *giant_strikes: GiantStrikeType) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.FEAT, feats=(feat_type,), giantStrikes=giant_strikes)
+
+
+def background_prerequisite(*backgrounds: BackgroundPrerequisiteType) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.BACKGROUND, backgrounds=backgrounds)
+
+
+def weapon_or_background_prerequisite(weapon_proficiency: WeaponProficiencyType, background: BackgroundPrerequisiteType) -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=(weapon_proficiency,), backgrounds=(background,))
 
 
 GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
-    GeneralFeatType.ACTOR: general_feat(GeneralFeatType.ACTOR, "Player's Handbook", "+1 Charisma; improve deception, performance, and mimicry."),
-    GeneralFeatType.ALERT: general_feat(GeneralFeatType.ALERT, "Player's Handbook", "+5 initiative, cannot be surprised, and unseen attackers do not gain advantage."),
-    GeneralFeatType.ARTIFICER_INITIATE: general_feat(GeneralFeatType.ARTIFICER_INITIATE, "Tasha's Cauldron of Everything", "Learn artificer magic and one artisan tool proficiency."),
-    GeneralFeatType.ATHLETE: general_feat(GeneralFeatType.ATHLETE, "Player's Handbook", "+1 Strength or Dexterity; improve climbing, standing, and jumping."),
-    GeneralFeatType.BOUNTIFUL_LUCK: general_feat(GeneralFeatType.BOUNTIFUL_LUCK, "Xanathar's Guide to Everything", "Let a nearby ally reroll a 1 on a d20.", "Halfling"),
-    GeneralFeatType.CHARGER: general_feat(GeneralFeatType.CHARGER, "Player's Handbook", "Dash into a melee attack with an added bonus after moving far enough."),
-    GeneralFeatType.CHEF: general_feat(GeneralFeatType.CHEF, "Tasha's Cauldron of Everything", "+1 Constitution or Wisdom; gain cook's utensils and prepare restorative food."),
-    GeneralFeatType.CROSSBOW_EXPERT: general_feat(GeneralFeatType.CROSSBOW_EXPERT, "Player's Handbook", "Improve crossbow handling and close-range ranged attacks."),
-    GeneralFeatType.CRUSHER: general_feat(GeneralFeatType.CRUSHER, "Tasha's Cauldron of Everything", "+1 Strength or Constitution; add control and critical riders to bludgeoning hits."),
-    GeneralFeatType.DEFENSIVE_DUELIST: general_feat(GeneralFeatType.DEFENSIVE_DUELIST, "Player's Handbook", "Use a reaction with a finesse weapon to add proficiency bonus to AC.", "Dexterity 13 or higher"),
-    GeneralFeatType.DRAGON_FEAR: general_feat(GeneralFeatType.DRAGON_FEAR, "Xanathar's Guide to Everything", "+1 Strength, Constitution, or Charisma; turn Breath Weapon into fear.", "Dragonborn"),
-    GeneralFeatType.DRAGON_HIDE: general_feat(GeneralFeatType.DRAGON_HIDE, "Xanathar's Guide to Everything", "+1 Strength, Constitution, or Charisma; gain natural armor and claws.", "Dragonborn"),
-    GeneralFeatType.DROW_HIGH_MAGIC: general_feat(GeneralFeatType.DROW_HIGH_MAGIC, "Xanathar's Guide to Everything", "Gain drow innate spells.", "Elf (drow)"),
-    GeneralFeatType.DUAL_WIELDER: general_feat(GeneralFeatType.DUAL_WIELDER, "Player's Handbook", "Improve AC, weapon options, and drawing weapons while dual wielding."),
-    GeneralFeatType.DUNGEON_DELVER: general_feat(GeneralFeatType.DUNGEON_DELVER, "Player's Handbook", "Improve trap detection, trap saves, and dungeon exploration."),
-    GeneralFeatType.DURABLE: general_feat(GeneralFeatType.DURABLE, "Player's Handbook", "+1 Constitution; improve healing from Hit Dice."),
-    GeneralFeatType.DWARF_FORTITUDE: general_feat(GeneralFeatType.DWARF_FORTITUDE, "Xanathar's Guide to Everything", "+1 Constitution; spend a Hit Die when taking the Dodge action.", "Dwarf"),
-    GeneralFeatType.ELDRITCH_ADEPT: general_feat(GeneralFeatType.ELDRITCH_ADEPT, "Tasha's Cauldron of Everything", "Learn one Eldritch Invocation.", "Spellcasting or Pact Magic feature"),
-    GeneralFeatType.ELEMENTAL_ADEPT: general_feat(GeneralFeatType.ELEMENTAL_ADEPT, "Player's Handbook", "Choose a damage type for spells to ignore resistance and improve low damage dice.", "The ability to cast at least one spell"),
-    GeneralFeatType.ELVEN_ACCURACY: general_feat(GeneralFeatType.ELVEN_ACCURACY, "Xanathar's Guide to Everything", "+1 Dexterity, Intelligence, Wisdom, or Charisma; improve advantaged attack rolls.", "Elf or half-elf"),
-    GeneralFeatType.EMBER_OF_THE_FIRE_GIANT: general_feat(GeneralFeatType.EMBER_OF_THE_FIRE_GIANT, "Glory of the Giants", "+1 Strength, Constitution, or Wisdom; fire resistance and fire-blind burst.", "4th level, Strike of the Giants (Fire Strike) feat"),
-    GeneralFeatType.FADE_AWAY: general_feat(GeneralFeatType.FADE_AWAY, "Xanathar's Guide to Everything", "+1 Dexterity or Intelligence; turn invisible after taking damage.", "Gnome"),
-    GeneralFeatType.FEY_TELEPORTATION: general_feat(GeneralFeatType.FEY_TELEPORTATION, "Xanathar's Guide to Everything", "+1 Intelligence or Charisma; gain Sylvan and misty step.", "Elf (high)"),
-    GeneralFeatType.FEY_TOUCHED: general_feat(GeneralFeatType.FEY_TOUCHED, "Tasha's Cauldron of Everything", "+1 Intelligence, Wisdom, or Charisma; learn misty step and another spell."),
-    GeneralFeatType.FIGHTING_INITIATE: general_feat(GeneralFeatType.FIGHTING_INITIATE, "Tasha's Cauldron of Everything", "Learn one Fighting Style option from the fighter class.", "Proficiency with a martial weapon"),
-    GeneralFeatType.FLAMES_OF_PHLEGETHOS: general_feat(GeneralFeatType.FLAMES_OF_PHLEGETHOS, "Xanathar's Guide to Everything", "+1 Intelligence or Charisma; improve fire spells and fiery retaliation.", "Tiefling"),
-    GeneralFeatType.FURY_OF_THE_FROST_GIANT: general_feat(GeneralFeatType.FURY_OF_THE_FROST_GIANT, "Glory of the Giants", "+1 Strength, Constitution, or Wisdom; cold resistance and frost retaliation.", "4th level, Strike of the Giants (Frost Strike) feat"),
-    GeneralFeatType.GIFT_OF_THE_CHROMATIC_DRAGON: general_feat(GeneralFeatType.GIFT_OF_THE_CHROMATIC_DRAGON, "Fizban's Treasury of Dragons", "Add elemental weapon damage and gain reactive elemental resistance."),
-    GeneralFeatType.GIFT_OF_THE_GEM_DRAGON: general_feat(GeneralFeatType.GIFT_OF_THE_GEM_DRAGON, "Fizban's Treasury of Dragons", "+1 Intelligence, Wisdom, or Charisma; telekinetic retaliation.", "-"),
-    GeneralFeatType.GIFT_OF_THE_METALLIC_DRAGON: general_feat(GeneralFeatType.GIFT_OF_THE_METALLIC_DRAGON, "Fizban's Treasury of Dragons", "Learn cure wounds and protect with a reactive AC bonus."),
-    GeneralFeatType.GRAPPLER: general_feat(GeneralFeatType.GRAPPLER, "Player's Handbook (SRD)", "Improve attacks and restraint options against grappled creatures.", "Strength 13 or higher"),
-    GeneralFeatType.GREAT_WEAPON_MASTER: general_feat(GeneralFeatType.GREAT_WEAPON_MASTER, "Player's Handbook", "Gain heavy-weapon damage tradeoffs and bonus attacks after key hits."),
-    GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT: general_feat(GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT, "Glory of the Giants", "+1 Strength, Constitution, or Wisdom; reduce damage and teleport.", "4th level, Strike of the Giants (Cloud Strike) feat"),
-    GeneralFeatType.GUNNER: general_feat(GeneralFeatType.GUNNER, "Tasha's Cauldron of Everything", "+1 Dexterity; firearm proficiency and improved firearm attacks."),
-    GeneralFeatType.HEALER: general_feat(GeneralFeatType.HEALER, "Player's Handbook", "Use a healer's kit to stabilize or restore hit points."),
-    GeneralFeatType.HEAVILY_ARMORED: general_feat(GeneralFeatType.HEAVILY_ARMORED, "Player's Handbook", "+1 Strength; gain heavy armor proficiency.", "Proficiency with medium armor"),
-    GeneralFeatType.HEAVY_ARMOR_MASTER: general_feat(GeneralFeatType.HEAVY_ARMOR_MASTER, "Player's Handbook", "+1 Strength; reduce mundane weapon damage while wearing heavy armor.", "Proficiency with heavy armor"),
-    GeneralFeatType.INFERNAL_CONSTITUTION: general_feat(GeneralFeatType.INFERNAL_CONSTITUTION, "Xanathar's Guide to Everything", "+1 Constitution; gain cold and poison resilience.", "Tiefling"),
-    GeneralFeatType.INSPIRING_LEADER: general_feat(GeneralFeatType.INSPIRING_LEADER, "Player's Handbook", "Give temporary hit points to a small group after a speech.", "Charisma 13 or higher"),
-    GeneralFeatType.KEEN_MIND: general_feat(GeneralFeatType.KEEN_MIND, "Player's Handbook", "+1 Intelligence; improve recall and orientation."),
-    GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT: general_feat(GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT, "Glory of the Giants", "+1 Strength, Constitution, or Wisdom; darkvision and stone strike.", "4th level, Strike of the Giants (Stone Strike) feat"),
-    GeneralFeatType.LIGHTLY_ARMORED: general_feat(GeneralFeatType.LIGHTLY_ARMORED, "Player's Handbook", "+1 Strength or Dexterity; gain light armor proficiency."),
-    GeneralFeatType.LINGUIST: general_feat(GeneralFeatType.LINGUIST, "Player's Handbook", "+1 Intelligence; learn languages and make ciphers."),
-    GeneralFeatType.LUCKY: general_feat(GeneralFeatType.LUCKY, "Player's Handbook", "Spend luck points to affect d20 rolls.", "-"),
-    GeneralFeatType.MAGE_SLAYER: general_feat(GeneralFeatType.MAGE_SLAYER, "Player's Handbook", "Punish nearby spellcasters and resist close-range spells."),
-    GeneralFeatType.MAGIC_INITIATE: general_feat(GeneralFeatType.MAGIC_INITIATE, "Player's Handbook", "Learn two cantrips and one 1st-level spell from a class list."),
-    GeneralFeatType.MARTIAL_ADEPT: general_feat(GeneralFeatType.MARTIAL_ADEPT, "Player's Handbook", "Learn Battle Master maneuvers and gain a superiority die."),
-    GeneralFeatType.MEDIUM_ARMOR_MASTER: general_feat(GeneralFeatType.MEDIUM_ARMOR_MASTER, "Player's Handbook", "Improve medium armor stealth and Dexterity AC cap.", "Proficiency with medium armor"),
-    GeneralFeatType.METAMAGIC_ADEPT: general_feat(GeneralFeatType.METAMAGIC_ADEPT, "Tasha's Cauldron of Everything", "Learn metamagic and gain sorcery points.", "Spellcasting or Pact Magic feature"),
-    GeneralFeatType.MOBILE: general_feat(GeneralFeatType.MOBILE, "Player's Handbook", "Increase speed and improve difficult-terrain dashes and skirmishing."),
-    GeneralFeatType.MODERATELY_ARMORED: general_feat(GeneralFeatType.MODERATELY_ARMORED, "Player's Handbook", "+1 Strength or Dexterity; gain medium armor and shield proficiency.", "Proficiency with light armor"),
-    GeneralFeatType.MOUNTED_COMBATANT: general_feat(GeneralFeatType.MOUNTED_COMBATANT, "Player's Handbook", "Improve mounted attacks and protect your mount."),
-    GeneralFeatType.OBSERVANT: general_feat(GeneralFeatType.OBSERVANT, "Player's Handbook", "+1 Intelligence or Wisdom; read lips and improve passive Investigation/Perception."),
-    GeneralFeatType.ORCISH_FURY: general_feat(GeneralFeatType.ORCISH_FURY, "Xanathar's Guide to Everything", "+1 Strength or Constitution; add weapon damage and retaliate after endurance.", "Half-orc"),
-    GeneralFeatType.PIERCER: general_feat(GeneralFeatType.PIERCER, "Tasha's Cauldron of Everything", "+1 Strength or Dexterity; improve piercing damage dice and criticals."),
-    GeneralFeatType.POISONER: general_feat(GeneralFeatType.POISONER, "Tasha's Cauldron of Everything", "Gain poisoner tools, faster poison application, and better poison attacks."),
-    GeneralFeatType.POLEARM_MASTER: general_feat(GeneralFeatType.POLEARM_MASTER, "Player's Handbook", "Make extra polearm attacks and opportunity attacks when foes enter reach."),
-    GeneralFeatType.PRODIGY: general_feat(GeneralFeatType.PRODIGY, "Xanathar's Guide to Everything", "Gain a skill, tool, language, and expertise.", "Half-elf, half-orc, or human"),
-    GeneralFeatType.RESILIENT: general_feat(GeneralFeatType.RESILIENT, "Player's Handbook", "+1 in one ability and proficiency in that ability's saving throws."),
-    GeneralFeatType.RITUAL_CASTER: general_feat(GeneralFeatType.RITUAL_CASTER, "Player's Handbook", "Gain a ritual book and cast ritual spells.", "Intelligence or Wisdom 13 or higher"),
-    GeneralFeatType.RUNE_SHAPER: general_feat(GeneralFeatType.RUNE_SHAPER, "Glory of the Giants", "Learn rune magic spells.", "Spellcasting feature or Rune Carver background"),
-    GeneralFeatType.SAVAGE_ATTACKER: general_feat(GeneralFeatType.SAVAGE_ATTACKER, "Player's Handbook", "Reroll melee weapon damage once per turn."),
-    GeneralFeatType.SECOND_CHANCE: general_feat(GeneralFeatType.SECOND_CHANCE, "Xanathar's Guide to Everything", "+1 Dexterity, Constitution, or Charisma; force an attacker to reroll.", "Halfling"),
-    GeneralFeatType.SENTINEL: general_feat(GeneralFeatType.SENTINEL, "Player's Handbook", "Improve opportunity attacks and lock down nearby enemies."),
-    GeneralFeatType.SHADOW_TOUCHED: general_feat(GeneralFeatType.SHADOW_TOUCHED, "Tasha's Cauldron of Everything", "+1 Intelligence, Wisdom, or Charisma; learn invisibility and another spell."),
-    GeneralFeatType.SHARPSHOOTER: general_feat(GeneralFeatType.SHARPSHOOTER, "Player's Handbook", "Ignore common ranged penalties and trade accuracy for damage."),
-    GeneralFeatType.SHIELD_MASTER: general_feat(GeneralFeatType.SHIELD_MASTER, "Player's Handbook", "Add shield tactics to attacks and Dexterity saves."),
-    GeneralFeatType.SKILL_EXPERT: general_feat(GeneralFeatType.SKILL_EXPERT, "Tasha's Cauldron of Everything", "+1 in one ability; gain one skill proficiency and one expertise."),
-    GeneralFeatType.SKILLED: general_feat(GeneralFeatType.SKILLED, "Player's Handbook", "Gain proficiency with three skills or tools."),
-    GeneralFeatType.SKULKER: general_feat(GeneralFeatType.SKULKER, "Player's Handbook", "Improve hiding and ranged stealth.", "Dexterity 13 or higher"),
-    GeneralFeatType.SLASHER: general_feat(GeneralFeatType.SLASHER, "Tasha's Cauldron of Everything", "+1 Strength or Dexterity; add control and critical riders to slashing hits."),
-    GeneralFeatType.SOUL_OF_THE_STORM_GIANT: general_feat(GeneralFeatType.SOUL_OF_THE_STORM_GIANT, "Glory of the Giants", "+1 Strength, Constitution, or Wisdom; lightning/thunder resilience and storm aura.", "4th level, Strike of the Giants (Storm Strike) feat"),
-    GeneralFeatType.SPELL_SNIPER: general_feat(GeneralFeatType.SPELL_SNIPER, "Player's Handbook", "Improve ranged spell attacks and learn an attack cantrip.", "The ability to cast at least one spell"),
-    GeneralFeatType.SQUAT_NIMBLENESS: general_feat(GeneralFeatType.SQUAT_NIMBLENESS, "Xanathar's Guide to Everything", "+1 Strength or Dexterity; improve speed and escape checks.", "Dwarf or a Small race"),
-    GeneralFeatType.STRIKE_OF_THE_GIANTS: general_feat(GeneralFeatType.STRIKE_OF_THE_GIANTS, "Glory of the Giants", "Choose a giant strike option for extra weapon damage and riders.", "Proficiency with a martial weapon or Giant Foundling background"),
-    GeneralFeatType.TAVERN_BRAWLER: general_feat(GeneralFeatType.TAVERN_BRAWLER, "Player's Handbook", "+1 Strength or Constitution; improve improvised weapons, unarmed strikes, and grapples."),
-    GeneralFeatType.TELEKINETIC: general_feat(GeneralFeatType.TELEKINETIC, "Tasha's Cauldron of Everything", "+1 Intelligence, Wisdom, or Charisma; improve mage hand and shove telekinetically."),
-    GeneralFeatType.TELEPATHIC: general_feat(GeneralFeatType.TELEPATHIC, "Tasha's Cauldron of Everything", "+1 Intelligence, Wisdom, or Charisma; speak telepathically and cast detect thoughts."),
-    GeneralFeatType.TOUGH: general_feat(GeneralFeatType.TOUGH, "Player's Handbook", "Increase hit point maximum by 2 per level."),
-    GeneralFeatType.VIGOR_OF_THE_HILL_GIANT: general_feat(GeneralFeatType.VIGOR_OF_THE_HILL_GIANT, "Glory of the Giants", "+1 Strength, Constitution, or Wisdom; improve prone resistance and Hit Dice healing.", "4th level, Strike of the Giants (Hill Strike) feat"),
-    GeneralFeatType.WAR_CASTER: general_feat(GeneralFeatType.WAR_CASTER, "Player's Handbook", "Improve concentration saves, somatic casting, and reaction spellcasting.", "The ability to cast at least one spell"),
-    GeneralFeatType.WEAPON_MASTER: general_feat(GeneralFeatType.WEAPON_MASTER, "Player's Handbook", "+1 Strength or Dexterity; gain weapon proficiencies."),
-    GeneralFeatType.WOOD_ELF_MAGIC: general_feat(GeneralFeatType.WOOD_ELF_MAGIC, "Xanathar's Guide to Everything", "Learn druid magic and wood elf spells.", "Elf (wood)"),
+    GeneralFeatType.ACTOR: general_feat(GeneralFeatType.ACTOR, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Charisma; improve deception, performance, and mimicry."),
+    GeneralFeatType.ALERT: general_feat(GeneralFeatType.ALERT, RuleSource.PLAYERS_HANDBOOK_2024, "+5 initiative, cannot be surprised, and unseen attackers do not gain advantage."),
+    GeneralFeatType.ARTIFICER_INITIATE: general_feat(GeneralFeatType.ARTIFICER_INITIATE, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn artificer magic and one artisan tool proficiency."),
+    GeneralFeatType.ATHLETE: general_feat(GeneralFeatType.ATHLETE, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; improve climbing, standing, and jumping."),
+    GeneralFeatType.BOUNTIFUL_LUCK: general_feat(GeneralFeatType.BOUNTIFUL_LUCK, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Let a nearby ally reroll a 1 on a d20.", (species_prerequisite(SpeciesType.HALFLING),)),
+    GeneralFeatType.CHARGER: general_feat(GeneralFeatType.CHARGER, RuleSource.PLAYERS_HANDBOOK_2024, "Dash into a melee attack with an added bonus after moving far enough."),
+    GeneralFeatType.CHEF: general_feat(GeneralFeatType.CHEF, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Constitution or Wisdom; gain cook's utensils and prepare restorative food."),
+    GeneralFeatType.CROSSBOW_EXPERT: general_feat(GeneralFeatType.CROSSBOW_EXPERT, RuleSource.PLAYERS_HANDBOOK_2024, "Improve crossbow handling and close-range ranged attacks."),
+    GeneralFeatType.CRAFTER: general_feat(GeneralFeatType.CRAFTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Artisan's Tools and craft mundane items faster."),
+    GeneralFeatType.CRUSHER: general_feat(GeneralFeatType.CRUSHER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Strength or Constitution; add control and critical riders to bludgeoning hits."),
+    GeneralFeatType.DEFENSIVE_DUELIST: general_feat(GeneralFeatType.DEFENSIVE_DUELIST, RuleSource.PLAYERS_HANDBOOK_2024, "Use a reaction with a finesse weapon to add proficiency bonus to AC.", (ability_prerequisite(13, AbilityType.DEXTERITY),)),
+    GeneralFeatType.DRAGON_FEAR: general_feat(GeneralFeatType.DRAGON_FEAR, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength, Constitution, or Charisma; turn Breath Weapon into fear.", (species_prerequisite(SpeciesType.DRAGONBORN),)),
+    GeneralFeatType.DRAGON_HIDE: general_feat(GeneralFeatType.DRAGON_HIDE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength, Constitution, or Charisma; gain natural armor and claws.", (species_prerequisite(SpeciesType.DRAGONBORN),)),
+    GeneralFeatType.DROW_HIGH_MAGIC: general_feat(GeneralFeatType.DROW_HIGH_MAGIC, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Gain drow innate spells.", (species_prerequisite(SpeciesType.ELF),)),
+    GeneralFeatType.DUAL_WIELDER: general_feat(GeneralFeatType.DUAL_WIELDER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve AC, weapon options, and drawing weapons while dual wielding."),
+    GeneralFeatType.DUNGEON_DELVER: general_feat(GeneralFeatType.DUNGEON_DELVER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve trap detection, trap saves, and dungeon exploration."),
+    GeneralFeatType.DURABLE: general_feat(GeneralFeatType.DURABLE, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Constitution; improve healing from Hit Dice."),
+    GeneralFeatType.DWARF_FORTITUDE: general_feat(GeneralFeatType.DWARF_FORTITUDE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Constitution; spend a Hit Die when taking the Dodge action.", (species_prerequisite(SpeciesType.DWARF),)),
+    GeneralFeatType.ELDRITCH_ADEPT: general_feat(GeneralFeatType.ELDRITCH_ADEPT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn one Eldritch Invocation.", (spellcasting_prerequisite(),)),
+    GeneralFeatType.ELEMENTAL_ADEPT: general_feat(GeneralFeatType.ELEMENTAL_ADEPT, RuleSource.PLAYERS_HANDBOOK_2024, "Choose a damage type for spells to ignore resistance and improve low damage dice.", (spellcasting_prerequisite(),)),
+    GeneralFeatType.ELVEN_ACCURACY: general_feat(GeneralFeatType.ELVEN_ACCURACY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Dexterity, Intelligence, Wisdom, or Charisma; improve advantaged attack rolls.", (species_prerequisite(SpeciesType.ELF),)),
+    GeneralFeatType.EMBER_OF_THE_FIRE_GIANT: general_feat(GeneralFeatType.EMBER_OF_THE_FIRE_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; fire resistance and fire-blind burst.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.FIRE_STRIKE))),
+    GeneralFeatType.FADE_AWAY: general_feat(GeneralFeatType.FADE_AWAY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Dexterity or Intelligence; turn invisible after taking damage.", (species_prerequisite(SpeciesType.GNOME),)),
+    GeneralFeatType.FEY_TELEPORTATION: general_feat(GeneralFeatType.FEY_TELEPORTATION, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Intelligence or Charisma; gain Sylvan and misty step.", (species_prerequisite(SpeciesType.ELF),)),
+    GeneralFeatType.FEY_TOUCHED: general_feat(GeneralFeatType.FEY_TOUCHED, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; learn misty step and another spell."),
+    GeneralFeatType.FIGHTING_INITIATE: general_feat(GeneralFeatType.FIGHTING_INITIATE, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn one Fighting Style option from the fighter class.", (weapon_prerequisite(WeaponProficiencyType.MARTIAL),)),
+    GeneralFeatType.FLAMES_OF_PHLEGETHOS: general_feat(GeneralFeatType.FLAMES_OF_PHLEGETHOS, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Intelligence or Charisma; improve fire spells and fiery retaliation.", (species_prerequisite(SpeciesType.TIEFLING),)),
+    GeneralFeatType.FURY_OF_THE_FROST_GIANT: general_feat(GeneralFeatType.FURY_OF_THE_FROST_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; cold resistance and frost retaliation.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.FROST_STRIKE))),
+    GeneralFeatType.GIFT_OF_THE_CHROMATIC_DRAGON: general_feat(GeneralFeatType.GIFT_OF_THE_CHROMATIC_DRAGON, RuleSource.FIZBANS_TREASURY_OF_DRAGONS, "Add elemental weapon damage and gain reactive elemental resistance."),
+    GeneralFeatType.GIFT_OF_THE_GEM_DRAGON: general_feat(GeneralFeatType.GIFT_OF_THE_GEM_DRAGON, RuleSource.FIZBANS_TREASURY_OF_DRAGONS, "+1 Intelligence, Wisdom, or Charisma; telekinetic retaliation."),
+    GeneralFeatType.GIFT_OF_THE_METALLIC_DRAGON: general_feat(GeneralFeatType.GIFT_OF_THE_METALLIC_DRAGON, RuleSource.FIZBANS_TREASURY_OF_DRAGONS, "Learn cure wounds and protect with a reactive AC bonus."),
+    GeneralFeatType.GRAPPLER: general_feat(GeneralFeatType.GRAPPLER, RuleSource.SYSTEM_REFERENCE_DOCUMENT, "Improve attacks and restraint options against grappled creatures.", (ability_prerequisite(13, AbilityType.STRENGTH),)),
+    GeneralFeatType.GREAT_WEAPON_MASTER: general_feat(GeneralFeatType.GREAT_WEAPON_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain heavy-weapon damage tradeoffs and bonus attacks after key hits."),
+    GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT: general_feat(GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; reduce damage and teleport.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.CLOUD_STRIKE))),
+    GeneralFeatType.GUNNER: general_feat(GeneralFeatType.GUNNER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Dexterity; firearm proficiency and improved firearm attacks."),
+    GeneralFeatType.HEALER: general_feat(GeneralFeatType.HEALER, RuleSource.PLAYERS_HANDBOOK_2024, "Use a healer's kit to stabilize or restore hit points."),
+    GeneralFeatType.HEAVILY_ARMORED: general_feat(GeneralFeatType.HEAVILY_ARMORED, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength; gain heavy armor proficiency.", (armor_prerequisite(ArmorCategory.MEDIUM),)),
+    GeneralFeatType.HEAVY_ARMOR_MASTER: general_feat(GeneralFeatType.HEAVY_ARMOR_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength; reduce mundane weapon damage while wearing heavy armor.", (armor_prerequisite(ArmorCategory.HEAVY),)),
+    GeneralFeatType.INFERNAL_CONSTITUTION: general_feat(GeneralFeatType.INFERNAL_CONSTITUTION, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Constitution; gain cold and poison resilience.", (species_prerequisite(SpeciesType.TIEFLING),)),
+    GeneralFeatType.INSPIRING_LEADER: general_feat(GeneralFeatType.INSPIRING_LEADER, RuleSource.PLAYERS_HANDBOOK_2024, "Give temporary hit points to a small group after a speech.", (ability_prerequisite(13, AbilityType.CHARISMA),)),
+    GeneralFeatType.KEEN_MIND: general_feat(GeneralFeatType.KEEN_MIND, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence; improve recall and orientation."),
+    GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT: general_feat(GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; darkvision and stone strike.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.STONE_STRIKE))),
+    GeneralFeatType.LIGHTLY_ARMORED: general_feat(GeneralFeatType.LIGHTLY_ARMORED, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain light armor proficiency."),
+    GeneralFeatType.LINGUIST: general_feat(GeneralFeatType.LINGUIST, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence; learn languages and make ciphers."),
+    GeneralFeatType.LUCKY: general_feat(GeneralFeatType.LUCKY, RuleSource.PLAYERS_HANDBOOK_2024, "Spend luck points to affect d20 rolls."),
+    GeneralFeatType.MAGE_SLAYER: general_feat(GeneralFeatType.MAGE_SLAYER, RuleSource.PLAYERS_HANDBOOK_2024, "Punish nearby spellcasters and resist close-range spells."),
+    GeneralFeatType.MAGIC_INITIATE: general_feat(GeneralFeatType.MAGIC_INITIATE, RuleSource.PLAYERS_HANDBOOK_2024, "Learn two cantrips and one 1st-level spell from a class list."),
+    GeneralFeatType.MARTIAL_ADEPT: general_feat(GeneralFeatType.MARTIAL_ADEPT, RuleSource.PLAYERS_HANDBOOK_2024, "Learn Battle Master maneuvers and gain a superiority die."),
+    GeneralFeatType.MEDIUM_ARMOR_MASTER: general_feat(GeneralFeatType.MEDIUM_ARMOR_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve medium armor stealth and Dexterity AC cap.", (armor_prerequisite(ArmorCategory.MEDIUM),)),
+    GeneralFeatType.METAMAGIC_ADEPT: general_feat(GeneralFeatType.METAMAGIC_ADEPT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn metamagic and gain sorcery points.", (spellcasting_prerequisite(),)),
+    GeneralFeatType.MOBILE: general_feat(GeneralFeatType.MOBILE, RuleSource.PLAYERS_HANDBOOK_2024, "Increase speed and improve difficult-terrain dashes and skirmishing."),
+    GeneralFeatType.MODERATELY_ARMORED: general_feat(GeneralFeatType.MODERATELY_ARMORED, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain medium armor and shield proficiency.", (armor_prerequisite(ArmorCategory.LIGHT),)),
+    GeneralFeatType.MOUNTED_COMBATANT: general_feat(GeneralFeatType.MOUNTED_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, "Improve mounted attacks and protect your mount."),
+    GeneralFeatType.MUSICIAN: general_feat(GeneralFeatType.MUSICIAN, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Musical Instruments and grant Heroic Inspiration after a Short or Long Rest."),
+    GeneralFeatType.OBSERVANT: general_feat(GeneralFeatType.OBSERVANT, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence or Wisdom; read lips and improve passive Investigation/Perception."),
+    GeneralFeatType.ORCISH_FURY: general_feat(GeneralFeatType.ORCISH_FURY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength or Constitution; add weapon damage and retaliate after endurance.", (species_prerequisite(SpeciesType.ORC),)),
+    GeneralFeatType.PIERCER: general_feat(GeneralFeatType.PIERCER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Strength or Dexterity; improve piercing damage dice and criticals."),
+    GeneralFeatType.POISONER: general_feat(GeneralFeatType.POISONER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Gain poisoner tools, faster poison application, and better poison attacks."),
+    GeneralFeatType.POLEARM_MASTER: general_feat(GeneralFeatType.POLEARM_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Make extra polearm attacks and opportunity attacks when foes enter reach."),
+    GeneralFeatType.PRODIGY: general_feat(GeneralFeatType.PRODIGY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Gain a skill, tool, language, and expertise.", (species_prerequisite(SpeciesType.HUMAN, SpeciesType.ORC, SpeciesType.ELF),)),
+    GeneralFeatType.RESILIENT: general_feat(GeneralFeatType.RESILIENT, RuleSource.PLAYERS_HANDBOOK_2024, "+1 in one ability and proficiency in that ability's saving throws."),
+    GeneralFeatType.RITUAL_CASTER: general_feat(GeneralFeatType.RITUAL_CASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain a ritual book and cast ritual spells.", (ability_prerequisite(13, AbilityType.INTELLIGENCE, AbilityType.WISDOM),)),
+    GeneralFeatType.RUNE_SHAPER: general_feat(GeneralFeatType.RUNE_SHAPER, RuleSource.GLORY_OF_THE_GIANTS, "Learn rune magic spells.", (feature_prerequisite(FeatCharacterFeatureType.SPELLCASTING, FeatCharacterFeatureType.RUNE_CARVER),)),
+    GeneralFeatType.SAVAGE_ATTACKER: general_feat(GeneralFeatType.SAVAGE_ATTACKER, RuleSource.PLAYERS_HANDBOOK_2024, "Reroll melee weapon damage once per turn."),
+    GeneralFeatType.SECOND_CHANCE: general_feat(GeneralFeatType.SECOND_CHANCE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Dexterity, Constitution, or Charisma; force an attacker to reroll.", (species_prerequisite(SpeciesType.HALFLING),)),
+    GeneralFeatType.SENTINEL: general_feat(GeneralFeatType.SENTINEL, RuleSource.PLAYERS_HANDBOOK_2024, "Improve opportunity attacks and lock down nearby enemies."),
+    GeneralFeatType.SHADOW_TOUCHED: general_feat(GeneralFeatType.SHADOW_TOUCHED, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; learn invisibility and another spell."),
+    GeneralFeatType.SHARPSHOOTER: general_feat(GeneralFeatType.SHARPSHOOTER, RuleSource.PLAYERS_HANDBOOK_2024, "Ignore common ranged penalties and trade accuracy for damage."),
+    GeneralFeatType.SHIELD_MASTER: general_feat(GeneralFeatType.SHIELD_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Add shield tactics to attacks and Dexterity saves."),
+    GeneralFeatType.SKILL_EXPERT: general_feat(GeneralFeatType.SKILL_EXPERT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 in one ability; gain one skill proficiency and one expertise."),
+    GeneralFeatType.SKILLED: general_feat(GeneralFeatType.SKILLED, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three skills or tools."),
+    GeneralFeatType.SKULKER: general_feat(GeneralFeatType.SKULKER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve hiding and ranged stealth.", (ability_prerequisite(13, AbilityType.DEXTERITY),)),
+    GeneralFeatType.SLASHER: general_feat(GeneralFeatType.SLASHER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Strength or Dexterity; add control and critical riders to slashing hits."),
+    GeneralFeatType.SOUL_OF_THE_STORM_GIANT: general_feat(GeneralFeatType.SOUL_OF_THE_STORM_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; lightning/thunder resilience and storm aura.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.STORM_STRIKE))),
+    GeneralFeatType.SPELL_SNIPER: general_feat(GeneralFeatType.SPELL_SNIPER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve ranged spell attacks and learn an attack cantrip.", (spellcasting_prerequisite(),)),
+    GeneralFeatType.SQUAT_NIMBLENESS: general_feat(GeneralFeatType.SQUAT_NIMBLENESS, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength or Dexterity; improve speed and escape checks.", (species_or_size_prerequisite(SpeciesType.DWARF, sizes=(FeatSpeciesSize.SMALL,)),)),
+    GeneralFeatType.STRIKE_OF_THE_GIANTS: general_feat(GeneralFeatType.STRIKE_OF_THE_GIANTS, RuleSource.GLORY_OF_THE_GIANTS, "Choose a giant strike option for extra weapon damage and riders.", (weapon_or_background_prerequisite(WeaponProficiencyType.MARTIAL, BackgroundPrerequisiteType.GIANT_FOUNDLING),)),
+    GeneralFeatType.TAVERN_BRAWLER: general_feat(GeneralFeatType.TAVERN_BRAWLER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Constitution; improve improvised weapons, unarmed strikes, and grapples."),
+    GeneralFeatType.TELEKINETIC: general_feat(GeneralFeatType.TELEKINETIC, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; improve mage hand and shove telekinetically."),
+    GeneralFeatType.TELEPATHIC: general_feat(GeneralFeatType.TELEPATHIC, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; speak telepathically and cast detect thoughts."),
+    GeneralFeatType.TOUGH: general_feat(GeneralFeatType.TOUGH, RuleSource.PLAYERS_HANDBOOK_2024, "Increase hit point maximum by 2 per level."),
+    GeneralFeatType.VIGOR_OF_THE_HILL_GIANT: general_feat(GeneralFeatType.VIGOR_OF_THE_HILL_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; improve prone resistance and Hit Dice healing.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.HILL_STRIKE))),
+    GeneralFeatType.WAR_CASTER: general_feat(GeneralFeatType.WAR_CASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve concentration saves, somatic casting, and reaction spellcasting.", (spellcasting_prerequisite(),)),
+    GeneralFeatType.WEAPON_MASTER: general_feat(GeneralFeatType.WEAPON_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain weapon proficiencies."),
+    GeneralFeatType.WOOD_ELF_MAGIC: general_feat(GeneralFeatType.WOOD_ELF_MAGIC, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Learn druid magic and wood elf spells.", (species_prerequisite(SpeciesType.ELF),)),
 }
 
 
@@ -539,7 +649,7 @@ def fighting_style_features(classes: list[CharacterClassLevel]):
     return features
 
 
-def general_feat_options(selected_feats=None):
+def general_feat_options(selected_feats=None, sheet=None):
     from dnd_board.character_sheet import ProgressionChoiceOption
 
     selected = set(selected_general_feat_keys(selected_feats))
@@ -547,6 +657,7 @@ def general_feat_options(selected_feats=None):
         ProgressionChoiceOption(value=enum_key(feat_type), label=enum_label(feat_type))
         for feat_type, definition in GENERAL_FEATS.items()
         if definition.repeatable or enum_key(feat_type) not in selected
+        if sheet is None or general_feat_prerequisites_met(feat_type, sheet)
     ]
 
 
@@ -557,14 +668,119 @@ def general_feat_feature(feat_key: str):
     if feat_type is None:
         return None
     definition = GENERAL_FEATS[feat_type]
-    prerequisite = "" if definition.prerequisite == "-" else f" Prerequisite: {definition.prerequisite}."
+    prerequisite = feat_prerequisite_description(definition.prerequisites)
     return SheetFeature(
         id=enum_key(feat_type),
         name=enum_label(feat_type),
-        source=definition.source,
+        source=rule_source_label(definition.source),
         activation=TimeEconomy.PASSIVE,
         description=f"{definition.description}{prerequisite}",
     )
+
+
+def feat_prerequisite_description(prerequisites: tuple[FeatPrerequisite, ...]) -> str:
+    if not prerequisites:
+        return ""
+    return f" Prerequisite: {', '.join(feat_prerequisite_label(prerequisite) for prerequisite in prerequisites)}."
+
+
+def feat_prerequisite_label(prerequisite: FeatPrerequisite) -> str:
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.CHARACTER_LEVEL:
+        return f"Level {prerequisite.minimumLevel}+"
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.ABILITY_SCORE:
+        abilities = " or ".join(enum_label(ability) for ability in prerequisite.abilities)
+        return f"{abilities} {prerequisite.minimumScore}+"
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.SPECIES:
+        parts = [enum_label(species) for species in prerequisite.species]
+        parts.extend(enum_label(size) for size in prerequisite.speciesSizes)
+        return " or ".join(parts)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.SPECIES_SIZE:
+        return " or ".join(enum_label(size) for size in prerequisite.speciesSizes)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.ARMOR_PROFICIENCY:
+        return "Proficiency with " + " or ".join(f"{enum_label(category)} armor" for category in prerequisite.armorCategories)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.WEAPON_PROFICIENCY:
+        parts = [enum_label(proficiency) for proficiency in prerequisite.weaponProficiencies]
+        parts.extend(enum_label(background) for background in prerequisite.backgrounds)
+        return " or ".join(parts)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.CHARACTER_FEATURE:
+        return " or ".join(enum_label(feature) for feature in prerequisite.features)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.SPELLCASTING:
+        return "Spellcasting or Pact Magic"
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.FEAT:
+        feat_labels = [enum_label(feat) for feat in prerequisite.feats]
+        strike_labels = [enum_label(strike) for strike in prerequisite.giantStrikes]
+        return " ".join([*feat_labels, *strike_labels])
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.BACKGROUND:
+        return " or ".join(enum_label(background) for background in prerequisite.backgrounds)
+    return ""
+
+
+def general_feat_prerequisites_met(feat_type: GeneralFeatType, sheet) -> bool:
+    return all(feat_prerequisite_met(prerequisite, sheet) for prerequisite in GENERAL_FEATS[feat_type].prerequisites)
+
+
+def feat_prerequisite_met(prerequisite: FeatPrerequisite, sheet) -> bool:
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.CHARACTER_LEVEL:
+        return character_level(sheet) >= prerequisite.minimumLevel
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.ABILITY_SCORE:
+        return any(getattr(sheet.abilityScores, enum_key(ability), 0) >= prerequisite.minimumScore for ability in prerequisite.abilities)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.SPECIES:
+        return character_species(sheet) in prerequisite.species or character_size(sheet) in prerequisite.speciesSizes
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.SPECIES_SIZE:
+        return character_size(sheet) in prerequisite.speciesSizes
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.ARMOR_PROFICIENCY:
+        return any(has_armor_proficiency(sheet, category) for category in prerequisite.armorCategories)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.WEAPON_PROFICIENCY:
+        return any(has_weapon_proficiency(sheet, proficiency) for proficiency in prerequisite.weaponProficiencies) or any(enum_label(background) == getattr(sheet, "background", "") for background in prerequisite.backgrounds)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.CHARACTER_FEATURE:
+        return any(has_character_feature(sheet, feature) for feature in prerequisite.features)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.SPELLCASTING:
+        return bool(getattr(sheet, "spells", None)) or any(has_character_feature(sheet, feature) for feature in prerequisite.features)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.FEAT:
+        return any(has_general_feat(sheet, feat) for feat in prerequisite.feats)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.BACKGROUND:
+        return any(enum_label(background) == getattr(sheet, "background", "") for background in prerequisite.backgrounds)
+    return False
+
+
+def character_level(sheet) -> int:
+    return sum(character_class.level for character_class in getattr(sheet, "classes", []) or []) or getattr(getattr(sheet, "characterClass", None), "level", 0)
+
+
+def character_species(sheet) -> SpeciesType | None:
+    race = getattr(sheet, "race", "")
+    for species in SpeciesType:
+        if enum_label(species) == race:
+            return species
+    return None
+
+
+SMALL_SPECIES = {SpeciesType.GNOME, SpeciesType.HALFLING, SpeciesType.FAERIE}
+
+
+def character_size(sheet) -> FeatSpeciesSize | None:
+    return FeatSpeciesSize.SMALL if character_species(sheet) in SMALL_SPECIES else None
+
+
+def has_armor_proficiency(sheet, category: ArmorCategory) -> bool:
+    label = f"{enum_label(category)} armor".lower()
+    return any(label in proficiency.lower() for proficiency in getattr(sheet, "proficiencies", []) or [])
+
+
+def has_weapon_proficiency(sheet, proficiency: WeaponProficiencyType) -> bool:
+    label = enum_label(proficiency).lower()
+    return any(label in sheet_proficiency.lower() for sheet_proficiency in getattr(sheet, "proficiencies", []) or [])
+
+
+def has_character_feature(sheet, feature: FeatCharacterFeatureType) -> bool:
+    label = enum_label(feature).lower()
+    feature_lists = [getattr(sheet, "features", []) or [], getattr(sheet, "abilities", []) or []]
+    return any(label in getattr(item, "name", "").lower() or label in getattr(item, "description", "").lower() for items in feature_lists for item in items)
+
+
+def has_general_feat(sheet, feat_type: GeneralFeatType) -> bool:
+    key = enum_key(feat_type)
+    return any(getattr(feat, "id", "") == key for feat in getattr(sheet, "features", []) or []) or any(getattr(feat, "id", "") == key for feat in getattr(sheet, "feats", []) or [])
 
 
 def selected_general_feat_keys(feats) -> list[str]:

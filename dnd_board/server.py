@@ -39,6 +39,8 @@ from dnd_board.character_sheet import (
     RollSource,
     RestType,
     SheetSectionType,
+    SkillType,
+    SpellSource,
     TokenKind,
     build_attack_roll_payload,
     build_ability_check_roll_payload,
@@ -59,7 +61,14 @@ from dnd_board.character_sheet import (
     sheet_to_dict,
     typed_json_from_value,
 )
-from dnd_board.rules.progression import ProgressionChoiceId, apply_progression_choice, fighter_asi_levels_up_to, parse_progression_choice_id, prune_progression_choices, rogue_asi_levels_up_to, update_class_level
+from dnd_board.character_builder import (
+    CharacterBuilderPayloadField,
+    build_party_member_config,
+    character_builder_options,
+    character_builder_request_from_payload,
+    payload_key,
+)
+from dnd_board.rules.progression import ProgressionChoiceId, apply_progression_choice, class_hit_die, fighter_asi_levels_up_to, parse_progression_choice_id, prune_progression_choices, rogue_asi_levels_up_to, update_class_level
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -254,6 +263,46 @@ async def get_room_sheet(room_id: str, sheet_id: str, playerKey: str) -> dict[st
     if sheet is None:
         raise HTTPException(status_code=404, detail="Sheet not found")
     return {"roomId": room.id, "playerKey": player.player_key, "sheet": sheet_to_dict(sheet)}
+
+
+@app.get("/api/rooms/{room_id}/character-builder/options")
+async def get_character_builder_options(room_id: str) -> dict[str, Any]:
+    return {"roomId": sanitize_room_id(room_id), **character_builder_options()}
+
+
+@app.post("/api/rooms/{room_id}/characters")
+async def create_room_character(room_id: str, playerKey: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-character-builder", name="Character Builder", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    body = payload if isinstance(payload, dict) else {}
+    requested_member_id = sanitize_asset_id(str(body.get(payload_key(CharacterBuilderPayloadField.MEMBER_ID), "")))
+    member_id = requested_member_id or ("player-1" if is_dm(player) else player.player_key)
+    if normalize_party_member_id(member_id, "") != member_id:
+        raise HTTPException(status_code=400, detail="Choose a player slot")
+    if not is_dm(player) and member_id != player.player_key:
+        raise HTTPException(status_code=403, detail="Cannot create a character for another player")
+    existing_member = party_member_by_id(member_id, room.id)
+    if existing_member is not None:
+        raise HTTPException(status_code=400, detail="That player slot is already in the game")
+    if len(load_party_members(room.id)) >= MAX_PLAYERS:
+        raise HTTPException(status_code=400, detail="The party already has 8 characters")
+
+    try:
+        builder_request = character_builder_request_from_payload(body, default_member_id=member_id, default_owner=member_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    member = build_party_member_config(builder_request)
+    save_party_member_config(room.id, member)
+    refresh_party_token(room, member)
+    room.resource_uses.pop(member.id, None)
+    room.hit_points.pop(member.id, None)
+    room.temporary_hit_points.pop(member.id, None)
+    room.condition_overrides.pop(member.id, None)
+    room.condition_durations.pop(member.id, None)
+    await broadcast_room_state(room)
+    return sheet_state_message(room, player)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/attack")
@@ -1422,7 +1471,7 @@ def resolve_source_check_condition_effects(
 
 def condition_source_check(source: CharacterSheet, effect) -> tuple[str, int]:
     if effect.condition == ConditionType.GRAPPLED and effect.sourceCheck == AbilityType.STRENGTH:
-        return ("Strength (Athletics)", skill_modifier(source, "athletics", AbilityType.STRENGTH))
+        return (f"{enum_label(AbilityType.STRENGTH)} ({enum_label(SkillType.ATHLETICS)})", skill_modifier(source, enum_key(SkillType.ATHLETICS), AbilityType.STRENGTH))
     return (f"{enum_label(effect.sourceCheck)} check", ability_check_modifier(source, effect.sourceCheck))
 
 
@@ -1433,9 +1482,9 @@ def condition_target_contest_check(target: CharacterSheet, effect) -> tuple[str,
 
 def condition_target_check(target: CharacterSheet, condition: ConditionType | None, ability: AbilityType) -> tuple[str, int, AbilityType]:
     if condition == ConditionType.GRAPPLED and ability == AbilityType.STRENGTH:
-        return ("Strength (Athletics)", skill_modifier(target, "athletics", AbilityType.STRENGTH), ability)
+        return (f"{enum_label(AbilityType.STRENGTH)} ({enum_label(SkillType.ATHLETICS)})", skill_modifier(target, enum_key(SkillType.ATHLETICS), AbilityType.STRENGTH), ability)
     if condition == ConditionType.GRAPPLED and ability == AbilityType.DEXTERITY:
-        return ("Dexterity (Acrobatics)", skill_modifier(target, "acrobatics", AbilityType.DEXTERITY), ability)
+        return (f"{enum_label(AbilityType.DEXTERITY)} ({enum_label(SkillType.ACROBATICS)})", skill_modifier(target, enum_key(SkillType.ACROBATICS), AbilityType.DEXTERITY), ability)
     return (f"{enum_label(ability)} check", ability_check_modifier(target, ability), ability)
 
 
@@ -1561,6 +1610,8 @@ def sanitize_room_id(room_id: str) -> str:
 
 def normalize_player_key(player_key: str, campaign_id: str | None = None) -> str:
     normalized = player_key.strip().lower()
+    if normalize_party_member_id(normalized, "") == normalized:
+        return normalized
     party_members = load_party_members(campaign_id)
     valid_player_keys = {member.owner for member in party_members}
     if normalized in valid_player_keys or normalized == "dm":
@@ -1771,6 +1822,49 @@ def update_party_member_config(campaign_id: str, member_id: str, update: Any) ->
     return target
 
 
+def save_party_member_config(campaign_id: str, member: PartyMemberConfig) -> PartyMemberConfig:
+    path = writable_party_manifest_path(campaign_id)
+    manifest = load_party_manifest_config(path) or PartyManifest(members=[])
+    target = next((candidate for candidate in manifest.members if normalize_party_member_id(candidate.id, "") == member.id), None)
+    if target is None:
+        manifest.members.append(member)
+    else:
+        index = manifest.members.index(target)
+        manifest.members[index] = member
+    path.write_text(json.dumps(typed_json_from_value(manifest), indent=2, sort_keys=False), encoding="utf-8")
+    return member
+
+
+def writable_party_manifest_path(campaign_id: str) -> Path:
+    campaign_path = CAMPAIGN_DIR / sanitize_asset_id(campaign_id)
+    party_path = campaign_path / "party"
+    party_path.mkdir(parents=True, exist_ok=True)
+    campaign_config = campaign_path / "campaign.json"
+    if not campaign_config.exists():
+        campaign_config.write_text(json.dumps({"id": campaign_path.name, "name": humanize_asset_name(campaign_path.name)}, indent=2), encoding="utf-8")
+    return party_path / "party.json"
+
+
+def refresh_party_token(room: Room, member: PartyMemberConfig) -> None:
+    token = room.tokens.get(member.id)
+    if token is None:
+        token = party_member_to_token(
+            PartyMember(
+                id=member.id,
+                name=member.name,
+                owner=member.id,
+                avatarUrl=None,
+                abilityScores=member.abilityScores,
+                maxHp=member.maxHp,
+                sheet=member.sheet,
+            ),
+            len([candidate for candidate in room.tokens.values() if candidate.kind == TokenKind.CHARACTER]),
+        )
+        room.tokens[member.id] = token
+    token.name = member.name
+    token.owner = member.id
+
+
 def load_party_manifest_config(path: Path) -> PartyManifest | None:
     if not path.is_file():
         return None
@@ -1889,7 +1983,7 @@ def apply_member_arcane_trickster_spells(member: PartyMemberConfig, values: list
     other_spells = [
         spell
         for spell in member.sheet.spells or []
-        if spell.source.value != "Arcane Trickster"
+        if spell.source != SpellSource.ARCANE_TRICKSTER
     ]
     member.sheet.spells = [*other_spells, *spells]
 
@@ -1900,10 +1994,6 @@ def class_hit_point_bump(member: PartyMemberConfig, class_name: ClassType, choic
     if normalize_choice_id(choice) == "roll":
         return max(1, random.randint(1, hit_die) + constitution_modifier)
     return max(1, (hit_die // 2 + 1) + constitution_modifier)
-
-
-def class_hit_die(class_name: ClassType) -> int:
-    return 8 if class_name == ClassType.ROGUE else 10
 
 
 def class_level_one_hit_points(class_name: ClassType) -> int:
@@ -2112,11 +2202,11 @@ def prune_member_arcane_trickster_spells(member: PartyMemberConfig) -> None:
 
     rogue = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.ROGUE), None)
     if rogue is None or rogue.subclass != RogueSubclassType.ARCANE_TRICKSTER or rogue.level < 3:
-        member.sheet.spells = [spell for spell in member.sheet.spells if arcane_trickster_catalog_spell(spell.id) is None or spell.source.value != "Arcane Trickster"] or None
+        member.sheet.spells = [spell for spell in member.sheet.spells if arcane_trickster_catalog_spell(spell.id) is None or spell.source != SpellSource.ARCANE_TRICKSTER] or None
         return
 
-    arcane_trickster_spells = [spell for spell in member.sheet.spells if spell.source.value == "Arcane Trickster"]
-    other_spells = [spell for spell in member.sheet.spells if spell.source.value != "Arcane Trickster"]
+    arcane_trickster_spells = [spell for spell in member.sheet.spells if spell.source == SpellSource.ARCANE_TRICKSTER]
+    other_spells = [spell for spell in member.sheet.spells if spell.source != SpellSource.ARCANE_TRICKSTER]
     member.sheet.spells = [
         *other_spells,
         *pruned_arcane_trickster_spells(rogue.level, arcane_trickster_spells),

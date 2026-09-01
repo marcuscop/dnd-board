@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -50,6 +52,7 @@ from dnd_board.rules.feats import (
     FIGHTING_STYLE_FEATS,
     FeatEffect,
     FeatEffectType,
+    GeneralFeatType,
     armor_class_bonus,
     armor_class_bonus_applies,
     attack_roll_bonus_applies,
@@ -59,6 +62,7 @@ from dnd_board.rules.feats import (
     feat_abilities,
     fighting_style_features,
     general_feat_feature,
+    general_feat_prerequisites_met,
     parse_general_feat,
     selected_fighting_styles,
     selected_general_feat_keys,
@@ -199,6 +203,42 @@ def test_general_feat_helpers_parse_duplicates_and_invalid_values() -> None:
     assert general_feat_feature("alert").id == "alert"
     assert parse_general_feat("not-a-feat") is None
     assert general_feat_feature("not-a-feat") is None
+
+
+def test_general_feat_prerequisites_are_structured_and_evaluable() -> None:
+    dwarf_sheet = SimpleNamespace(
+        race="Dwarf",
+        background="Soldier",
+        abilityScores=AbilityScores(12, 12, 12, 10, 10, 10),
+        classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+        proficiencies=["Light armor", "Martial Weapon"],
+        feats=[],
+        features=[],
+        abilities=[],
+        spells=[],
+    )
+    dragonborn_sheet = SimpleNamespace(
+        race="Dragonborn",
+        background="Criminal",
+        abilityScores=AbilityScores(10, 14, 12, 10, 10, 10),
+        classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)],
+        proficiencies=[],
+        feats=[],
+        features=[],
+        abilities=[],
+        spells=[],
+    )
+
+    assert "Prerequisite: Dragonborn." in general_feat_feature("dragonFear").description
+    assert "Prerequisite: Proficiency with Light armor." in general_feat_feature("moderatelyArmored").description
+    assert "Prerequisite: Dexterity 13+." in general_feat_feature("defensiveDuelist").description
+    assert "Prerequisite: Dwarf or Small." in general_feat_feature("squatNimbleness").description
+    assert "Prerequisite: Level 4+, Strike Of The Giants Hill Strike." in general_feat_feature("vigorOfTheHillGiant").description
+    assert general_feat_prerequisites_met(GeneralFeatType.SQUAT_NIMBLENESS, dwarf_sheet)
+    assert general_feat_prerequisites_met(GeneralFeatType.MODERATELY_ARMORED, dwarf_sheet)
+    assert not general_feat_prerequisites_met(GeneralFeatType.HEAVILY_ARMORED, dwarf_sheet)
+    assert general_feat_prerequisites_met(GeneralFeatType.DEFENSIVE_DUELIST, dragonborn_sheet)
+    assert general_feat_prerequisites_met(GeneralFeatType.DRAGON_FEAR, dragonborn_sheet)
 
 
 def test_feat_predicates_return_false_for_unscoped_effects() -> None:
@@ -1202,7 +1242,7 @@ def test_fighter_level_progression_exposes_hit_point_and_asi_choices() -> None:
     assert [option.value for option in choices["hitPointIncrease"].options] == ["fixed", "roll"]
     assert choices["fighterAbilityScoreImprovement"].choiceType.name == "ABILITY_SCORE_IMPROVEMENT"
     assert "alert" in {option.value for option in choices["fighterAbilityScoreImprovement"].options}
-    assert "warCaster" in {option.value for option in choices["fighterAbilityScoreImprovement"].options}
+    assert "warCaster" not in {option.value for option in choices["fighterAbilityScoreImprovement"].options}
 
 
 def test_fighter_progression_labels_legacy_options() -> None:

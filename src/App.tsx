@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MutableRefObject } from "react";
 import { RollResolutionMode, SheetSectionType, TokenKind } from "./types";
-import type { AbilityType, Asset, Board, CharacterSheet, ConditionType, EquipmentSlot, FogState, PlayerSummary, ProgressionChoice, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
+import type { AbilityScores, AbilityType, Asset, Board, CharacterBuilderDraft, CharacterBuilderOptions, CharacterSheet, ConditionType, EquipmentSlot, FogState, PlayerSummary, ProgressionChoice, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
 
 const DEFAULT_BOARD_WIDTH = 1200;
 const DEFAULT_BOARD_HEIGHT = 720;
@@ -17,6 +17,9 @@ const DEFAULT_FOG: FogState = { hideMode: false, brushSize: 120, revealedAreas: 
 const DEFAULT_BOARD: Board = { id: "", name: "", width: DEFAULT_BOARD_WIDTH, height: DEFAULT_BOARD_HEIGHT };
 const ROLL_HISTORY_LIMIT = 10;
 const SAME_ABILITY_VALUE = "__same__";
+const ABILITY_SCORE_METHOD_STANDARD_ARRAY = "standardArray";
+const ABILITY_SCORE_METHOD_POINT_BUY = "pointBuy";
+const ABILITY_SCORE_METHOD_RANDOM = "random";
 const ABILITY_SCORE_OPTIONS: { value: AbilityType; label: string }[] = [
   { value: "strength", label: "Strength" },
   { value: "dexterity", label: "Dexterity" },
@@ -740,7 +743,7 @@ export function App() {
   const updateSheetLevel = useCallback(
     async (sheet: CharacterSheet, delta: 1 | -1) => {
       const response = await fetch(
-        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/level?playerKey=${encodeURIComponent(playerKey)}&delta=${encodeURIComponent(delta)}`,
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/level?playerKey=${encodeURIComponent(playerKey)}&delta=${encodeURIComponent(delta)}&className=${encodeURIComponent(sheet.characterClass.name)}`,
         { method: "POST" }
       );
       if (!response.ok) {
@@ -811,12 +814,33 @@ export function App() {
     [playerKey]
   );
 
+  const createCharacter = useCallback(
+    async (draft: CharacterBuilderDraft) => {
+      const response = await fetch(`/api/rooms/${encodeURIComponent(getInitialRoomId())}/characters?playerKey=${encodeURIComponent(playerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft)
+      });
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; rollHistory: RollLogEntry[] };
+      setSheets(body.sheets);
+      setRolls(body.pendingRolls);
+      setRollHistory(body.rollHistory);
+      setSheetStatus("idle");
+    },
+    [playerKey]
+  );
+
   if (view === "sheet") {
     return (
       <SheetView
         connection={connection}
         expandedSheetId={expandedSheetId}
         isDm={isDm}
+        onCreateCharacter={createCharacter}
         onExpand={setExpandedSheetId}
         onRollDamage={rollDamage}
         onRollAttack={rollAttack}
@@ -1005,6 +1029,7 @@ type SheetViewProps = {
   connection: ConnectionState;
   expandedSheetId: string | null;
   isDm: boolean;
+  onCreateCharacter: (draft: CharacterBuilderDraft) => Promise<void>;
   onExpand: (sheetId: string | null) => void;
   onClearSheetRolls: (sheet: CharacterSheet) => void;
   onRollAbilityCheck: (sheet: CharacterSheet, ability: string) => void;
@@ -1026,10 +1051,11 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
+  const showCharacterBuilder = shouldShowCharacterBuilder(isDm, playerKey, partySheets);
   const [draggingRollId, setDraggingRollId] = useState<string | null>(null);
   const [dropTargetSheetId, setDropTargetSheetId] = useState<string | null>(null);
   const [clearedCardRollIds, setClearedCardRollIds] = useState<Set<string>>(() => new Set());
@@ -1114,6 +1140,7 @@ function SheetView({ connection, expandedSheetId, isDm, onClearSheetRolls, onExp
         />
       ) : (
         <div className="sheet-sections" aria-busy={sheetStatus === "loading"}>
+          {showCharacterBuilder && <CharacterBuilderPanel isDm={isDm} onCreateCharacter={onCreateCharacter} playerKey={playerKey} sheets={partySheets} />}
           <SheetSection
             title="Party"
             sheets={partySheets}
@@ -1177,6 +1204,431 @@ function SheetView({ connection, expandedSheetId, isDm, onClearSheetRolls, onExp
       </aside>
     </main>
   );
+}
+
+function CharacterBuilderPanel({
+  isDm,
+  onCreateCharacter,
+  playerKey,
+  sheets
+}: {
+  isDm: boolean;
+  onCreateCharacter: (draft: CharacterBuilderDraft) => Promise<void>;
+  playerKey: string;
+  sheets: CharacterSheet[];
+}) {
+  const [options, setOptions] = useState<CharacterBuilderOptions | null>(null);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const memberOptions = useMemo(() => characterBuilderMemberOptions(isDm, playerKey, sheets), [isDm, playerKey, sheets]);
+  const [draft, setDraft] = useState<CharacterBuilderDraft>(() => defaultCharacterBuilderDraft(memberOptions[0]?.value ?? playerKey));
+  const backgroundDetail = options?.backgroundDetails[draft.background];
+  const usesScorePool = draft.abilityScoreMethod !== ABILITY_SCORE_METHOD_POINT_BUY;
+  const scorePool = draft.abilityScoreMethod === ABILITY_SCORE_METHOD_RANDOM ? draft.rolledAbilityScores : options?.standardArray ?? [];
+  const availableScoreCounts = countScoreValues(scorePool);
+  const pointBuySpent = ABILITY_SCORE_OPTIONS.reduce((sum, ability) => sum + (options?.pointBuyCosts[String(draft.baseAbilityScores[ability.value])] ?? 0), 0);
+  const backgroundIncreaseMode = Object.values(draft.backgroundAbilityIncreases).filter((increase) => increase > 0).length === 3 ? "oneEach" : "twoOne";
+  const backgroundPlusTwo = ABILITY_SCORE_OPTIONS.find((ability) => draft.backgroundAbilityIncreases[ability.value] === 2)?.value ?? (backgroundDetail?.abilityScores[0]?.value as AbilityType | undefined);
+  const backgroundPlusOne = ABILITY_SCORE_OPTIONS.find((ability) => draft.backgroundAbilityIncreases[ability.value] === 1)?.value ?? (backgroundDetail?.abilityScores[1]?.value as AbilityType | undefined);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/rooms/${encodeURIComponent(getInitialRoomId())}/character-builder/options`)
+      .then((response) => response.json())
+      .then((body: CharacterBuilderOptions) => {
+        if (active) {
+          setOptions(body);
+          setDraft((current) => normalizeCharacterBuilderDraft(current, body));
+        }
+      })
+      .catch((error) => console.error(error));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setDraft((current) => {
+      const fallbackMemberId = memberOptions[0]?.value ?? playerKey;
+      const memberId = isDm && memberOptions.some((option) => option.value === current.memberId) ? current.memberId : fallbackMemberId;
+      return { ...current, memberId };
+    });
+  }, [isDm, memberOptions, playerKey]);
+
+  const updateDraft = (patch: Partial<CharacterBuilderDraft>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+  const updateBaseAbilityScore = (ability: AbilityType, value: number) => {
+    setDraft((current) => ({
+      ...current,
+      baseAbilityScores: updatedBaseAbilityScores(current, ability, value)
+    }));
+  };
+  const updateBackground = (background: string) => {
+    if (!options) {
+      updateDraft({ background });
+      return;
+    }
+    setDraft((current) => normalizeCharacterBuilderDraft({ ...current, background }, options));
+  };
+  const updateIncreaseMode = (mode: "twoOne" | "oneEach") => {
+    if (!backgroundDetail) return;
+    const abilities = backgroundDetail.abilityScores.map((option) => option.value as AbilityType);
+    updateDraft({ backgroundAbilityIncreases: abilityIncreasesForMode(mode, abilities) });
+  };
+  const updateTwoOneIncrease = (amount: 1 | 2, ability: AbilityType) => {
+    if (!backgroundDetail) return;
+    const abilities = backgroundDetail.abilityScores.map((option) => option.value as AbilityType);
+    const otherAmount = amount === 2 ? 1 : 2;
+    const otherAbility = ABILITY_SCORE_OPTIONS.find((option) => draft.backgroundAbilityIncreases[option.value] === otherAmount)?.value;
+    updateDraft({ backgroundAbilityIncreases: abilityIncreasesForTwoOne(abilities, amount === 2 ? ability : otherAbility, amount === 1 ? ability : otherAbility) });
+  };
+  const updateAbilityScoreMethod = (abilityScoreMethod: string) => {
+    if (!options) {
+      updateDraft({ abilityScoreMethod });
+      return;
+    }
+    const rolledAbilityScores = abilityScoreMethod === ABILITY_SCORE_METHOD_RANDOM && draft.rolledAbilityScores.length !== 6 ? rollAbilityScorePool() : draft.rolledAbilityScores;
+    setDraft((current) => ({
+      ...current,
+      abilityScoreMethod,
+      rolledAbilityScores,
+      baseAbilityScores: baseAbilityScoresForMethod(abilityScoreMethod, options, rolledAbilityScores)
+    }));
+  };
+  const rerollAbilityScores = () => {
+    if (!options) return;
+    const rolledAbilityScores = rollAbilityScorePool();
+    updateDraft({
+      abilityScoreMethod: ABILITY_SCORE_METHOD_RANDOM,
+      rolledAbilityScores,
+      baseAbilityScores: baseAbilityScoresForMethod(ABILITY_SCORE_METHOD_RANDOM, options, rolledAbilityScores)
+    });
+  };
+  const characterBuilderInvalid = draft.abilityScoreMethod === ABILITY_SCORE_METHOD_POINT_BUY && pointBuySpent > (options?.pointBuyPoints ?? 0);
+
+  const create = async () => {
+    setSaving(true);
+    try {
+      await onCreateCharacter(draft);
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!options) return null;
+  if (memberOptions.length === 0) return null;
+
+  return (
+    <section className="sheet-panel character-builder-panel">
+      <div className="panel-title-row">
+        <h2>Character Builder</h2>
+        <button type="button" onClick={() => setOpen((current) => !current)}>
+          {open ? "Close" : "Build"}
+        </button>
+      </div>
+      {open && (
+        <div className="character-builder-grid">
+          <label>
+            Slot
+            <select value={draft.memberId} disabled={!isDm} onChange={(event) => updateDraft({ memberId: event.currentTarget.value })}>
+              {memberOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Name
+            <input value={draft.name} onChange={(event) => updateDraft({ name: event.currentTarget.value })} />
+          </label>
+          <label>
+            Class
+            <select value={draft.className} onChange={(event) => updateDraft({ className: event.currentTarget.value })}>
+              {options.classes.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Race
+            <select value={draft.race} onChange={(event) => updateDraft({ race: event.currentTarget.value })}>
+              {options.races.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Background
+            <select value={draft.background} onChange={(event) => updateBackground(event.currentTarget.value)}>
+              {options.backgrounds.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Scores
+            <select value={draft.abilityScoreMethod} onChange={(event) => updateAbilityScoreMethod(event.currentTarget.value)}>
+              {options.abilityScoreMethods.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Tool
+            <select value={draft.toolProficiency ?? ""} onChange={(event) => updateDraft({ toolProficiency: event.currentTarget.value })}>
+              {(backgroundDetail?.toolOptions ?? []).length === 0 && <option value="">None</option>}
+              {(backgroundDetail?.toolOptions ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Equipment
+            <select value={draft.equipmentChoice} onChange={(event) => updateDraft({ equipmentChoice: event.currentTarget.value })}>
+              {(backgroundDetail?.equipmentChoices ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Ability Boost
+            <select value={backgroundIncreaseMode} onChange={(event) => updateIncreaseMode(event.currentTarget.value as "twoOne" | "oneEach")}>
+              <option value="twoOne">+2 / +1</option>
+              <option value="oneEach">+1 / +1 / +1</option>
+            </select>
+          </label>
+          {backgroundIncreaseMode === "twoOne" && (
+            <>
+              <label>
+                +2
+                <select value={backgroundPlusTwo ?? ""} onChange={(event) => updateTwoOneIncrease(2, event.currentTarget.value as AbilityType)}>
+                  {(backgroundDetail?.abilityScores ?? []).map((option) => (
+                    <option key={option.value} value={option.value} disabled={option.value === backgroundPlusOne}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                +1
+                <select value={backgroundPlusOne ?? ""} onChange={(event) => updateTwoOneIncrease(1, event.currentTarget.value as AbilityType)}>
+                  {(backgroundDetail?.abilityScores ?? []).map((option) => (
+                    <option key={option.value} value={option.value} disabled={option.value === backgroundPlusTwo}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+          <div className="ability-score-editor">
+            <div className="ability-score-editor-meta">
+              {draft.abilityScoreMethod === ABILITY_SCORE_METHOD_POINT_BUY && <span>Point Buy {pointBuySpent} / {options.pointBuyPoints}</span>}
+              {draft.abilityScoreMethod === ABILITY_SCORE_METHOD_RANDOM && (
+                <>
+                  <span>Rolled {draft.rolledAbilityScores.join(", ")}</span>
+                  <button type="button" onClick={rerollAbilityScores}>Roll</button>
+                </>
+              )}
+            </div>
+            {ABILITY_SCORE_OPTIONS.map((ability) => (
+              <label key={ability.value}>
+                {ability.label}
+                <span className="ability-score-select-row">
+                  <select value={draft.baseAbilityScores[ability.value]} onChange={(event) => updateBaseAbilityScore(ability.value, Number(event.currentTarget.value))}>
+                    {scoreOptionsForMethod(draft.abilityScoreMethod, options, scorePool).map((score) => (
+                      <option key={score} value={score} disabled={scoreOptionDisabled(score, ability.value, draft, options, usesScorePool, availableScoreCounts, pointBuySpent)}>
+                        {score}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="ability-score-total">{draft.baseAbilityScores[ability.value] + draft.backgroundAbilityIncreases[ability.value]}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <button className="builder-submit" type="button" disabled={saving || characterBuilderInvalid} onClick={create}>
+            {saving ? "Creating" : "Create Character"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function defaultCharacterBuilderDraft(playerKey: string): CharacterBuilderDraft {
+  return {
+    memberId: playerKey.startsWith("player-") ? playerKey : "player-1",
+    name: "New Character",
+    className: "rogue",
+    race: "dwarf",
+    background: "criminal",
+    abilityScoreMethod: ABILITY_SCORE_METHOD_STANDARD_ARRAY,
+    baseAbilityScores: defaultBaseAbilityScores(),
+    rolledAbilityScores: [],
+    backgroundAbilityIncreases: abilityIncreasesForTwoOne(["dexterity", "constitution", "intelligence"], "dexterity", "constitution"),
+    toolProficiency: "thievesTools",
+    equipmentChoice: "package"
+  };
+}
+
+function defaultBaseAbilityScores(): AbilityScores {
+  return {
+    strength: 8,
+    dexterity: 15,
+    constitution: 14,
+    intelligence: 13,
+    wisdom: 10,
+    charisma: 12
+  };
+}
+
+function normalizeCharacterBuilderDraft(draft: CharacterBuilderDraft, options: CharacterBuilderOptions): CharacterBuilderDraft {
+  const detail = options.backgroundDetails[draft.background];
+  if (!detail) return draft;
+  const toolProficiency = detail.toolOptions.some((option) => option.value === draft.toolProficiency) ? draft.toolProficiency : detail.toolOptions[0]?.value;
+  const equipmentChoice = detail.equipmentChoices.some((option) => option.value === draft.equipmentChoice) ? draft.equipmentChoice : detail.equipmentChoices[0]?.value ?? "package";
+  const abilities = detail.abilityScores.map((option) => option.value as AbilityType);
+  const validIncreases = abilities.length > 0 && ABILITY_SCORE_OPTIONS.every((ability) => {
+    const increase = draft.backgroundAbilityIncreases[ability.value];
+    return increase >= 0 && increase <= 2 && (increase === 0 || abilities.includes(ability.value));
+  });
+  const totalIncrease = Object.values(draft.backgroundAbilityIncreases).reduce((sum, increase) => sum + increase, 0);
+  return {
+    ...draft,
+    toolProficiency,
+    equipmentChoice,
+    backgroundAbilityIncreases: validIncreases && totalIncrease === 3 ? draft.backgroundAbilityIncreases : abilityIncreasesForMode("twoOne", abilities)
+  };
+}
+
+function baseAbilityScoresForMethod(method: string, options: CharacterBuilderOptions, rolledScores: number[]): AbilityScores {
+  if (method === ABILITY_SCORE_METHOD_POINT_BUY) {
+    return {
+      strength: 8,
+      dexterity: 15,
+      constitution: 14,
+      intelligence: 10,
+      wisdom: 10,
+      charisma: 8
+    };
+  }
+  const pool = method === ABILITY_SCORE_METHOD_RANDOM ? rolledScores : options.standardArray;
+  return abilityScoresFromPool(pool.length === 6 ? pool : options.standardArray);
+}
+
+function abilityScoresFromPool(pool: number[]): AbilityScores {
+  const sorted = [...pool].sort((left, right) => right - left);
+  return {
+    strength: sorted[5] ?? 8,
+    dexterity: sorted[0] ?? 15,
+    constitution: sorted[1] ?? 14,
+    intelligence: sorted[2] ?? 13,
+    wisdom: sorted[4] ?? 10,
+    charisma: sorted[3] ?? 12
+  };
+}
+
+function scoreOptionsForMethod(method: string, options: CharacterBuilderOptions, scorePool: number[]): number[] {
+  if (method === ABILITY_SCORE_METHOD_POINT_BUY) {
+    return Object.keys(options.pointBuyCosts).map(Number).sort((left, right) => left - right);
+  }
+  return Array.from(new Set(scorePool)).sort((left, right) => right - left);
+}
+
+function scoreOptionDisabled(
+  score: number,
+  ability: AbilityType,
+  draft: CharacterBuilderDraft,
+  options: CharacterBuilderOptions,
+  usesScorePool: boolean,
+  availableScoreCounts: Map<number, number>,
+  pointBuySpent: number
+): boolean {
+  if (!usesScorePool) {
+    const currentScore = draft.baseAbilityScores[ability];
+    const currentCost = options.pointBuyCosts[String(currentScore)] ?? 0;
+    const nextCost = options.pointBuyCosts[String(score)] ?? 0;
+    return pointBuySpent - currentCost + nextCost > options.pointBuyPoints;
+  }
+  return (availableScoreCounts.get(score) ?? 0) === 0;
+}
+
+function countScoreValues(scores: number[]): Map<number, number> {
+  const counts = new Map<number, number>();
+  scores.forEach((score) => counts.set(score, (counts.get(score) ?? 0) + 1));
+  return counts;
+}
+
+function updatedBaseAbilityScores(draft: CharacterBuilderDraft, ability: AbilityType, nextScore: number): AbilityScores {
+  if (draft.abilityScoreMethod === ABILITY_SCORE_METHOD_POINT_BUY) {
+    return { ...draft.baseAbilityScores, [ability]: nextScore };
+  }
+  const currentScore = draft.baseAbilityScores[ability];
+  const holder = ABILITY_SCORE_OPTIONS.find((option) => option.value !== ability && draft.baseAbilityScores[option.value] === nextScore)?.value;
+  if (!holder) {
+    return { ...draft.baseAbilityScores, [ability]: nextScore };
+  }
+  return {
+    ...draft.baseAbilityScores,
+    [ability]: nextScore,
+    [holder]: currentScore
+  };
+}
+
+function rollAbilityScorePool(): number[] {
+  return Array.from({ length: 6 }, rollAbilityScore);
+}
+
+function rollAbilityScore(): number {
+  const dice = Array.from({ length: 4 }, () => Math.floor(Math.random() * 6) + 1).sort((left, right) => left - right);
+  return dice.slice(1).reduce((sum, die) => sum + die, 0);
+}
+
+function abilityIncreasesForMode(mode: "twoOne" | "oneEach", abilities: AbilityType[]): AbilityScores {
+  if (mode === "oneEach") {
+    return abilityIncreasesFromEntries(abilities.map((ability) => [ability, 1]));
+  }
+  return abilityIncreasesForTwoOne(abilities, abilities[0], abilities[1]);
+}
+
+function abilityIncreasesForTwoOne(abilities: AbilityType[], plusTwo?: AbilityType, plusOne?: AbilityType): AbilityScores {
+  const selectedPlusTwo = plusTwo && abilities.includes(plusTwo) ? plusTwo : abilities[0];
+  const selectedPlusOne = plusOne && abilities.includes(plusOne) && plusOne !== selectedPlusTwo ? plusOne : abilities.find((ability) => ability !== selectedPlusTwo);
+  return abilityIncreasesFromEntries([
+    [selectedPlusTwo, 2],
+    [selectedPlusOne, 1]
+  ]);
+}
+
+function abilityIncreasesFromEntries(entries: ([AbilityType | undefined, number])[]): AbilityScores {
+  const scores: AbilityScores = {
+    strength: 0,
+    dexterity: 0,
+    constitution: 0,
+    intelligence: 0,
+    wisdom: 0,
+    charisma: 0
+  };
+  entries.forEach(([ability, increase]) => {
+    if (ability) scores[ability] = increase;
+  });
+  return scores;
 }
 
 function SheetSection({
@@ -2682,13 +3134,14 @@ function normalizeRequestedPlayerKey(value: string) {
 
   const player = value.trim().toLowerCase();
   if (player === "dm") return "dm";
-  if (player && /^player-[1-4]$/.test(player)) return player;
-  if (player && /^[1-4]$/.test(player)) return `player-${player}`;
+  if (player && /^player-[1-8]$/.test(player)) return player;
+  if (player && /^[1-8]$/.test(player)) return `player-${player}`;
   return player || "player-1";
 }
 
 function resolvePlayerKey(requestedPlayerKey: string, tokens: Token[]) {
   if (requestedPlayerKey === "dm") return "dm";
+  if (isPlayerSlot(requestedPlayerKey)) return requestedPlayerKey;
   if (tokens.some((token) => token.owner === requestedPlayerKey)) return requestedPlayerKey;
 
   const normalized = normalizeIdentity(requestedPlayerKey);
@@ -2699,6 +3152,35 @@ function resolvePlayerKey(requestedPlayerKey: string, tokens: Token[]) {
 function playerUrlValue(playerKey: string, tokens: Token[]) {
   if (playerKey === "dm") return "dm";
   return tokens.find((token) => token.kind === TokenKind.CHARACTER && token.owner === playerKey)?.name ?? playerKey;
+}
+
+function shouldShowCharacterBuilder(isDm: boolean, playerKey: string, sheets: CharacterSheet[]) {
+  const occupiedSheets = sheets.filter(isPlayerSlotSheet);
+  if (occupiedSheets.length >= 8) return false;
+  if (isDm) return true;
+  if (!isPlayerSlot(playerKey)) return false;
+  return !occupiedSheets.some((sheet) => sheet.id === playerKey || sheet.owner === playerKey);
+}
+
+function characterBuilderMemberOptions(isDm: boolean, playerKey: string, sheets: CharacterSheet[]) {
+  const occupiedSheets = sheets.filter(isPlayerSlotSheet);
+  if (!isDm) {
+    return isPlayerSlot(playerKey) && !occupiedSheets.some((sheet) => sheet.id === playerKey || sheet.owner === playerKey)
+      ? [{ value: playerKey, label: formatPlayerName(playerKey, []) }]
+      : [];
+  }
+  return Array.from({ length: 8 }, (_value, index) => {
+    const value = `player-${index + 1}`;
+    return occupiedSheets.some((sheet) => sheet.id === value || sheet.owner === value) ? null : { value, label: value };
+  }).filter((option): option is { value: string; label: string } => option !== null);
+}
+
+function isPlayerSlotSheet(sheet: CharacterSheet) {
+  return isPlayerSlot(sheet.id) || isPlayerSlot(sheet.owner);
+}
+
+function isPlayerSlot(playerKey: string) {
+  return /^player-[1-8]$/.test(playerKey);
 }
 
 function formatPlayerName(playerKey: string, tokens: Token[] = []) {

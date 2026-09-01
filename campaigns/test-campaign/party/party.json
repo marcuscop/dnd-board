@@ -594,6 +594,839 @@
               "value": "ex4.png"
             }
           }
+        },
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": {
+              "$type": "str",
+              "value": "player-5"
+            },
+            "name": {
+              "$type": "str",
+              "value": "Bob"
+            },
+            "maxHp": {
+              "$type": "int",
+              "value": 11
+            },
+            "abilityScores": {
+              "$type": "AbilityScores",
+              "fields": {
+                "strength": {
+                  "$type": "int",
+                  "value": 11
+                },
+                "dexterity": {
+                  "$type": "int",
+                  "value": 12
+                },
+                "constitution": {
+                  "$type": "int",
+                  "value": 14
+                },
+                "intelligence": {
+                  "$type": "int",
+                  "value": 12
+                },
+                "wisdom": {
+                  "$type": "int",
+                  "value": 16
+                },
+                "charisma": {
+                  "$type": "int",
+                  "value": 11
+                }
+              }
+            },
+            "sheet": {
+              "$type": "PartyMemberSheet",
+              "fields": {
+                "race": {
+                  "$type": "str",
+                  "value": "Dwarf"
+                },
+                "background": {
+                  "$type": "str",
+                  "value": "Sage"
+                },
+                "classes": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "CharacterClassLevel",
+                      "fields": {
+                        "name": {
+                          "$type": "ClassType",
+                          "value": "ROGUE"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 2
+                        }
+                      }
+                    }
+                  ]
+                },
+                "speed": {
+                  "$type": "int",
+                  "value": 30
+                },
+                "skills": {
+                  "$type": "dict",
+                  "value": {
+                    "arcana": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    },
+                    "history": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    }
+                  }
+                },
+                "proficiencies": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "str",
+                      "value": "Calligrapher's Supplies"
+                    }
+                  ]
+                },
+                "feats": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "magicInitiate"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Magic Initiate (Wizard)"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Player's Handbook (2024)"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Learn two cantrips and one 1st-level spell from a class list."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "traits": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfdarkvision"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Darkvision"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "You have Darkvision with a range of 120 feet."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfdwarvenResilience"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Dwarven Resilience"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "You have resistance to Poison damage and advantage on saving throws to avoid or end the Poisoned condition."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfdwarvenToughness"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Dwarven Toughness"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Your Hit Point maximum increases by 1, and it increases by 1 again whenever you gain a level."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfstonecunning"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Stonecunning"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "BONUS_ACTION"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "As a Bonus Action, gain Tremorsense with a range of 60 feet for 10 minutes. You can use this a number of times equal to your Proficiency Bonus per Long Rest."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "features": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "sagetoolProficiency"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Tool Proficiency"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Sage"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Gain proficiency with Calligrapher's Supplies."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "damageResistances": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "DamageType",
+                      "value": "POISON"
+                    }
+                  ]
+                },
+                "equipment": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "sageEquipmentPackage"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Sage Equipment Package"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": "Starting equipment package from background."
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": {
+              "$type": "str",
+              "value": "player-6"
+            },
+            "name": {
+              "$type": "str",
+              "value": "Bilbo"
+            },
+            "maxHp": {
+              "$type": "int",
+              "value": 20
+            },
+            "abilityScores": {
+              "$type": "AbilityScores",
+              "fields": {
+                "strength": {
+                  "$type": "int",
+                  "value": 8
+                },
+                "dexterity": {
+                  "$type": "int",
+                  "value": 18
+                },
+                "constitution": {
+                  "$type": "int",
+                  "value": 17
+                },
+                "intelligence": {
+                  "$type": "int",
+                  "value": 14
+                },
+                "wisdom": {
+                  "$type": "int",
+                  "value": 11
+                },
+                "charisma": {
+                  "$type": "int",
+                  "value": 12
+                }
+              }
+            },
+            "sheet": {
+              "$type": "PartyMemberSheet",
+              "fields": {
+                "race": {
+                  "$type": "str",
+                  "value": "Dwarf"
+                },
+                "background": {
+                  "$type": "str",
+                  "value": "Criminal"
+                },
+                "classes": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "CharacterClassLevel",
+                      "fields": {
+                        "name": {
+                          "$type": "ClassType",
+                          "value": "ROGUE"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 2
+                        }
+                      }
+                    }
+                  ]
+                },
+                "speed": {
+                  "$type": "int",
+                  "value": 30
+                },
+                "skills": {
+                  "$type": "dict",
+                  "value": {
+                    "sleightOfHand": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    },
+                    "stealth": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    }
+                  }
+                },
+                "proficiencies": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "str",
+                      "value": "Thieves' Tools"
+                    }
+                  ]
+                },
+                "feats": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "alert"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Alert"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Player's Handbook (2024)"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "+5 initiative, cannot be surprised, and unseen attackers do not gain advantage."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "traits": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfdarkvision"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Darkvision"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "You have Darkvision with a range of 120 feet."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfdwarvenResilience"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Dwarven Resilience"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "You have resistance to Poison damage and advantage on saving throws to avoid or end the Poisoned condition."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfdwarvenToughness"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Dwarven Toughness"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Your Hit Point maximum increases by 1, and it increases by 1 again whenever you gain a level."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfstonecunning"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Stonecunning"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "BONUS_ACTION"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "As a Bonus Action, gain Tremorsense with a range of 60 feet for 10 minutes. You can use this a number of times equal to your Proficiency Bonus per Long Rest."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "features": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "criminaltoolProficiency"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Tool Proficiency"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Criminal"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Gain proficiency with Thieves' Tools."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "hitPointIncreases": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "int",
+                      "value": 8
+                    }
+                  ]
+                },
+                "damageResistances": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "DamageType",
+                      "value": "POISON"
+                    }
+                  ]
+                },
+                "equipment": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "criminalEquipmentPackage"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Criminal Equipment Package"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": "Starting equipment package from background."
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": {
+              "$type": "str",
+              "value": "player-7"
+            },
+            "name": {
+              "$type": "str",
+              "value": "Freddy"
+            },
+            "maxHp": {
+              "$type": "int",
+              "value": 12
+            },
+            "abilityScores": {
+              "$type": "AbilityScores",
+              "fields": {
+                "strength": {
+                  "$type": "int",
+                  "value": 14
+                },
+                "dexterity": {
+                  "$type": "int",
+                  "value": 14
+                },
+                "constitution": {
+                  "$type": "int",
+                  "value": 15
+                },
+                "intelligence": {
+                  "$type": "int",
+                  "value": 12
+                },
+                "wisdom": {
+                  "$type": "int",
+                  "value": 11
+                },
+                "charisma": {
+                  "$type": "int",
+                  "value": 8
+                }
+              }
+            },
+            "sheet": {
+              "$type": "PartyMemberSheet",
+              "fields": {
+                "race": {
+                  "$type": "str",
+                  "value": "Boggart"
+                },
+                "background": {
+                  "$type": "str",
+                  "value": "Harper"
+                },
+                "classes": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "CharacterClassLevel",
+                      "fields": {
+                        "name": {
+                          "$type": "ClassType",
+                          "value": "FIGHTER"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "fightingStyles": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "FightingStyleType",
+                              "value": "PROTECTION"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "speed": {
+                  "$type": "int",
+                  "value": 30
+                },
+                "traits": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "boggartspeciesTraits"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Species Traits"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Boggart"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Detailed species mechanics are not implemented yet."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "equipment": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "harperEquipmentPackage"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Harper Equipment Package"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": "Starting equipment package from background."
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
         }
       ]
     }

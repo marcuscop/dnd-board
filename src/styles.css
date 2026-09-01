@@ -676,6 +676,86 @@ canvas.is-dragging,
   gap: 10px;
 }
 
+.character-builder-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-title-row h2 {
+  margin: 0;
+}
+
+.character-builder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  border-top: 1px solid rgba(216, 156, 70, 0.32);
+  padding-top: 10px;
+}
+
+.character-builder-grid label,
+.ability-score-editor label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: #d8b778;
+  font-size: 0.78rem;
+}
+
+.character-builder-grid input,
+.character-builder-grid select {
+  width: 100%;
+}
+
+.ability-score-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+}
+
+.ability-score-editor-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: #f2e5c6;
+  font-size: 0.82rem;
+}
+
+.ability-score-editor-meta button {
+  padding: 5px 10px;
+}
+
+.ability-score-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 6px;
+}
+
+.ability-score-total {
+  display: inline-grid;
+  place-items: center;
+  min-height: 34px;
+  border: 1px solid rgba(216, 156, 70, 0.32);
+  color: #f2e5c6;
+  background: rgba(18, 14, 10, 0.68);
+  font-weight: 700;
+}
+
+.builder-submit {
+  align-self: end;
+}
+
 .progression-choice-list {
   display: grid;
   gap: 10px;

@@ -13,6 +13,7 @@ from dnd_board.character_sheet import (
     ProgressionChoiceType,
     RuneType,
     SheetFeature,
+    SpellSource,
     SpellEntry,
     enum_key,
     enum_label,
@@ -85,6 +86,11 @@ class HitDieLabel(Enum):
     ROGUE = "Rogue d8"
 
 
+class HitDieValue(Enum):
+    FIGHTER = 10
+    ROGUE = 8
+
+
 class SpellOptionLabel(Enum):
     CANTRIP = "Cantrip"
     LEVEL = "Level {level}"
@@ -96,6 +102,7 @@ def progression_choices(
     hit_point_increases: list[int],
     ability_score_improvements: list[str],
     feats: list[SheetFeature] | None = None,
+    feat_eligibility_sheet=None,
 ) -> list[ProgressionChoice]:
     fighter = fighter_class(classes)
     rogue = rogue_class(classes)
@@ -127,7 +134,7 @@ def progression_choices(
             minimum=asi_count,
             maximum=asi_count,
             selected=[*ability_score_improvements, *selected_general_feat_keys(feats)],
-            options=general_feat_options(feats),
+            options=general_feat_options(feats, feat_eligibility_sheet),
         ))
 
     if rogue is not None and len(ability_score_improvements) < asi_count and len(ability_score_improvements) >= fighter_asi_count:
@@ -141,7 +148,7 @@ def progression_choices(
             minimum=asi_count,
             maximum=asi_count,
             selected=[*ability_score_improvements, *selected_general_feat_keys(feats)],
-            options=general_feat_options(feats),
+            options=general_feat_options(feats, feat_eligibility_sheet),
         ))
 
     if fighter is not None and fighter.level >= 3 and fighter.subclass is None:
@@ -401,7 +408,7 @@ def arcane_trickster_progression_choices(rogue: CharacterClassLevel | None, spel
     if rogue is None:
         return []
     spell_count = rogue_configured_spell_count(rogue)
-    arcane_trickster_spells = [spell for spell in spells if spell.source.value == "Arcane Trickster"]
+    arcane_trickster_spells = [spell for spell in spells if spell.source == SpellSource.ARCANE_TRICKSTER]
     if len(arcane_trickster_spells) >= spell_count:
         return []
     return [
@@ -445,6 +452,12 @@ def hit_die_label(class_name: ClassType) -> str:
     if class_name == ClassType.ROGUE:
         return HitDieLabel.ROGUE.value
     return HitDieLabel.FIGHTER.value
+
+
+def class_hit_die(class_name: ClassType) -> int:
+    if class_name == ClassType.ROGUE:
+        return HitDieValue.ROGUE.value
+    return HitDieValue.FIGHTER.value
 
 
 def hit_point_choice_options() -> list[ProgressionChoiceOption]:

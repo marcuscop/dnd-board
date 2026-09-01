@@ -271,6 +271,43 @@ export type ProgressionChoice = {
   }[];
 };
 
+export type CharacterBuilderOption = {
+  value: string;
+  label: string;
+};
+
+export type CharacterBuilderOptions = {
+  roomId: string;
+  classes: CharacterBuilderOption[];
+  races: CharacterBuilderOption[];
+  backgrounds: CharacterBuilderOption[];
+  abilityScoreMethods: CharacterBuilderOption[];
+  standardArray: number[];
+  pointBuyCosts: Record<string, number>;
+  pointBuyPoints: number;
+  backgroundDetails: Record<string, CharacterBuilderBackgroundDetail>;
+};
+
+export type CharacterBuilderBackgroundDetail = {
+  abilityScores: CharacterBuilderOption[];
+  toolOptions: CharacterBuilderOption[];
+  equipmentChoices: CharacterBuilderOption[];
+};
+
+export type CharacterBuilderDraft = {
+  memberId: string;
+  name: string;
+  className: string;
+  race: string;
+  background: string;
+  abilityScoreMethod: string;
+  baseAbilityScores: AbilityScores;
+  rolledAbilityScores: number[];
+  backgroundAbilityIncreases: AbilityScores;
+  toolProficiency?: string;
+  equipmentChoice: string;
+};
+
 export type CharacterSheet = {
   id: string;
   tokenId: string;
