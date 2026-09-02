@@ -29,6 +29,7 @@ from dnd_board.character_sheet import (
     PartyMemberSheet,
     PartyMember,
     PartyManifest,
+    ProficiencyLevel,
     RollPayload,
     RollLogEntry,
     RollLogEntryType,
@@ -63,12 +64,13 @@ from dnd_board.character_sheet import (
 )
 from dnd_board.character_builder import (
     CharacterBuilderPayloadField,
+    SUPPORTED_CLASS_TYPES,
     build_party_member_config,
     character_builder_options,
     character_builder_request_from_payload,
     payload_key,
 )
-from dnd_board.rules.progression import ProgressionChoiceId, apply_progression_choice, class_hit_die, fighter_asi_levels_up_to, parse_progression_choice_id, prune_progression_choices, rogue_asi_levels_up_to, update_class_level
+from dnd_board.rules.progression import ProgressionChoiceId, apply_progression_choice, class_hit_die, fighter_asi_levels_up_to, fighter_skill_option_types, fighter_skill_proficiency_count, parse_progression_choice_id, prune_progression_choices, rogue_asi_levels_up_to, rogue_expertise_count, rogue_skill_option_types, rogue_skill_proficiency_count, update_class_level
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -379,7 +381,7 @@ async def update_sheet_level(room_id: str, sheet_id: str, playerKey: str, delta:
         raise HTTPException(status_code=403, detail="Only the DM can level sheets")
 
     class_type = enum_value(ClassType, className)
-    if class_type is None:
+    if class_type not in SUPPORTED_CLASS_TYPES:
         raise HTTPException(status_code=400, detail="Invalid class")
 
     sanitized_sheet_id = sanitize_asset_id(sheet_id)
@@ -440,6 +442,24 @@ async def update_sheet_progression_choice(room_id: str, sheet_id: str, choice_id
             room.id,
             sanitize_asset_id(sheet_id),
             lambda member: apply_member_ability_score_improvement(member, [str(value) for value in values]),
+        )
+    elif parsed_choice_id == ProgressionChoiceId.FIGHTER_SKILL_PROFICIENCIES:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_fighter_skill_proficiencies(member, [str(value) for value in values]),
+        )
+    elif parsed_choice_id == ProgressionChoiceId.ROGUE_SKILL_PROFICIENCIES:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_rogue_skill_proficiencies(member, [str(value) for value in values]),
+        )
+    elif parsed_choice_id == ProgressionChoiceId.ROGUE_EXPERTISE:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_rogue_expertise(member, [str(value) for value in values]),
         )
     elif parsed_choice_id == ProgressionChoiceId.ELDRITCH_KNIGHT_SPELLS:
         updated_member = update_party_member_config(
@@ -1988,12 +2008,98 @@ def apply_member_arcane_trickster_spells(member: PartyMemberConfig, values: list
     member.sheet.spells = [*other_spells, *spells]
 
 
+def apply_member_fighter_skill_proficiencies(member: PartyMemberConfig, values: list[str]) -> None:
+    fighter = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.FIGHTER), None)
+    if fighter is None or fighter.level < 1:
+        raise HTTPException(status_code=400, detail="Fighter skill proficiencies are not available")
+
+    selected_skills = parse_skill_choices(values)
+    expected_count = fighter_skill_proficiency_count(fighter)
+    if len(selected_skills) != expected_count:
+        raise HTTPException(status_code=400, detail=f"Choose {expected_count} Fighter skill proficiencies")
+
+    fighter_options = set(fighter_skill_option_types())
+    if any(skill not in fighter_options for skill in selected_skills):
+        raise HTTPException(status_code=400, detail="Invalid Fighter skill proficiency")
+
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[fighter])
+    skills = dict(member.sheet.skills or {})
+    for skill in selected_skills:
+        skill_key = enum_key(skill)
+        if skills.get(skill_key) != ProficiencyLevel.EXPERTISE:
+            skills[skill_key] = ProficiencyLevel.PROFICIENT
+    member.sheet.skills = skills or None
+
+
+def apply_member_rogue_skill_proficiencies(member: PartyMemberConfig, values: list[str]) -> None:
+    rogue = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.ROGUE), None)
+    if rogue is None or rogue.level < 1:
+        raise HTTPException(status_code=400, detail="Rogue skill proficiencies are not available")
+
+    selected_skills = parse_skill_choices(values)
+    expected_count = rogue_skill_proficiency_count(rogue)
+    if len(selected_skills) != expected_count:
+        raise HTTPException(status_code=400, detail=f"Choose {expected_count} Rogue skill proficiencies")
+
+    rogue_options = set(rogue_skill_option_types())
+    if any(skill not in rogue_options for skill in selected_skills):
+        raise HTTPException(status_code=400, detail="Invalid Rogue skill proficiency")
+
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[rogue])
+    skills = dict(member.sheet.skills or {})
+    for skill in selected_skills:
+        skill_key = enum_key(skill)
+        if skills.get(skill_key) != ProficiencyLevel.EXPERTISE:
+            skills[skill_key] = ProficiencyLevel.PROFICIENT
+    member.sheet.skills = skills or None
+
+
+def apply_member_rogue_expertise(member: PartyMemberConfig, values: list[str]) -> None:
+    rogue = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.ROGUE), None)
+    if rogue is None or rogue.level < 1:
+        raise HTTPException(status_code=400, detail="Rogue Expertise is not available")
+
+    selected_skills = parse_skill_choices(values)
+    skills = dict(member.sheet.skills if member.sheet and member.sheet.skills else {})
+    eligible_skill_keys = {
+        skill_key
+        for skill_key, proficiency in skills.items()
+        if proficiency in {ProficiencyLevel.PROFICIENT, ProficiencyLevel.EXPERTISE}
+    }
+    expected_count = min(rogue_expertise_count(rogue), len(eligible_skill_keys))
+    if len(selected_skills) != expected_count:
+        raise HTTPException(status_code=400, detail=f"Choose {expected_count} Rogue Expertise skills")
+    if any(enum_key(skill) not in eligible_skill_keys for skill in selected_skills):
+        raise HTTPException(status_code=400, detail="Expertise requires an existing skill proficiency")
+
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[rogue])
+    for skill in selected_skills:
+        skills[enum_key(skill)] = ProficiencyLevel.EXPERTISE
+    member.sheet.skills = skills or None
+
+
+def parse_skill_choices(values: list[str]) -> list[SkillType]:
+    selected: list[SkillType] = []
+    for value in unique_clean_values(values):
+        skill = enum_value(SkillType, value)
+        if skill is None:
+            raise HTTPException(status_code=400, detail="Invalid skill")
+        selected.append(skill)
+    return selected
+
+
 def class_hit_point_bump(member: PartyMemberConfig, class_name: ClassType, choice: str) -> int:
+    from dnd_board.rules.feats import GeneralFeatType
+
     constitution_modifier = member_constitution_modifier(member)
     hit_die = class_hit_die(class_name)
+    feat_bonus = 2 if member_has_general_feat(member, GeneralFeatType.TOUGH) else 0
     if normalize_choice_id(choice) == "roll":
-        return max(1, random.randint(1, hit_die) + constitution_modifier)
-    return max(1, (hit_die // 2 + 1) + constitution_modifier)
+        return max(1, random.randint(1, hit_die) + constitution_modifier + feat_bonus)
+    return max(1, (hit_die // 2 + 1) + constitution_modifier + feat_bonus)
 
 
 def class_level_one_hit_points(class_name: ClassType) -> int:
@@ -2003,6 +2109,14 @@ def class_level_one_hit_points(class_name: ClassType) -> int:
 def member_constitution_modifier(member: PartyMemberConfig) -> int:
     constitution = member.abilityScores.constitution if member.abilityScores else 10
     return ability_modifier(constitution)
+
+
+def member_has_general_feat(member: PartyMemberConfig, feat_type) -> bool:
+    from dnd_board.rules.feats import parse_general_feat
+
+    if member.sheet is None:
+        return False
+    return any(parse_general_feat(feature.id) == feat_type for feature in member.sheet.feats or [])
 
 
 def prune_member_hit_point_increases(member: PartyMemberConfig) -> None:
@@ -2058,12 +2172,14 @@ def is_feat_choice(values: list[str]) -> bool:
 
 
 def apply_member_feat_improvement(member: PartyMemberConfig, improvements: list[str], value: str) -> None:
-    from dnd_board.rules.feats import general_feat_feature, parse_general_feat, selected_general_feat_keys
+    from dnd_board.rules.feats import FeatCategory, general_feat_category, general_feat_feature, parse_general_feat, selected_general_feat_keys
 
     feat_key = value.split(":", 1)[1] if ":" in value else value
     feat_type = parse_general_feat(feat_key)
     if feat_type is None:
         raise HTTPException(status_code=400, detail="Invalid feat")
+    if general_feat_category(feat_type) != FeatCategory.GENERAL:
+        raise HTTPException(status_code=400, detail="That feat is not available from this progression choice")
     feature = general_feat_feature(feat_key)
     if feature is None:
         raise HTTPException(status_code=400, detail="Invalid feat")
@@ -2135,6 +2251,8 @@ def parse_ability_score_improvement(value: str) -> dict[AbilityType, int]:
 
 
 def prune_member_ability_score_improvements(member: PartyMemberConfig) -> None:
+    from dnd_board.rules.feats import GeneralFeatType
+
     if member.sheet is None or not member.sheet.abilityScoreImprovements:
         return
     expected_improvements = expected_member_ability_score_improvements(member_sheet_classes(member))
@@ -2148,6 +2266,9 @@ def prune_member_ability_score_improvements(member: PartyMemberConfig) -> None:
     for improvement in reversed(removed):
         feat_key = parse_feat_improvement(improvement)
         if feat_key is not None:
+            feat_type = GeneralFeatType.TOUGH if parse_feat_improvement(improvement) == enum_key(GeneralFeatType.TOUGH) else None
+            if feat_type == GeneralFeatType.TOUGH and member.maxHp is not None:
+                member.maxHp = max(1, member.maxHp - 2 * total_member_level(member))
             member.sheet.feats = [feat for feat in member.sheet.feats or [] if feat.id != feat_key] or None
             continue
         for ability, delta in parse_ability_score_improvement(improvement).items():

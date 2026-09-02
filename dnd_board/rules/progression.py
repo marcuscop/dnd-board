@@ -8,11 +8,13 @@ from dnd_board.character_sheet import (
     CharacterClassLevel,
     ClassType,
     FightingStyleType,
+    ProficiencyLevel,
     ProgressionChoice,
     ProgressionChoiceOption,
     ProgressionChoiceType,
     RuneType,
     SheetFeature,
+    SkillType,
     SpellSource,
     SpellEntry,
     enum_key,
@@ -34,6 +36,9 @@ class ProgressionChoiceId(Enum):
     HIT_POINT_INCREASE = "hitPointIncrease"
     FIGHTER_ABILITY_SCORE_IMPROVEMENT = "fighterAbilityScoreImprovement"
     ROGUE_ABILITY_SCORE_IMPROVEMENT = "rogueAbilityScoreImprovement"
+    FIGHTER_SKILL_PROFICIENCIES = "fighterSkillProficiencies"
+    ROGUE_SKILL_PROFICIENCIES = "rogueSkillProficiencies"
+    ROGUE_EXPERTISE = "rogueExpertise"
     FIGHTER_SUBCLASS = "fighterSubclass"
     ROGUE_SUBCLASS = "rogueSubclass"
     FIGHTER_FIGHTING_STYLES = "fighterFightingStyles"
@@ -47,6 +52,9 @@ class ProgressionChoiceId(Enum):
 class ProgressionChoiceLabel(Enum):
     HIT_POINTS = "Hit Points"
     ABILITY_SCORE_IMPROVEMENT = "Ability Score Improvement"
+    FIGHTER_SKILL_PROFICIENCIES = "Fighter Skill Proficiencies"
+    ROGUE_SKILL_PROFICIENCIES = "Rogue Skill Proficiencies"
+    ROGUE_EXPERTISE = "Expertise"
     FIGHTER_SUBCLASS = "Martial Archetype"
     ROGUE_SUBCLASS = "Roguish Archetype"
     FIGHTING_STYLE = "Fighting Style"
@@ -61,6 +69,9 @@ class ProgressionChoiceDescription(Enum):
     HIT_POINTS = "Choose fixed HP or roll the {hit_die_label} for this level. Constitution modifier is applied by the server."
     FIGHTER_ABILITY_SCORE_IMPROVEMENT = "Increase one ability score by 2, increase two ability scores by 1, or choose a feat. Optional Martial Versatility changes are not built yet."
     ROGUE_ABILITY_SCORE_IMPROVEMENT = "Increase one ability score by 2, increase two ability scores by 1, or choose a feat."
+    FIGHTER_SKILL_PROFICIENCIES = "Choose Fighter skill proficiencies."
+    ROGUE_SKILL_PROFICIENCIES = "Choose Rogue skill proficiencies."
+    ROGUE_EXPERTISE = "Choose proficient skills to receive Expertise."
     FIGHTER_SUBCLASS = "Choose a Fighter Martial Archetype."
     ROGUE_SUBCLASS = "Choose a Rogue archetype."
     FIGHTING_STYLE = "Choose Fighter Fighting Style feats. These are not repeatable."
@@ -101,6 +112,7 @@ def progression_choices(
     spells: list[SpellEntry],
     hit_point_increases: list[int],
     ability_score_improvements: list[str],
+    skill_proficiencies: dict[str, ProficiencyLevel],
     feats: list[SheetFeature] | None = None,
     feat_eligibility_sheet=None,
 ) -> list[ProgressionChoice]:
@@ -150,6 +162,12 @@ def progression_choices(
             selected=[*ability_score_improvements, *selected_general_feat_keys(feats)],
             options=general_feat_options(feats, feat_eligibility_sheet),
         ))
+
+    if rogue is not None:
+        choices.extend(rogue_skill_progression_choices(rogue, skill_proficiencies))
+
+    if fighter is not None:
+        choices.extend(fighter_skill_progression_choices(fighter, skill_proficiencies))
 
     if fighter is not None and fighter.level >= 3 and fighter.subclass is None:
         choices.append(single_choice(
@@ -341,6 +359,133 @@ def fighter_asi_levels_up_to(fighter_level: int) -> int:
 
 def rogue_asi_levels_up_to(rogue_level: int) -> int:
     return sum(1 for level in [4, 8, 10, 12, 16] if rogue_level >= level)
+
+
+def fighter_skill_progression_choices(fighter: CharacterClassLevel, skill_proficiencies: dict[str, ProficiencyLevel]) -> list[ProgressionChoice]:
+    selected_fighter_skills = [
+        skill_key
+        for skill_key in fighter_skill_option_keys()
+        if skill_proficiencies.get(skill_key) in {ProficiencyLevel.PROFICIENT, ProficiencyLevel.EXPERTISE}
+    ]
+    if fighter.level < 1 or len(selected_fighter_skills) >= fighter_skill_proficiency_count(fighter):
+        return []
+    return [
+        multi_choice(
+            choice_id=ProgressionChoiceId.FIGHTER_SKILL_PROFICIENCIES,
+            choice_type=ProgressionChoiceType.SKILL_PROFICIENCIES,
+            label=progression_choice_label(ProgressionChoiceLabel.FIGHTER_SKILL_PROFICIENCIES),
+            description=progression_choice_description(ProgressionChoiceDescription.FIGHTER_SKILL_PROFICIENCIES),
+            minimum=fighter_skill_proficiency_count(fighter),
+            maximum=fighter_skill_proficiency_count(fighter),
+            selected=selected_fighter_skills,
+            options=fighter_skill_options(),
+        )
+    ]
+
+
+def fighter_skill_proficiency_count(fighter: CharacterClassLevel) -> int:
+    return 2 if fighter.level >= 1 else 0
+
+
+def fighter_skill_option_keys() -> list[str]:
+    return [enum_key(skill) for skill in fighter_skill_option_types()]
+
+
+def fighter_skill_options() -> list[ProgressionChoiceOption]:
+    return [ProgressionChoiceOption(value=enum_key(skill), label=enum_label(skill)) for skill in fighter_skill_option_types()]
+
+
+def fighter_skill_option_types() -> list[SkillType]:
+    return [
+        SkillType.ACROBATICS,
+        SkillType.ANIMAL_HANDLING,
+        SkillType.ATHLETICS,
+        SkillType.HISTORY,
+        SkillType.INSIGHT,
+        SkillType.INTIMIDATION,
+        SkillType.PERCEPTION,
+        SkillType.PERSUASION,
+        SkillType.SURVIVAL,
+    ]
+
+
+def rogue_skill_progression_choices(rogue: CharacterClassLevel, skill_proficiencies: dict[str, ProficiencyLevel]) -> list[ProgressionChoice]:
+    choices: list[ProgressionChoice] = []
+    selected_rogue_skills = [
+        skill_key
+        for skill_key in rogue_skill_option_keys()
+        if skill_proficiencies.get(skill_key) in {ProficiencyLevel.PROFICIENT, ProficiencyLevel.EXPERTISE}
+    ]
+    if rogue.level >= 1 and len(selected_rogue_skills) < rogue_skill_proficiency_count(rogue):
+        choices.append(multi_choice(
+            choice_id=ProgressionChoiceId.ROGUE_SKILL_PROFICIENCIES,
+            choice_type=ProgressionChoiceType.SKILL_PROFICIENCIES,
+            label=progression_choice_label(ProgressionChoiceLabel.ROGUE_SKILL_PROFICIENCIES),
+            description=progression_choice_description(ProgressionChoiceDescription.ROGUE_SKILL_PROFICIENCIES),
+            minimum=rogue_skill_proficiency_count(rogue),
+            maximum=rogue_skill_proficiency_count(rogue),
+            selected=selected_rogue_skills,
+            options=rogue_skill_options(),
+        ))
+        return choices
+
+    expected_expertise = rogue_expertise_count(rogue)
+    selected_expertise = [
+        skill_key
+        for skill_key, proficiency in skill_proficiencies.items()
+        if proficiency == ProficiencyLevel.EXPERTISE
+    ]
+    expertise_options = [
+        ProgressionChoiceOption(value=enum_key(skill), label=enum_label(skill))
+        for skill in SkillType
+        if skill_proficiencies.get(enum_key(skill)) in {ProficiencyLevel.PROFICIENT, ProficiencyLevel.EXPERTISE}
+    ]
+    required_expertise = min(expected_expertise, len(expertise_options))
+    if expected_expertise > 0 and len(selected_expertise) < required_expertise:
+        choices.append(multi_choice(
+            choice_id=ProgressionChoiceId.ROGUE_EXPERTISE,
+            choice_type=ProgressionChoiceType.EXPERTISE,
+            label=progression_choice_label(ProgressionChoiceLabel.ROGUE_EXPERTISE),
+            description=progression_choice_description(ProgressionChoiceDescription.ROGUE_EXPERTISE),
+            minimum=required_expertise,
+            maximum=required_expertise,
+            selected=selected_expertise,
+            options=expertise_options,
+        ))
+    return choices
+
+
+def rogue_skill_proficiency_count(rogue: CharacterClassLevel) -> int:
+    return 4 if rogue.level >= 1 else 0
+
+
+def rogue_expertise_count(rogue: CharacterClassLevel) -> int:
+    if rogue.level >= 6:
+        return 4
+    return 2 if rogue.level >= 1 else 0
+
+
+def rogue_skill_option_keys() -> list[str]:
+    return [enum_key(skill) for skill in rogue_skill_option_types()]
+
+
+def rogue_skill_options() -> list[ProgressionChoiceOption]:
+    return [ProgressionChoiceOption(value=enum_key(skill), label=enum_label(skill)) for skill in rogue_skill_option_types()]
+
+
+def rogue_skill_option_types() -> list[SkillType]:
+    return [
+        SkillType.ACROBATICS,
+        SkillType.ATHLETICS,
+        SkillType.DECEPTION,
+        SkillType.INSIGHT,
+        SkillType.INTIMIDATION,
+        SkillType.INVESTIGATION,
+        SkillType.PERCEPTION,
+        SkillType.PERSUASION,
+        SkillType.SLEIGHT_OF_HAND,
+        SkillType.STEALTH,
+    ]
 
 
 def fighter_fighting_style_count(fighter: CharacterClassLevel) -> int:

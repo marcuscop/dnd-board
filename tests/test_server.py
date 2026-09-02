@@ -81,6 +81,11 @@ def resolve_rogue_level_choices(client: TestClient, room_id: str) -> dict:
             response = client.post(f"/api/rooms/{room_id}/sheet/player-1/choices/rogueSubclass?playerKey=player-1", json={"values": [enum_key(RogueSubclassType.SOULKNIFE)]})
         elif "rogueAbilityScoreImprovement" in choice_ids:
             response = client.post(f"/api/rooms/{room_id}/sheet/player-1/choices/rogueAbilityScoreImprovement?playerKey=player-1", json={"values": ["dexterity", "dexterity"]})
+        elif "rogueExpertise" in choice_ids:
+            response = client.post(
+                f"/api/rooms/{room_id}/sheet/player-1/choices/rogueExpertise?playerKey=player-1",
+                json={"values": [enum_key(SkillType.SLEIGHT_OF_HAND), enum_key(SkillType.STEALTH), enum_key(SkillType.PERCEPTION), enum_key(SkillType.INVESTIGATION)]},
+            )
         else:
             raise AssertionError(f"Unhandled Rogue level choice: {choice_ids}")
         assert response.status_code == 200
@@ -1411,7 +1416,7 @@ def test_dm_cannot_level_up_with_unresolved_level_choices(tmp_path, monkeypatch)
     response = client.post("/api/rooms/level-gate-test/sheet/player-1/level?playerKey=dm&delta=1")
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Resolve pending level choices before leveling up: Hit Points, Ability Score Improvement, Martial Archetype, Fighting Style"
+    assert response.json()["detail"] == "Resolve pending level choices before leveling up: Hit Points, Ability Score Improvement, Fighter Skill Proficiencies, Martial Archetype, Fighting Style"
 
 
 def test_level_one_fighter_must_choose_starting_fighting_style_before_level_up(tmp_path, monkeypatch) -> None:
@@ -1432,7 +1437,7 @@ def test_level_one_fighter_must_choose_starting_fighting_style_before_level_up(t
     response = client.post("/api/rooms/level-one-style-gate-test/sheet/player-1/level?playerKey=dm&delta=1")
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Resolve pending level choices before leveling up: Fighting Style"
+    assert response.json()["detail"] == "Resolve pending level choices before leveling up: Fighter Skill Proficiencies, Fighting Style"
 
 
 def test_player_can_apply_own_level_choice_but_not_other_sheets(tmp_path, monkeypatch) -> None:
@@ -1591,14 +1596,35 @@ def test_player_can_choose_feat_for_fighter_ability_score_improvement(tmp_path, 
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
 
-    response = client.post('/api/rooms/asi-feat-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["feat:alert"]})
+    response = client.post('/api/rooms/asi-feat-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["feat:actor"]})
     sheet = response.json()["sheet"]
     feats = {feature["id"]: feature for feature in sheet["features"]}
 
     assert response.status_code == 200
-    assert feats["alert"]["name"] == "Alert"
-    assert feats["alert"]["source"] == rule_source_label(RuleSource.PLAYERS_HANDBOOK_2024)
+    assert feats["actor"]["name"] == "Actor"
+    assert feats["actor"]["source"] == rule_source_label(RuleSource.PLAYERS_HANDBOOK_2024)
     assert "fighterAbilityScoreImprovement" not in {choice["id"] for choice in sheet["pendingChoices"]}
+
+
+def test_ability_score_improvement_rejects_non_general_feat(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "asi-origin-feat-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Feat Fighter",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post('/api/rooms/asi-origin-feat-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["feat:alert"]})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "That feat is not available from this progression choice"
 
 
 def test_fighter_ability_score_improvement_rejects_duplicate_feat(tmp_path, monkeypatch) -> None:
@@ -1612,9 +1638,9 @@ def test_fighter_ability_score_improvement_rejects_duplicate_feat(tmp_path, monk
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=6)],
-                abilityScoreImprovements=["feat:alert"],
+                abilityScoreImprovements=["feat:actor"],
                 feats=[
-                    general_feat_feature("alert")
+                    general_feat_feature("actor")
                 ],
             ),
         ),
@@ -1622,9 +1648,39 @@ def test_fighter_ability_score_improvement_rejects_duplicate_feat(tmp_path, monk
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
 
-    response = client.post('/api/rooms/asi-duplicate-feat-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["feat:alert"]})
+    response = client.post('/api/rooms/asi-duplicate-feat-test/sheet/player-1/choices/fighterAbilityScoreImprovement?playerKey=player-1', json={"values": ["feat:actor"]})
 
     assert response.status_code == 400
+
+
+def test_tough_origin_feat_adds_hit_points_on_level_up(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "tough-level-up-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Tough Fighter",
+            maxHp=14,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1, fightingStyles=[FightingStyleType.DEFENSE])],
+                skills={
+                    enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT,
+                    enum_key(SkillType.PERCEPTION): ProficiencyLevel.PROFICIENT,
+                },
+                feats=[general_feat_feature("tough")],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    level_response = client.post("/api/rooms/tough-level-up-test/sheet/player-1/level?playerKey=dm&delta=1&className=fighter")
+    hp_response = client.post("/api/rooms/tough-level-up-test/sheet/player-1/choices/hitPointIncrease?playerKey=dm", json={"values": ["fixed"]})
+
+    assert level_response.status_code == 200
+    assert hp_response.status_code == 200
+    assert hp_response.json()["sheet"]["hp"]["max"] == 24
 
 
 def test_dm_level_up_exposes_pending_fighter_choices_and_applies_them(tmp_path, monkeypatch) -> None:
@@ -1638,6 +1694,10 @@ def test_dm_level_up_exposes_pending_fighter_choices_and_applies_them(tmp_path, 
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=2, fightingStyles=[FightingStyleType.DEFENSE])],
+                skills={
+                    enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT,
+                    enum_key(SkillType.PERCEPTION): ProficiencyLevel.PROFICIENT,
+                },
                 hitPointIncreases=[8],
             ),
         ),
@@ -1733,8 +1793,8 @@ def test_level_down_prunes_fighter_feat_improvements(tmp_path, monkeypatch) -> N
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
-                abilityScoreImprovements=["feat:alert"],
-                feats=[general_feat_feature("alert")],
+                abilityScoreImprovements=["feat:actor"],
+                feats=[general_feat_feature("actor")],
             ),
         ),
     )
@@ -1746,7 +1806,7 @@ def test_level_down_prunes_fighter_feat_improvements(tmp_path, monkeypatch) -> N
 
     assert response.status_code == 200
     assert sheet["characterClass"]["level"] == 3
-    assert "alert" not in {feature["id"] for feature in sheet["features"]}
+    assert "actor" not in {feature["id"] for feature in sheet["features"]}
 
 
 def test_player_can_choose_eldritch_knight_spells(tmp_path, monkeypatch) -> None:
@@ -1822,7 +1882,15 @@ def test_rogue_levels_into_soulknife_and_uses_homing_strikes(tmp_path, monkeypat
             name="Journey Rogue",
             maxHp=10,
             abilityScores=AbilityScores(strength=10, dexterity=16, constitution=14, intelligence=12, wisdom=12, charisma=10),
-            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)]),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)],
+                skills={
+                    enum_key(SkillType.SLEIGHT_OF_HAND): ProficiencyLevel.EXPERTISE,
+                    enum_key(SkillType.STEALTH): ProficiencyLevel.EXPERTISE,
+                    enum_key(SkillType.PERCEPTION): ProficiencyLevel.PROFICIENT,
+                    enum_key(SkillType.INVESTIGATION): ProficiencyLevel.PROFICIENT,
+                },
+            ),
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
@@ -3318,13 +3386,13 @@ def test_member_progression_helper_error_and_pruning_paths(monkeypatch) -> None:
     with pytest.raises(Exception) as invalid_feat:
         server.apply_member_ability_score_improvement(feat_member, ["feat:not-real"])
     assert invalid_feat.value.detail == "Invalid feat"
-    server.apply_member_ability_score_improvement(feat_member, ["feat:alert"])
+    server.apply_member_ability_score_improvement(feat_member, ["feat:actor"])
     with pytest.raises(Exception) as duplicate_feat:
-        server.apply_member_ability_score_improvement(PartyMemberConfig(id="player-1", name="Feat", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=8)], feats=feat_member.sheet.feats)), ["feat:alert"])
+        server.apply_member_ability_score_improvement(PartyMemberConfig(id="player-1", name="Feat", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=8)], feats=feat_member.sheet.feats)), ["feat:actor"])
     assert duplicate_feat.value.detail == "Feat is already selected"
 
-    member.sheet.abilityScoreImprovements = ["strength:1", "feat:alert", "constitution:2"]
-    member.sheet.feats = [general_feat_feature("alert")]
+    member.sheet.abilityScoreImprovements = ["strength:1", "feat:actor", "constitution:2"]
+    member.sheet.feats = [general_feat_feature("actor")]
     member.abilityScores.constitution = 15
     server.prune_member_ability_score_improvements(member)
     assert member.sheet.abilityScoreImprovements == ["strength:1"]

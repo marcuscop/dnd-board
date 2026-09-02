@@ -1,3 +1,5 @@
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 from dnd_board.character_sheet import (
@@ -22,11 +24,11 @@ from dnd_board.character_sheet import (
     FightingStyleType,
     PartyMember,
     PartyMemberSheet,
+    RestType,
     RollModifierType,
     RollResolutionMode,
     TokenKind,
     RuneType,
-    SpellCastingTime,
     SpellComponent,
     SpellDuration,
     SpellDurationUnit,
@@ -38,21 +40,31 @@ from dnd_board.character_sheet import (
     SpellSchool,
     SpellSource,
     SpellTargeting,
+    TimeEconomy,
     WeaponCategory,
     WeaponProperty,
     build_attack_roll_payload,
     build_character_sheet,
     build_damage_roll_payload,
     enum_key,
+    enum_label,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.fighter import archetypes as fighter_archetypes
 from dnd_board.rules.classes.fighter.base import fighter_features, fighter_resources, subclass_description
 from dnd_board.rules.feats import (
+    BackgroundPrerequisiteType,
     FIGHTING_STYLE_FEATS,
+    FeatCharacterFeatureType,
     FeatEffect,
+    FeatCategory,
     FeatEffectType,
+    FeatPrerequisiteType,
+    FeatPrerequisite,
+    GENERAL_FEATS,
     GeneralFeatType,
+    GiantStrikeType,
+    WeaponProficiencyType,
     armor_class_bonus,
     armor_class_bonus_applies,
     attack_roll_bonus_applies,
@@ -60,13 +72,23 @@ from dnd_board.rules.feats import (
     damage_dice_reroll_applies,
     damage_roll_bonus_applies,
     feat_abilities,
+    feat_prerequisite_label,
+    feat_prerequisite_met,
+    feat_resources,
+    feat_speed_bonus,
+    background_prerequisite,
     fighting_style_features,
+    general_feat_category,
     general_feat_feature,
     general_feat_prerequisites_met,
     parse_general_feat,
     selected_fighting_styles,
     selected_general_feat_keys,
+    small_species_prerequisite,
+    spellcasting_prerequisite,
 )
+from dnd_board.rules.sources import RuleSource
+from dnd_board.rules.species import SpeciesType
 from dnd_board.rules.classes.fighter.archetypes import (
     EldritchKnightSpellcastingProgression,
     FighterSubclassRollActionType,
@@ -239,6 +261,173 @@ def test_general_feat_prerequisites_are_structured_and_evaluable() -> None:
     assert not general_feat_prerequisites_met(GeneralFeatType.HEAVILY_ARMORED, dwarf_sheet)
     assert general_feat_prerequisites_met(GeneralFeatType.DEFENSIVE_DUELIST, dragonborn_sheet)
     assert general_feat_prerequisites_met(GeneralFeatType.DRAGON_FEAR, dragonborn_sheet)
+
+
+def test_feat_prerequisite_labels_and_checks_cover_all_prerequisite_types() -> None:
+    spellcaster_sheet = SimpleNamespace(
+        race="Human",
+        background="Giant Foundling",
+        abilityScores=AbilityScores(8, 8, 8, 8, 8, 8),
+        characterClass=SimpleNamespace(level=20),
+        classes=[],
+        proficiencies=["Martial Weapon"],
+        feats=[general_feat_feature("strikeOfTheGiants")],
+        features=[SimpleNamespace(id="spellcasting", name="Spellcasting Feature", description="")],
+        abilities=[],
+        spells=[],
+    )
+
+    assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.SPECIES_SIZE, speciesSizes=())) == ""
+    assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=(WeaponProficiencyType.MARTIAL,), backgrounds=(BackgroundPrerequisiteType.GIANT_FOUNDLING,))) == "Martial Weapon or Giant Foundling"
+    assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.CHARACTER_FEATURE, features=(FeatCharacterFeatureType.SPELLCASTING,))) == "Spellcasting Feature"
+    assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.SPELLCASTING)) == "Spellcasting or Pact Magic"
+    assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.BACKGROUND, backgrounds=(BackgroundPrerequisiteType.GIANT_FOUNDLING,))) == "Giant Foundling"
+    assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.FEAT, feats=(GeneralFeatType.STRIKE_OF_THE_GIANTS,), giantStrikes=(GiantStrikeType.HILL_STRIKE,))) == "Strike Of The Giants Hill Strike"
+    assert feat_prerequisite_label(small_species_prerequisite()) == "Small"
+    assert feat_prerequisite_label(background_prerequisite(BackgroundPrerequisiteType.GIANT_FOUNDLING)) == "Giant Foundling"
+    assert feat_prerequisite_label(FeatPrerequisite(None)) == ""
+
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.CHARACTER_LEVEL, minimumLevel=19), spellcaster_sheet)
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.SPECIES_SIZE, speciesSizes=()), spellcaster_sheet) is False
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=(WeaponProficiencyType.MARTIAL,)), spellcaster_sheet)
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.CHARACTER_FEATURE, features=(FeatCharacterFeatureType.SPELLCASTING,)), spellcaster_sheet)
+    assert feat_prerequisite_met(spellcasting_prerequisite(), spellcaster_sheet)
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.FEAT, feats=(GeneralFeatType.STRIKE_OF_THE_GIANTS,)), spellcaster_sheet)
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.BACKGROUND, backgrounds=(BackgroundPrerequisiteType.GIANT_FOUNDLING,)), spellcaster_sheet)
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.ARMOR_PROFICIENCY, armorCategories=(ArmorCategory.HEAVY,)), spellcaster_sheet) is False
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.ABILITY_SCORE, minimumScore=13, abilities=(AbilityType.STRENGTH,)), spellcaster_sheet) is False
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.SPECIES, species=(SpeciesType.DWARF,)), spellcaster_sheet) is False
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.BACKGROUND), spellcaster_sheet) is False
+    assert feat_prerequisite_met(FeatPrerequisite(None), spellcaster_sheet) is False
+    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.ABILITY_SCORE, minimumScore=1, abilities=(AbilityType.STRENGTH,)), SimpleNamespace()) is False
+
+
+def test_2024_feat_catalog_covers_design_doc() -> None:
+    entries = feat_design_doc_entries()
+
+    missing_general: list[str] = []
+    missing_styles: list[str] = []
+    for entry in entries:
+        feat_type = enum_value_by_name(GeneralFeatType, entry["enum_name"])
+        fighting_style = enum_value_by_name(FightingStyleType, entry["enum_name"])
+        if entry["subcategory"] == "Fighting Style Feats":
+            if fighting_style is None or fighting_style not in FIGHTING_STYLE_FEATS:
+                missing_styles.append(entry["name"])
+        elif feat_type is None or feat_type not in GENERAL_FEATS:
+            missing_general.append(entry["name"])
+
+    assert missing_general == []
+    assert missing_styles == []
+    assert len(entries) == 176
+
+
+def test_2024_feat_catalog_preserves_source_and_category_metadata() -> None:
+    assert general_feat_category(GeneralFeatType.ALERT) == FeatCategory.ORIGIN
+    assert GENERAL_FEATS[GeneralFeatType.ALERT].source == RuleSource.PLAYERS_HANDBOOK_2024
+    assert general_feat_category(GeneralFeatType.COLD_CASTER) == FeatCategory.GENERAL
+    assert GENERAL_FEATS[GeneralFeatType.COLD_CASTER].source == RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024
+    assert general_feat_category(GeneralFeatType.BOON_OF_SIBERYS) == FeatCategory.EPIC_BOON
+    assert GENERAL_FEATS[GeneralFeatType.BOON_OF_SIBERYS].source == RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024
+    assert general_feat_category(GeneralFeatType.MARK_OF_DETECTION) == FeatCategory.DRAGONMARK
+    assert general_feat_category(GeneralFeatType.GREATER_MARK_OF_DETECTION) == FeatCategory.GREATER_DRAGONMARK
+    assert general_feat_category(GeneralFeatType.FEY_PACT) == FeatCategory.PLANAR_PACT
+    assert general_feat_category(GeneralFeatType.FEY_SENTINEL) == FeatCategory.GREATER_PLANAR_PACT
+    assert general_feat_category(GeneralFeatType.ABERRANT_ANATOMY) == FeatCategory.DARK_GIFT
+    assert GENERAL_FEATS[GeneralFeatType.ABERRANT_ANATOMY].source == RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024
+    assert enum_label(GeneralFeatType.VAMPIRE_S_PLAYTHING) == "Vampire's Plaything"
+
+
+def test_supported_general_feat_mechanics_are_reflected_on_sheet() -> None:
+    sheet = build_character_sheet(
+        token_id="feat-fighter",
+        kind=TokenKind.CHARACTER,
+        name="Feat Fighter",
+        owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(
+            id="feat-fighter",
+            name="Feat Fighter",
+            owner="player-1",
+            avatarUrl=None,
+            maxHp=44,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5, fightingStyles=[FightingStyleType.DEFENSE])],
+                feats=[
+                    general_feat_feature("alert"),
+                    general_feat_feature("lucky"),
+                    general_feat_feature("speedy"),
+                    general_feat_feature("boonOfFortitude"),
+                    general_feat_feature("boonOfSpeed"),
+                    general_feat_feature("observant"),
+                ],
+            ),
+        ),
+        current_hp=None,
+        resource_overrides={},
+    )
+    resources = {resource.id: resource for resource in sheet.resources}
+    abilities = {ability.id: ability for ability in sheet.abilities}
+
+    assert sheet.initiativeBonus == 5
+    assert sheet.speed == 70
+    assert sheet.hp.max == 84
+    assert resources["luckPoints"].maxUses == sheet.proficiencyBonus
+    assert resources["luckPoints"].reset.name == "LONG_REST"
+    assert abilities["luckyAdvantage"].resourceId == "luckPoints"
+    assert abilities["observantQuickSearch"].activation == TimeEconomy.BONUS_ACTION
+
+
+def test_epic_boon_feat_resources_and_legacy_speed_bonus_are_reflected() -> None:
+    feats = [
+        general_feat_feature("boonOfCombatProwess"),
+        general_feat_feature("boonOfDimensionalTravel"),
+        general_feat_feature("boonOfFate"),
+        general_feat_feature("boonOfRecovery"),
+        general_feat_feature("mobile"),
+    ]
+    resources = {resource.id: resource for resource in feat_resources([], feats)}
+    abilities = {ability.id: ability for ability in feat_abilities([], feats)}
+
+    assert set(resources) == {"boonOfCombatProwess", "boonOfDimensionalTravel", "boonOfFate", "boonOfRecovery"}
+    assert resources["boonOfRecovery"].reset == RestType.LONG_REST
+    assert resources["boonOfFate"].reset == RestType.SHORT_REST
+    assert abilities["boonOfDimensionalTravel"].activation == TimeEconomy.ACTION
+    assert abilities["boonOfRecovery"].resourceId == "boonOfRecovery"
+    assert feat_speed_bonus(feats) == 10
+
+
+def feat_design_doc_entries() -> list[dict[str, str]]:
+    path = Path(__file__).resolve().parents[1] / "my-design-docs" / "feats-2024.md"
+    category = ""
+    subcategory = ""
+    entries: list[dict[str, str]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            category = line.removeprefix("## ").strip()
+        elif line.startswith("### "):
+            subcategory = line.removeprefix("### ").strip()
+        elif match := re.match(r"\| \[([^\]]+)\]\(http://dnd2024\.wikidot\.com/feat:[^)]+\) \|", line):
+            name = match.group(1)
+            entries.append({
+                "name": name,
+                "category": category,
+                "subcategory": subcategory,
+                "enum_name": re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper(),
+            })
+        elif ": http://dnd2024.wikidot.com/feat:" in line:
+            name = line.split(": http", 1)[0]
+            entries.append({
+                "name": name,
+                "category": category,
+                "subcategory": subcategory,
+                "enum_name": re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper(),
+            })
+    return entries
+
+
+def enum_value_by_name(enum_type, name: str):
+    return enum_type.__members__.get(name)
 
 
 def test_feat_predicates_return_false_for_unscoped_effects() -> None:
@@ -963,7 +1152,8 @@ def test_monster_hunter_tracks_superiority_and_mysticism_spells() -> None:
     assert spells[SpellId.DETECT_MAGIC].ritual is True
     assert spells[SpellId.DETECT_MAGIC].source == SpellSource.MONSTER_HUNTER
     assert spells[SpellId.DETECT_MAGIC].castingAbility.name == "WISDOM"
-    assert spells[SpellId.DETECT_MAGIC].castingTime == SpellCastingTime.TEN_MINUTES
+    assert spells[SpellId.DETECT_MAGIC].castingTime == TimeEconomy.SPECIAL
+    assert spells[SpellId.DETECT_MAGIC].castingDuration == SpellDuration(SpellDurationUnit.MINUTE, amount=10)
     assert spells[SpellId.PROTECTION_FROM_EVIL_AND_GOOD].resourceId == "protectionFromEvilAndGood"
     assert spells[SpellId.PROTECTION_FROM_EVIL_AND_GOOD].concentration is True
 
@@ -1202,7 +1392,7 @@ def test_eldritch_knight_uses_configured_spells_with_intelligence() -> None:
                 level=1,
                 school=SpellSchool.ABJURATION,
                 castingAbility=AbilityType.WISDOM,
-                castingTime=SpellCastingTime.REACTION,
+                castingTime=TimeEconomy.REACTION,
                 targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
                 duration=SpellDuration(unit=SpellDurationUnit.ROUND, amount=1),
                 components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -1241,7 +1431,8 @@ def test_fighter_level_progression_exposes_hit_point_and_asi_choices() -> None:
     assert choices["hitPointIncrease"].choiceType.name == "HIT_POINTS"
     assert [option.value for option in choices["hitPointIncrease"].options] == ["fixed", "roll"]
     assert choices["fighterAbilityScoreImprovement"].choiceType.name == "ABILITY_SCORE_IMPROVEMENT"
-    assert "alert" in {option.value for option in choices["fighterAbilityScoreImprovement"].options}
+    assert "actor" in {option.value for option in choices["fighterAbilityScoreImprovement"].options}
+    assert "alert" not in {option.value for option in choices["fighterAbilityScoreImprovement"].options}
     assert "warCaster" not in {option.value for option in choices["fighterAbilityScoreImprovement"].options}
 
 

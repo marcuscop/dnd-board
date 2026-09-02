@@ -23,6 +23,7 @@ from dnd_board.character_sheet import (
     PartyMemberSheet,
     PartyMember,
     ProficiencyLevel,
+    Purse,
     RollAction,
     RollLogEntry,
     RollLogEntryType,
@@ -33,6 +34,8 @@ from dnd_board.character_sheet import (
     SpellConeArea,
     SpellCubeArea,
     SpellCylinderArea,
+    SpellDuration,
+    SpellDurationUnit,
     SpellLineArea,
     SpellRangeType,
     SpellTargeting,
@@ -61,6 +64,7 @@ from dnd_board.character_sheet import (
     sanitize_identifier,
     saving_throw_total,
     spell_area_label,
+    spell_target_range_label,
     text_list,
     to_float,
     typed_json_from_value,
@@ -80,6 +84,7 @@ def test_typed_party_manifest_round_trips_config_objects() -> None:
                 maxHp=31,
                 abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
                 sheet=PartyMemberSheet(
+                    purse=Purse(copper=3, silver=2, gold=31),
                     classes=[
                         CharacterClassLevel(
                             name=ClassType.FIGHTER,
@@ -101,6 +106,15 @@ def test_typed_party_manifest_round_trips_config_objects() -> None:
     assert loaded.members[0].sheet.classes[0].name == ClassType.FIGHTER
     assert loaded.members[0].sheet.classes[0].subclass == FighterSubclassType.CHAMPION
     assert loaded.members[0].sheet.classes[0].fightingStyles == [FightingStyleType.DEFENSE, FightingStyleType.INTERCEPTION]
+    assert loaded.members[0].sheet.purse == Purse(copper=3, silver=2, gold=31)
+
+
+def test_spell_summary_formatters_cover_special_ranges_and_durations() -> None:
+    assert SpellDuration(SpellDurationUnit.UNTIL_DISPELLED).summary == "Until dispelled"
+    assert SpellDuration(SpellDurationUnit.SPECIAL).summary == "Special"
+    assert spell_target_range_label(SpellTargeting(SpellRangeType.SIGHT)) == "Sight"
+    assert spell_target_range_label(SpellTargeting(SpellRangeType.UNLIMITED)) == "Unlimited"
+    assert spell_target_range_label(SpellTargeting(SpellRangeType.SPECIAL)) == "Special"
 
 
 def test_untyped_party_member_sheet_is_not_loaded() -> None:

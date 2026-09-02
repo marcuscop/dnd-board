@@ -20,7 +20,6 @@ from dnd_board.character_sheet import (
     RuneType,
     SheetAbility,
     SheetFeature,
-    SpellCastingTime,
     SpellConeArea,
     SpellComponent,
     SpellCubeArea,
@@ -272,7 +271,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
         duration=SpellDuration(unit=SpellDurationUnit.ROUND, amount=1),
         components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -285,7 +284,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=120),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -298,7 +297,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -311,7 +310,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.TOUCH),
         duration=SpellDuration(unit=SpellDurationUnit.HOUR, amount=1),
         components=[SpellComponent.VERBAL, SpellComponent.MATERIAL],
@@ -324,7 +323,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=0,
         school=SpellSchool.CONJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=30),
         duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=1),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -337,7 +336,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=0,
         school=SpellSchool.ILLUSION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=30),
         duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=1),
         components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -350,7 +349,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=0,
         school=SpellSchool.TRANSMUTATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=10),
         duration=SpellDuration(unit=SpellDurationUnit.HOUR, amount=1, maximum=True),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -363,7 +362,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=60),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -376,7 +375,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=0,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.TOUCH),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -389,7 +388,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=1,
         school=SpellSchool.ABJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.REACTION,
+        castingTime=TimeEconomy.REACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
         duration=SpellDuration(unit=SpellDurationUnit.ROUND, amount=1),
         components=[SpellComponent.SOMATIC],
@@ -402,7 +401,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=1,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellConeArea(lengthFeet=15)),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -415,7 +414,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=1,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=90),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -428,7 +427,8 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=1,
         school=SpellSchool.CONJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.HOUR,
+        castingTime=TimeEconomy.SPECIAL,
+        castingDuration=SpellDuration(unit=SpellDurationUnit.HOUR, amount=1),
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=10),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -442,7 +442,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=1,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=120),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -455,7 +455,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=1,
         school=SpellSchool.ABJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.TOUCH),
         duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -469,7 +469,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=1,
         school=SpellSchool.ABJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.REACTION,
+        castingTime=TimeEconomy.REACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
         duration=SpellDuration(unit=SpellDurationUnit.ROUND, amount=1),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -482,7 +482,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=1,
         school=SpellSchool.ENCHANTMENT,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=90, area=SpellRadiusArea(radiusFeet=20)),
         duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=1),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -495,7 +495,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=1,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellCubeArea(sizeFeet=15)),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -508,7 +508,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=2,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellRadiusArea(radiusFeet=10)),
         duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
         components=[SpellComponent.VERBAL],
@@ -522,7 +522,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=2,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=120),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -535,7 +535,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=2,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=60, area=SpellRadiusArea(radiusFeet=10)),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -548,7 +548,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=3,
         school=SpellSchool.ABJURATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.REACTION,
+        castingTime=TimeEconomy.REACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=60),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.SOMATIC],
@@ -561,7 +561,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=3,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=150, area=SpellRadiusArea(radiusFeet=20)),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -574,7 +574,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=3,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellLineArea(lengthFeet=100, widthFeet=5)),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -587,7 +587,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=4,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.SELF),
         duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -600,7 +600,7 @@ ELDRITCH_KNIGHT_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
         level=4,
         school=SpellSchool.EVOCATION,
         castingAbility=AbilityType.INTELLIGENCE,
-        castingTime=SpellCastingTime.ACTION,
+        castingTime=TimeEconomy.ACTION,
         targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=300, area=SpellCylinderArea(radiusFeet=20, heightFeet=40)),
         duration=SpellDuration(unit=SpellDurationUnit.INSTANTANEOUS),
         components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -1749,7 +1749,8 @@ def fighter_subclass_spells(classes) -> list[SpellEntry]:
                 level=1,
                 school=SpellSchool.DIVINATION,
                 castingAbility=AbilityType.WISDOM,
-                castingTime=SpellCastingTime.TEN_MINUTES,
+                castingTime=TimeEconomy.SPECIAL,
+                castingDuration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10),
                 targeting=SpellTargeting(rangeType=SpellRangeType.SELF, area=SpellRadiusArea(radiusFeet=30)),
                 duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
                 components=[SpellComponent.VERBAL, SpellComponent.SOMATIC],
@@ -1764,7 +1765,7 @@ def fighter_subclass_spells(classes) -> list[SpellEntry]:
                 level=1,
                 school=SpellSchool.ABJURATION,
                 castingAbility=AbilityType.WISDOM,
-                castingTime=SpellCastingTime.ACTION,
+                castingTime=TimeEconomy.ACTION,
                 targeting=SpellTargeting(rangeType=SpellRangeType.TOUCH),
                 duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
                 components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
@@ -1783,7 +1784,7 @@ def fighter_subclass_spells(classes) -> list[SpellEntry]:
                 level=5,
                 school=SpellSchool.TRANSMUTATION,
                 castingAbility=AbilityType.INTELLIGENCE,
-                castingTime=SpellCastingTime.ACTION,
+                castingTime=TimeEconomy.ACTION,
                 targeting=SpellTargeting(rangeType=SpellRangeType.DISTANCE, distanceFeet=60),
                 duration=SpellDuration(unit=SpellDurationUnit.MINUTE, amount=10, maximum=True),
                 components=[],
@@ -1827,18 +1828,23 @@ def normalized_eldritch_knight_spell(spell: SpellEntry) -> SpellEntry:
 
 
 def eldritch_knight_spell_options(fighter_level_value: int, selected_spell_ids: list[str] | None = None) -> list[SpellEntry]:
+    from dnd_board.rules.spells import wizard_spell_entries
+
     selected = set(selected_spell_ids or [])
     max_spell_level = eldritch_knight_max_spell_level(fighter_level_value)
+    shared_spells = wizard_spell_entries(maximum_level=max_spell_level)
+    catalog = {spell.id: spell for spell in shared_spells}
+    catalog.update(ELDRITCH_KNIGHT_SPELL_CATALOG)
     flexible_slots_used = eldritch_knight_flexible_spell_count([
         spell
         for spell_id in selected
         if (spell_key := enum_value(SpellId, spell_id)) is not None
-        if (spell := ELDRITCH_KNIGHT_SPELL_CATALOG.get(spell_key)) is not None
+        if (spell := catalog.get(spell_key)) is not None
     ])
     flexible_slots_available = eldritch_knight_flexible_spell_limit(fighter_level_value)
     return [
         normalized_eldritch_knight_spell(spell)
-        for spell in ELDRITCH_KNIGHT_SPELL_CATALOG.values()
+        for spell in catalog.values()
         if (spell.level == 0 or spell.level <= max_spell_level)
         and (
             enum_key(spell.id) in selected
@@ -1850,8 +1856,11 @@ def eldritch_knight_spell_options(fighter_level_value: int, selected_spell_ids: 
 
 
 def eldritch_knight_catalog_spell(spell_id: str | SpellId) -> SpellEntry | None:
+    from dnd_board.rules.spells import wizard_spell_entry
+
     spell_key = spell_id if isinstance(spell_id, SpellId) else enum_value(SpellId, spell_id)
     spell = ELDRITCH_KNIGHT_SPELL_CATALOG.get(spell_key)
+    spell = spell or (wizard_spell_entry(spell_key) if spell_key is not None else None)
     return normalized_eldritch_knight_spell(spell) if spell is not None else None
 
 

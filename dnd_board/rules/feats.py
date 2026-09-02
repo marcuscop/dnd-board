@@ -18,6 +18,8 @@ from dnd_board.character_sheet import (
     EquipmentSlot,
     EquipmentType,
     FightingStyleType,
+    ResourceTracker,
+    RestType,
     RollAction,
     RollModifierBreakdown,
     RollModifierType,
@@ -34,8 +36,58 @@ from dnd_board.rules.species import SpeciesType
 
 
 class FeatCategory(Enum):
+    ORIGIN = auto()
     GENERAL = auto()
     FIGHTING_STYLE = auto()
+    EPIC_BOON = auto()
+    DRAGONMARK = auto()
+    GREATER_DRAGONMARK = auto()
+    PLANAR_PACT = auto()
+    GREATER_PLANAR_PACT = auto()
+    DARK_GIFT = auto()
+
+
+class FeatSheetField(Enum):
+    ABILITIES = "abilities"
+    ABILITY_SCORES = "abilityScores"
+    BACKGROUND = "background"
+    CHARACTER_CLASS = "characterClass"
+    CLASSES = "classes"
+    FEATS = "feats"
+    FEATURES = "features"
+    PROFICIENCIES = "proficiencies"
+    RACE = "race"
+    SPELLS = "spells"
+
+
+class FeatFeatureField(Enum):
+    DESCRIPTION = "description"
+    ID = "id"
+    NAME = "name"
+
+
+class FeatResourceId(Enum):
+    LUCK_POINTS = "luckPoints"
+    BOON_OF_COMBAT_PROWESS = "boonOfCombatProwess"
+    BOON_OF_DIMENSIONAL_TRAVEL = "boonOfDimensionalTravel"
+    BOON_OF_FATE = "boonOfFate"
+    BOON_OF_RECOVERY = "boonOfRecovery"
+
+
+class FeatAbilityId(Enum):
+    HEALER = "healer"
+    LUCKY_ADVANTAGE = "luckyAdvantage"
+    LUCKY_DISADVANTAGE = "luckyDisadvantage"
+    OBSERVANT_QUICK_SEARCH = "observantQuickSearch"
+    TELEKINETIC_SHOVE = "telekineticShove"
+    BOON_OF_COMBAT_PROWESS = "boonOfCombatProwess"
+    BOON_OF_DIMENSIONAL_TRAVEL = "boonOfDimensionalTravel"
+    BOON_OF_FATE = "boonOfFate"
+    BOON_OF_RECOVERY = "boonOfRecovery"
+
+
+class FeatCharacterClassField(Enum):
+    LEVEL = "level"
 
 
 class GeneralFeatType(Enum):
@@ -124,6 +176,120 @@ class GeneralFeatType(Enum):
     WAR_CASTER = auto()
     WEAPON_MASTER = auto()
     WOOD_ELF_MAGIC = auto()
+    SHARP_EYE = "Sharp Eye"
+    SURVIVOR = "Survivor"
+    CULT_OF_THE_DRAGON_INITIATE = "Cult of the Dragon Initiate"
+    EMERALD_ENCLAVE_FLEDGLING = "Emerald Enclave Fledgling"
+    HARPER_AGENT = "Harper Agent"
+    LORDS_ALLIANCE_AGENT = "Lords' Alliance Agent"
+    PURPLE_DRAGON_ROOK = "Purple Dragon Rook"
+    SPELLFIRE_SPARK = "Spellfire Spark"
+    TYRO_OF_THE_GAUNTLET = "Tyro of the Gauntlet"
+    ZHENTARIM_RUFFIAN = "Zhentarim Ruffian"
+    CHILD_OF_THE_SUN = "Child of the Sun"
+    SHADOWMOOR_HEXER = "Shadowmoor Hexer"
+    TIRELESS_REVELER = "Tireless Reveler"
+    VAMPIRE_HUNTER = "Vampire Hunter"
+    VAMPIRE_S_PLAYTHING = "Vampire's Plaything"
+    ABILITY_SCORE_IMPROVEMENT = "Ability Score Improvement"
+    MARTIAL_WEAPON_TRAINING = "Martial Weapon Training"
+    SHIFTING_COMBATANT = "Shifting Combatant"
+    SPEEDY = "Speedy"
+    TACTICAL_COMBATANT = "Tactical Combatant"
+    COLD_CASTER = "Cold Caster"
+    DRAGONSCARRED = "Dragonscarred"
+    ENCLAVE_MAGIC = "Enclave Magic"
+    FAIRY_TRICKSTER = "Fairy Trickster"
+    GENIE_MAGIC = "Genie Magic"
+    HARPER_TEAMWORK = "Harper Teamwork"
+    LORDLY_RESOLVE = "Lordly Resolve"
+    MYTHAL_TOUCHED = "Mythal Touched"
+    ORDER_S_RESILIENCE = "Order's Resilience"
+    PURPLE_DRAGON_COMMANDANT = "Purple Dragon Commandant"
+    SPELLFIRE_ADEPT = "Spellfire Adept"
+    STREET_JUSTICE = "Street Justice"
+    ZHENTARIM_TACTICS = "Zhentarim Tactics"
+    BLOODLUST = "Bloodlust"
+    BOMBER = "Bomber"
+    CLOYING_MISTS = "Cloying Mists"
+    DELICIOUS_PAIN = "Delicious Pain"
+    LIGHT_BRINGER = "Light Bringer"
+    LOVE_BITES = "Love Bites"
+    PUTREFY = "Putrefy"
+    REBUKE = "Rebuke"
+    TREACHEROUS_ALLURE = "Treacherous Allure"
+    VAMPIRE_TOUCHED = "Vampire Touched"
+    BOON_OF_COMBAT_PROWESS = "Boon of Combat Prowess"
+    BOON_OF_DIMENSIONAL_TRAVEL = "Boon of Dimensional Travel"
+    BOON_OF_ENERGY_RESISTANCE = "Boon of Energy Resistance"
+    BOON_OF_FATE = "Boon of Fate"
+    BOON_OF_FORTITUDE = "Boon of Fortitude"
+    BOON_OF_IRRESISTIBLE_OFFENSE = "Boon of Irresistible Offense"
+    BOON_OF_RECOVERY = "Boon of Recovery"
+    BOON_OF_SKILL = "Boon of Skill"
+    BOON_OF_SPEED = "Boon of Speed"
+    BOON_OF_SPELL_RECALL = "Boon of Spell Recall"
+    BOON_OF_THE_NIGHT_SPIRIT = "Boon of the Night Spirit"
+    BOON_OF_TRUESIGHT = "Boon of Truesight"
+    BOON_OF_SIBERYS = "Boon of Siberys"
+    BOON_OF_BLOODSHED = "Boon of Bloodshed"
+    BOON_OF_BOUNTIFUL_HEALTH = "Boon of Bountiful Health"
+    BOON_OF_COMMUNICATION = "Boon of Communication"
+    BOON_OF_DESPERATE_RESILIENCE = "Boon of Desperate Resilience"
+    BOON_OF_EXQUISITE_RADIANCE = "Boon of Exquisite Radiance"
+    BOON_OF_FLUID_FORMS = "Boon of Fluid Forms"
+    BOON_OF_FORTUNE_S_FAVOR = "Boon of Fortune's Favor"
+    BOON_OF_POISON_MASTERY = "Boon of Poison Mastery"
+    BOON_OF_REVELRY = "Boon of Revelry"
+    BOON_OF_TERROR = "Boon of Terror"
+    BOON_OF_THE_BRIGHT_SUN = "Boon of the Bright Sun"
+    BOON_OF_THE_FURIOUS_STORM = "Boon of the Furious Storm"
+    BOON_OF_THE_SOUL_DRINKER = "Boon of the Soul Drinker"
+    BOON_OF_BLAZING_DAWN = "Boon of Blazing Dawn"
+    BOON_OF_LOOMING_SHADOWS = "Boon of Looming Shadows"
+    BOON_OF_MISTY_ESCAPE = "Boon of Misty Escape"
+    ABERRANT_DRAGONMARK = "Aberrant Dragonmark"
+    MARK_OF_DETECTION = "Mark of Detection"
+    MARK_OF_FINDING = "Mark of Finding"
+    MARK_OF_HANDLING = "Mark of Handling"
+    MARK_OF_HEALING = "Mark of Healing"
+    MARK_OF_HOSPITALITY = "Mark of Hospitality"
+    MARK_OF_MAKING = "Mark of Making"
+    MARK_OF_PASSAGE = "Mark of Passage"
+    MARK_OF_SCRIBING = "Mark of Scribing"
+    MARK_OF_SENTINEL = "Mark of Sentinel"
+    MARK_OF_SHADOW = "Mark of Shadow"
+    MARK_OF_STORM = "Mark of Storm"
+    MARK_OF_WARDING = "Mark of Warding"
+    GREATER_ABERRANT_MARK = "Greater Aberrant Mark"
+    GREATER_MARK_OF_DETECTION = "Greater Mark of Detection"
+    GREATER_MARK_OF_FINDING = "Greater Mark of Finding"
+    GREATER_MARK_OF_HANDLING = "Greater Mark of Handling"
+    GREATER_MARK_OF_HEALING = "Greater Mark of Healing"
+    GREATER_MARK_OF_HOSPITALITY = "Greater Mark of Hospitality"
+    GREATER_MARK_OF_MAKING = "Greater Mark of Making"
+    GREATER_MARK_OF_PASSAGE = "Greater Mark of Passage"
+    GREATER_MARK_OF_SCRIBING = "Greater Mark of Scribing"
+    GREATER_MARK_OF_SENTINEL = "Greater Mark of Sentinel"
+    GREATER_MARK_OF_SHADOW = "Greater Mark of Shadow"
+    GREATER_MARK_OF_STORM = "Greater Mark of Storm"
+    GREATER_MARK_OF_WARDING = "Greater Mark of Warding"
+    POTENT_DRAGONMARK = "Potent Dragonmark"
+    FEY_PACT = "Fey Pact"
+    INFERNAL_PACT = "Infernal Pact"
+    FEY_SENTINEL = "Fey Sentinel"
+    FEY_TORMENTOR = "Fey Tormentor"
+    INFERNAL_BULWARK = "Infernal Bulwark"
+    INFERNAL_DRAGOON = "Infernal Dragoon"
+    ABERRANT_ANATOMY = "Aberrant Anatomy"
+    ECHOING_SOUL = "Echoing Soul"
+    GATHERED_WHISPERS = "Gathered Whispers"
+    LIVING_SHADOW = "Living Shadow"
+    MIST_WALKER = "Mist Walker"
+    SECOND_SKIN = "Second Skin"
+    SYMBIOTIC_BEING = "Symbiotic Being"
+    TOUCH_OF_DEATH = "Touch of Death"
+    WATCHERS = "Watchers"
 
 
 class FeatEffectType(Enum):
@@ -265,13 +431,14 @@ def fighting_style_source(style: FightingStyleType) -> RuleSource:
 class GeneralFeatDefinition:
     featType: GeneralFeatType
     source: RuleSource
+    category: FeatCategory
     prerequisites: tuple[FeatPrerequisite, ...]
     description: str
     repeatable: bool = False
 
 
-def general_feat(feat_type: GeneralFeatType, source: RuleSource, description: str, prerequisites: tuple[FeatPrerequisite, ...] = (), repeatable: bool = False) -> GeneralFeatDefinition:
-    return GeneralFeatDefinition(featType=feat_type, source=source, prerequisites=prerequisites, description=description, repeatable=repeatable)
+def general_feat(feat_type: GeneralFeatType, source: RuleSource, description: str, prerequisites: tuple[FeatPrerequisite, ...] = (), repeatable: bool = False, category: FeatCategory = FeatCategory.GENERAL) -> GeneralFeatDefinition:
+    return GeneralFeatDefinition(featType=feat_type, source=source, category=category, prerequisites=prerequisites, description=description, repeatable=repeatable)
 
 
 def level_prerequisite(minimum_level: int) -> FeatPrerequisite:
@@ -409,6 +576,160 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.WEAPON_MASTER: general_feat(GeneralFeatType.WEAPON_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain weapon proficiencies."),
     GeneralFeatType.WOOD_ELF_MAGIC: general_feat(GeneralFeatType.WOOD_ELF_MAGIC, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Learn druid magic and wood elf spells.", (species_prerequisite(SpeciesType.ELF),)),
 }
+
+SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
+    GeneralFeatType.SHARP_EYE: general_feat(GeneralFeatType.SHARP_EYE, RuleSource.PLAYERS_HANDBOOK_2024, 'Sharp Eye 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.SURVIVOR: general_feat(GeneralFeatType.SURVIVOR, RuleSource.PLAYERS_HANDBOOK_2024, 'Survivor 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.CULT_OF_THE_DRAGON_INITIATE: general_feat(GeneralFeatType.CULT_OF_THE_DRAGON_INITIATE, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Cult of the Dragon Initiate 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.EMERALD_ENCLAVE_FLEDGLING: general_feat(GeneralFeatType.EMERALD_ENCLAVE_FLEDGLING, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Emerald Enclave Fledgling 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.HARPER_AGENT: general_feat(GeneralFeatType.HARPER_AGENT, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Harper Agent 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.LORDS_ALLIANCE_AGENT: general_feat(GeneralFeatType.LORDS_ALLIANCE_AGENT, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, "Lords' Alliance Agent 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.PURPLE_DRAGON_ROOK: general_feat(GeneralFeatType.PURPLE_DRAGON_ROOK, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Purple Dragon Rook 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.SPELLFIRE_SPARK: general_feat(GeneralFeatType.SPELLFIRE_SPARK, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Spellfire Spark 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.TYRO_OF_THE_GAUNTLET: general_feat(GeneralFeatType.TYRO_OF_THE_GAUNTLET, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Tyro of the Gauntlet 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.ZHENTARIM_RUFFIAN: general_feat(GeneralFeatType.ZHENTARIM_RUFFIAN, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Zhentarim Ruffian 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.CHILD_OF_THE_SUN: general_feat(GeneralFeatType.CHILD_OF_THE_SUN, RuleSource.DND_BEYOND_DROPS_2026, 'Child of the Sun 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.SHADOWMOOR_HEXER: general_feat(GeneralFeatType.SHADOWMOOR_HEXER, RuleSource.DND_BEYOND_DROPS_2026, 'Shadowmoor Hexer 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.TIRELESS_REVELER: general_feat(GeneralFeatType.TIRELESS_REVELER, RuleSource.DND_BEYOND_DROPS_2026, 'Tireless Reveler 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.VAMPIRE_HUNTER: general_feat(GeneralFeatType.VAMPIRE_HUNTER, RuleSource.DND_BEYOND_DROPS_2026, 'Vampire Hunter 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.VAMPIRE_S_PLAYTHING: general_feat(GeneralFeatType.VAMPIRE_S_PLAYTHING, RuleSource.DND_BEYOND_DROPS_2026, "Vampire's Plaything 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.ABILITY_SCORE_IMPROVEMENT: general_feat(GeneralFeatType.ABILITY_SCORE_IMPROVEMENT, RuleSource.PLAYERS_HANDBOOK_2024, 'Ability Score Improvement 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.MARTIAL_WEAPON_TRAINING: general_feat(GeneralFeatType.MARTIAL_WEAPON_TRAINING, RuleSource.PLAYERS_HANDBOOK_2024, 'Martial Weapon Training 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.SHIFTING_COMBATANT: general_feat(GeneralFeatType.SHIFTING_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, 'Shifting Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.SPEEDY: general_feat(GeneralFeatType.SPEEDY, RuleSource.PLAYERS_HANDBOOK_2024, 'Speedy 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.TACTICAL_COMBATANT: general_feat(GeneralFeatType.TACTICAL_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, 'Tactical Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.COLD_CASTER: general_feat(GeneralFeatType.COLD_CASTER, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Cold Caster 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.DRAGONSCARRED: general_feat(GeneralFeatType.DRAGONSCARRED, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Dragonscarred 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.ENCLAVE_MAGIC: general_feat(GeneralFeatType.ENCLAVE_MAGIC, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Enclave Magic 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.FAIRY_TRICKSTER: general_feat(GeneralFeatType.FAIRY_TRICKSTER, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Fairy Trickster 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.GENIE_MAGIC: general_feat(GeneralFeatType.GENIE_MAGIC, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Genie Magic 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.HARPER_TEAMWORK: general_feat(GeneralFeatType.HARPER_TEAMWORK, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Harper Teamwork 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.LORDLY_RESOLVE: general_feat(GeneralFeatType.LORDLY_RESOLVE, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Lordly Resolve 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.MYTHAL_TOUCHED: general_feat(GeneralFeatType.MYTHAL_TOUCHED, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Mythal Touched 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.ORDER_S_RESILIENCE: general_feat(GeneralFeatType.ORDER_S_RESILIENCE, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, "Order's Resilience 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.PURPLE_DRAGON_COMMANDANT: general_feat(GeneralFeatType.PURPLE_DRAGON_COMMANDANT, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Purple Dragon Commandant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.SPELLFIRE_ADEPT: general_feat(GeneralFeatType.SPELLFIRE_ADEPT, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Spellfire Adept 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.STREET_JUSTICE: general_feat(GeneralFeatType.STREET_JUSTICE, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Street Justice 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.ZHENTARIM_TACTICS: general_feat(GeneralFeatType.ZHENTARIM_TACTICS, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Zhentarim Tactics 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.BLOODLUST: general_feat(GeneralFeatType.BLOODLUST, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Bloodlust 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.BOMBER: general_feat(GeneralFeatType.BOMBER, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Bomber 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.CLOYING_MISTS: general_feat(GeneralFeatType.CLOYING_MISTS, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Cloying Mists 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.DELICIOUS_PAIN: general_feat(GeneralFeatType.DELICIOUS_PAIN, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Delicious Pain 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.LIGHT_BRINGER: general_feat(GeneralFeatType.LIGHT_BRINGER, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Light Bringer 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.LOVE_BITES: general_feat(GeneralFeatType.LOVE_BITES, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Love Bites 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.PUTREFY: general_feat(GeneralFeatType.PUTREFY, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Putrefy 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.REBUKE: general_feat(GeneralFeatType.REBUKE, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Rebuke 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.TREACHEROUS_ALLURE: general_feat(GeneralFeatType.TREACHEROUS_ALLURE, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Treacherous Allure 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.VAMPIRE_TOUCHED: general_feat(GeneralFeatType.VAMPIRE_TOUCHED, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Vampire Touched 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.BOON_OF_COMBAT_PROWESS: general_feat(GeneralFeatType.BOON_OF_COMBAT_PROWESS, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Combat Prowess 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL: general_feat(GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Dimensional Travel 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_ENERGY_RESISTANCE: general_feat(GeneralFeatType.BOON_OF_ENERGY_RESISTANCE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Energy Resistance 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_FATE: general_feat(GeneralFeatType.BOON_OF_FATE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Fate 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_FORTITUDE: general_feat(GeneralFeatType.BOON_OF_FORTITUDE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Fortitude 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_IRRESISTIBLE_OFFENSE: general_feat(GeneralFeatType.BOON_OF_IRRESISTIBLE_OFFENSE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Irresistible Offense 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_RECOVERY: general_feat(GeneralFeatType.BOON_OF_RECOVERY, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Recovery 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_SKILL: general_feat(GeneralFeatType.BOON_OF_SKILL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Skill 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_SPEED: general_feat(GeneralFeatType.BOON_OF_SPEED, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Speed 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_SPELL_RECALL: general_feat(GeneralFeatType.BOON_OF_SPELL_RECALL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Spell Recall 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_THE_NIGHT_SPIRIT: general_feat(GeneralFeatType.BOON_OF_THE_NIGHT_SPIRIT, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of the Night Spirit 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_TRUESIGHT: general_feat(GeneralFeatType.BOON_OF_TRUESIGHT, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Truesight 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_SIBERYS: general_feat(GeneralFeatType.BOON_OF_SIBERYS, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Boon of Siberys 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_BLOODSHED: general_feat(GeneralFeatType.BOON_OF_BLOODSHED, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of Bloodshed 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_BOUNTIFUL_HEALTH: general_feat(GeneralFeatType.BOON_OF_BOUNTIFUL_HEALTH, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of Bountiful Health 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_COMMUNICATION: general_feat(GeneralFeatType.BOON_OF_COMMUNICATION, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of Communication 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_DESPERATE_RESILIENCE: general_feat(GeneralFeatType.BOON_OF_DESPERATE_RESILIENCE, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of Desperate Resilience 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_EXQUISITE_RADIANCE: general_feat(GeneralFeatType.BOON_OF_EXQUISITE_RADIANCE, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of Exquisite Radiance 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_FLUID_FORMS: general_feat(GeneralFeatType.BOON_OF_FLUID_FORMS, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of Fluid Forms 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_FORTUNE_S_FAVOR: general_feat(GeneralFeatType.BOON_OF_FORTUNE_S_FAVOR, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, "Boon of Fortune's Favor 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.", (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_POISON_MASTERY: general_feat(GeneralFeatType.BOON_OF_POISON_MASTERY, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of Poison Mastery 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_REVELRY: general_feat(GeneralFeatType.BOON_OF_REVELRY, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of Revelry 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_TERROR: general_feat(GeneralFeatType.BOON_OF_TERROR, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of Terror 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_THE_BRIGHT_SUN: general_feat(GeneralFeatType.BOON_OF_THE_BRIGHT_SUN, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of the Bright Sun 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_THE_FURIOUS_STORM: general_feat(GeneralFeatType.BOON_OF_THE_FURIOUS_STORM, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of the Furious Storm 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_THE_SOUL_DRINKER: general_feat(GeneralFeatType.BOON_OF_THE_SOUL_DRINKER, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Boon of the Soul Drinker 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_BLAZING_DAWN: general_feat(GeneralFeatType.BOON_OF_BLAZING_DAWN, RuleSource.DND_BEYOND_DROPS_2026, 'Boon of Blazing Dawn 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_LOOMING_SHADOWS: general_feat(GeneralFeatType.BOON_OF_LOOMING_SHADOWS, RuleSource.DND_BEYOND_DROPS_2026, 'Boon of Looming Shadows 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_MISTY_ESCAPE: general_feat(GeneralFeatType.BOON_OF_MISTY_ESCAPE, RuleSource.DND_BEYOND_DROPS_2026, 'Boon of Misty Escape 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.ABERRANT_DRAGONMARK: general_feat(GeneralFeatType.ABERRANT_DRAGONMARK, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Aberrant Dragonmark 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_DETECTION: general_feat(GeneralFeatType.MARK_OF_DETECTION, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Detection 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_FINDING: general_feat(GeneralFeatType.MARK_OF_FINDING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Finding 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_HANDLING: general_feat(GeneralFeatType.MARK_OF_HANDLING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Handling 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_HEALING: general_feat(GeneralFeatType.MARK_OF_HEALING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Healing 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_HOSPITALITY: general_feat(GeneralFeatType.MARK_OF_HOSPITALITY, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Hospitality 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_MAKING: general_feat(GeneralFeatType.MARK_OF_MAKING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Making 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_PASSAGE: general_feat(GeneralFeatType.MARK_OF_PASSAGE, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Passage 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_SCRIBING: general_feat(GeneralFeatType.MARK_OF_SCRIBING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Scribing 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_SENTINEL: general_feat(GeneralFeatType.MARK_OF_SENTINEL, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Sentinel 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_SHADOW: general_feat(GeneralFeatType.MARK_OF_SHADOW, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Shadow 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_STORM: general_feat(GeneralFeatType.MARK_OF_STORM, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Storm 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.MARK_OF_WARDING: general_feat(GeneralFeatType.MARK_OF_WARDING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Mark of Warding 2024 Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DRAGONMARK),
+    GeneralFeatType.GREATER_ABERRANT_MARK: general_feat(GeneralFeatType.GREATER_ABERRANT_MARK, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Aberrant Mark 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_DETECTION: general_feat(GeneralFeatType.GREATER_MARK_OF_DETECTION, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Detection 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_FINDING: general_feat(GeneralFeatType.GREATER_MARK_OF_FINDING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Finding 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_HANDLING: general_feat(GeneralFeatType.GREATER_MARK_OF_HANDLING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Handling 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_HEALING: general_feat(GeneralFeatType.GREATER_MARK_OF_HEALING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Healing 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_HOSPITALITY: general_feat(GeneralFeatType.GREATER_MARK_OF_HOSPITALITY, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Hospitality 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_MAKING: general_feat(GeneralFeatType.GREATER_MARK_OF_MAKING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Making 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_PASSAGE: general_feat(GeneralFeatType.GREATER_MARK_OF_PASSAGE, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Passage 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_SCRIBING: general_feat(GeneralFeatType.GREATER_MARK_OF_SCRIBING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Scribing 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_SENTINEL: general_feat(GeneralFeatType.GREATER_MARK_OF_SENTINEL, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Sentinel 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_SHADOW: general_feat(GeneralFeatType.GREATER_MARK_OF_SHADOW, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Shadow 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_STORM: general_feat(GeneralFeatType.GREATER_MARK_OF_STORM, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Storm 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.GREATER_MARK_OF_WARDING: general_feat(GeneralFeatType.GREATER_MARK_OF_WARDING, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Greater Mark of Warding 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.POTENT_DRAGONMARK: general_feat(GeneralFeatType.POTENT_DRAGONMARK, RuleSource.EBERRON_FORGE_OF_THE_ARTIFICER_2024, 'Potent Dragonmark 2024 Greater Dragonmark feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_DRAGONMARK),
+    GeneralFeatType.FEY_PACT: general_feat(GeneralFeatType.FEY_PACT, RuleSource.DND_BEYOND_DROPS_2026, 'Fey Pact 2024 Planar Pact feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.PLANAR_PACT),
+    GeneralFeatType.INFERNAL_PACT: general_feat(GeneralFeatType.INFERNAL_PACT, RuleSource.DND_BEYOND_DROPS_2026, 'Infernal Pact 2024 Planar Pact feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.PLANAR_PACT),
+    GeneralFeatType.FEY_SENTINEL: general_feat(GeneralFeatType.FEY_SENTINEL, RuleSource.DND_BEYOND_DROPS_2026, 'Fey Sentinel 2024 Greater Planar Pact feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_PLANAR_PACT),
+    GeneralFeatType.FEY_TORMENTOR: general_feat(GeneralFeatType.FEY_TORMENTOR, RuleSource.DND_BEYOND_DROPS_2026, 'Fey Tormentor 2024 Greater Planar Pact feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_PLANAR_PACT),
+    GeneralFeatType.INFERNAL_BULWARK: general_feat(GeneralFeatType.INFERNAL_BULWARK, RuleSource.DND_BEYOND_DROPS_2026, 'Infernal Bulwark 2024 Greater Planar Pact feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_PLANAR_PACT),
+    GeneralFeatType.INFERNAL_DRAGOON: general_feat(GeneralFeatType.INFERNAL_DRAGOON, RuleSource.DND_BEYOND_DROPS_2026, 'Infernal Dragoon 2024 Greater Planar Pact feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.GREATER_PLANAR_PACT),
+    GeneralFeatType.ABERRANT_ANATOMY: general_feat(GeneralFeatType.ABERRANT_ANATOMY, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Aberrant Anatomy 2024 Dark Gift feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DARK_GIFT),
+    GeneralFeatType.ECHOING_SOUL: general_feat(GeneralFeatType.ECHOING_SOUL, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Echoing Soul 2024 Dark Gift feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DARK_GIFT),
+    GeneralFeatType.GATHERED_WHISPERS: general_feat(GeneralFeatType.GATHERED_WHISPERS, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Gathered Whispers 2024 Dark Gift feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DARK_GIFT),
+    GeneralFeatType.LIVING_SHADOW: general_feat(GeneralFeatType.LIVING_SHADOW, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Living Shadow 2024 Dark Gift feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DARK_GIFT),
+    GeneralFeatType.MIST_WALKER: general_feat(GeneralFeatType.MIST_WALKER, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Mist Walker 2024 Dark Gift feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DARK_GIFT),
+    GeneralFeatType.SECOND_SKIN: general_feat(GeneralFeatType.SECOND_SKIN, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Second Skin 2024 Dark Gift feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DARK_GIFT),
+    GeneralFeatType.SYMBIOTIC_BEING: general_feat(GeneralFeatType.SYMBIOTIC_BEING, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Symbiotic Being 2024 Dark Gift feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DARK_GIFT),
+    GeneralFeatType.TOUCH_OF_DEATH: general_feat(GeneralFeatType.TOUCH_OF_DEATH, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Touch of Death 2024 Dark Gift feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DARK_GIFT),
+    GeneralFeatType.WATCHERS: general_feat(GeneralFeatType.WATCHERS, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Watchers 2024 Dark Gift feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.DARK_GIFT),
+}
+
+GENERAL_FEATS.update(SUPPLEMENTAL_2024_FEATS)
+
+
+ORIGIN_FEAT_TYPES = {
+    GeneralFeatType.ALERT,
+    GeneralFeatType.CRAFTER,
+    GeneralFeatType.HEALER,
+    GeneralFeatType.LUCKY,
+    GeneralFeatType.MAGIC_INITIATE,
+    GeneralFeatType.MUSICIAN,
+    GeneralFeatType.SAVAGE_ATTACKER,
+    GeneralFeatType.SHARP_EYE,
+    GeneralFeatType.SKILLED,
+    GeneralFeatType.SURVIVOR,
+    GeneralFeatType.TAVERN_BRAWLER,
+    GeneralFeatType.TOUGH,
+    GeneralFeatType.CULT_OF_THE_DRAGON_INITIATE,
+    GeneralFeatType.EMERALD_ENCLAVE_FLEDGLING,
+    GeneralFeatType.HARPER_AGENT,
+    GeneralFeatType.LORDS_ALLIANCE_AGENT,
+    GeneralFeatType.PURPLE_DRAGON_ROOK,
+    GeneralFeatType.SPELLFIRE_SPARK,
+    GeneralFeatType.TYRO_OF_THE_GAUNTLET,
+    GeneralFeatType.ZHENTARIM_RUFFIAN,
+    GeneralFeatType.CHILD_OF_THE_SUN,
+    GeneralFeatType.SHADOWMOOR_HEXER,
+    GeneralFeatType.TIRELESS_REVELER,
+    GeneralFeatType.VAMPIRE_HUNTER,
+    GeneralFeatType.VAMPIRE_S_PLAYTHING,
+}
+
+
+def general_feat_category(feat_type: GeneralFeatType) -> FeatCategory:
+    if feat_type in ORIGIN_FEAT_TYPES:
+        return FeatCategory.ORIGIN
+    return GENERAL_FEATS[feat_type].category
 
 
 FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
@@ -656,6 +977,7 @@ def general_feat_options(selected_feats=None, sheet=None):
     return [
         ProgressionChoiceOption(value=enum_key(feat_type), label=enum_label(feat_type))
         for feat_type, definition in GENERAL_FEATS.items()
+        if general_feat_category(feat_type) == FeatCategory.GENERAL
         if definition.repeatable or enum_key(feat_type) not in selected
         if sheet is None or general_feat_prerequisites_met(feat_type, sheet)
     ]
@@ -723,7 +1045,7 @@ def feat_prerequisite_met(prerequisite: FeatPrerequisite, sheet) -> bool:
     if prerequisite.prerequisiteType == FeatPrerequisiteType.CHARACTER_LEVEL:
         return character_level(sheet) >= prerequisite.minimumLevel
     if prerequisite.prerequisiteType == FeatPrerequisiteType.ABILITY_SCORE:
-        return any(getattr(sheet.abilityScores, enum_key(ability), 0) >= prerequisite.minimumScore for ability in prerequisite.abilities)
+        return any(ability_score(sheet, ability) >= prerequisite.minimumScore for ability in prerequisite.abilities)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.SPECIES:
         return character_species(sheet) in prerequisite.species or character_size(sheet) in prerequisite.speciesSizes
     if prerequisite.prerequisiteType == FeatPrerequisiteType.SPECIES_SIZE:
@@ -731,24 +1053,29 @@ def feat_prerequisite_met(prerequisite: FeatPrerequisite, sheet) -> bool:
     if prerequisite.prerequisiteType == FeatPrerequisiteType.ARMOR_PROFICIENCY:
         return any(has_armor_proficiency(sheet, category) for category in prerequisite.armorCategories)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.WEAPON_PROFICIENCY:
-        return any(has_weapon_proficiency(sheet, proficiency) for proficiency in prerequisite.weaponProficiencies) or any(enum_label(background) == getattr(sheet, "background", "") for background in prerequisite.backgrounds)
+        return any(has_weapon_proficiency(sheet, proficiency) for proficiency in prerequisite.weaponProficiencies) or any(enum_label(background) == sheet_background(sheet) for background in prerequisite.backgrounds)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.CHARACTER_FEATURE:
         return any(has_character_feature(sheet, feature) for feature in prerequisite.features)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.SPELLCASTING:
-        return bool(getattr(sheet, "spells", None)) or any(has_character_feature(sheet, feature) for feature in prerequisite.features)
+        return bool(sheet_value(sheet, FeatSheetField.SPELLS, None)) or any(has_character_feature(sheet, feature) for feature in prerequisite.features)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.FEAT:
         return any(has_general_feat(sheet, feat) for feat in prerequisite.feats)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.BACKGROUND:
-        return any(enum_label(background) == getattr(sheet, "background", "") for background in prerequisite.backgrounds)
+        return any(enum_label(background) == sheet_background(sheet) for background in prerequisite.backgrounds)
     return False
 
 
 def character_level(sheet) -> int:
-    return sum(character_class.level for character_class in getattr(sheet, "classes", []) or []) or getattr(getattr(sheet, "characterClass", None), "level", 0)
+    return sum(character_class.level for character_class in sheet_value(sheet, FeatSheetField.CLASSES, []) or []) or sheet_character_class_level(sheet)
+
+
+def sheet_character_class_level(sheet) -> int:
+    character_class = sheet_value(sheet, FeatSheetField.CHARACTER_CLASS, None)
+    return getattr(character_class, FeatCharacterClassField.LEVEL.value, 0)
 
 
 def character_species(sheet) -> SpeciesType | None:
-    race = getattr(sheet, "race", "")
+    race = sheet_value(sheet, FeatSheetField.RACE, "")
     for species in SpeciesType:
         if enum_label(species) == race:
             return species
@@ -764,34 +1091,66 @@ def character_size(sheet) -> FeatSpeciesSize | None:
 
 def has_armor_proficiency(sheet, category: ArmorCategory) -> bool:
     label = f"{enum_label(category)} armor".lower()
-    return any(label in proficiency.lower() for proficiency in getattr(sheet, "proficiencies", []) or [])
+    return any(label in proficiency.lower() for proficiency in sheet_proficiencies(sheet))
 
 
 def has_weapon_proficiency(sheet, proficiency: WeaponProficiencyType) -> bool:
     label = enum_label(proficiency).lower()
-    return any(label in sheet_proficiency.lower() for sheet_proficiency in getattr(sheet, "proficiencies", []) or [])
+    return any(label in sheet_proficiency.lower() for sheet_proficiency in sheet_proficiencies(sheet))
 
 
 def has_character_feature(sheet, feature: FeatCharacterFeatureType) -> bool:
     label = enum_label(feature).lower()
-    feature_lists = [getattr(sheet, "features", []) or [], getattr(sheet, "abilities", []) or []]
-    return any(label in getattr(item, "name", "").lower() or label in getattr(item, "description", "").lower() for items in feature_lists for item in items)
+    feature_lists = [sheet_value(sheet, FeatSheetField.FEATURES, []) or [], sheet_value(sheet, FeatSheetField.ABILITIES, []) or []]
+    return any(label in feature_text(item, FeatFeatureField.NAME).lower() or label in feature_text(item, FeatFeatureField.DESCRIPTION).lower() for items in feature_lists for item in items)
 
 
 def has_general_feat(sheet, feat_type: GeneralFeatType) -> bool:
     key = enum_key(feat_type)
-    return any(getattr(feat, "id", "") == key for feat in getattr(sheet, "features", []) or []) or any(getattr(feat, "id", "") == key for feat in getattr(sheet, "feats", []) or [])
+    return any(feature_text(feat, FeatFeatureField.ID) == key for feat in sheet_value(sheet, FeatSheetField.FEATURES, []) or []) or any(feature_text(feat, FeatFeatureField.ID) == key for feat in sheet_value(sheet, FeatSheetField.FEATS, []) or [])
 
 
 def selected_general_feat_keys(feats) -> list[str]:
     keys: list[str] = []
     for feat in feats or []:
-        feat_type = parse_general_feat(getattr(feat, "id", ""))
+        feat_type = parse_general_feat(feature_text(feat, FeatFeatureField.ID))
         if feat_type is not None:
             key = enum_key(feat_type)
             if key not in keys:
                 keys.append(key)
     return keys
+
+
+def selected_general_feat_types(feats) -> set[GeneralFeatType]:
+    selected: set[GeneralFeatType] = set()
+    for feat in feats or []:
+        feat_type = parse_general_feat(feature_text(feat, FeatFeatureField.ID))
+        if feat_type is not None:
+            selected.add(feat_type)
+    return selected
+
+
+def ability_score(sheet, ability: AbilityType) -> int:
+    ability_scores = sheet_value(sheet, FeatSheetField.ABILITY_SCORES, None)
+    if ability_scores is None:
+        return 0
+    return getattr(ability_scores, enum_key(ability), 0)
+
+
+def sheet_background(sheet) -> str:
+    return sheet_value(sheet, FeatSheetField.BACKGROUND, "")
+
+
+def sheet_proficiencies(sheet) -> list[str]:
+    return sheet_value(sheet, FeatSheetField.PROFICIENCIES, []) or []
+
+
+def sheet_value(sheet, field: FeatSheetField, default):
+    return getattr(sheet, field.value, default)
+
+
+def feature_text(feature, field: FeatFeatureField) -> str:
+    return getattr(feature, field.value, "")
 
 
 def parse_general_feat(value: str) -> GeneralFeatType | None:
@@ -806,12 +1165,67 @@ def normalize_feat_key(value: str) -> str:
     return value.strip().replace("-", "").replace("_", "").replace(" ", "").lower()
 
 
-def feat_resources(classes: list[CharacterClassLevel]):
-    return []
+def feat_resources(classes: list[CharacterClassLevel], feats=None, proficiency_bonus: int = 2) -> list[ResourceTracker]:
+    selected_feats = selected_general_feat_types(feats)
+    resources: list[ResourceTracker] = []
+    if GeneralFeatType.LUCKY in selected_feats:
+        resources.append(ResourceTracker(
+            id=FeatResourceId.LUCK_POINTS.value,
+            name=enum_label(GeneralFeatType.LUCKY),
+            currentUses=proficiency_bonus,
+            maxUses=proficiency_bonus,
+            reset=RestType.LONG_REST,
+            activation=TimeEconomy.SPECIAL,
+            description="Spend Luck Points to gain Advantage on a D20 Test or impose Disadvantage on an attack roll against you.",
+        ))
+    if GeneralFeatType.BOON_OF_COMBAT_PROWESS in selected_feats:
+        resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_COMBAT_PROWESS, GeneralFeatType.BOON_OF_COMBAT_PROWESS, RestType.SHORT_REST, "Turn a missed melee weapon attack into a hit."))
+    if GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL in selected_feats:
+        resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_DIMENSIONAL_TRAVEL, GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, RestType.SHORT_REST, "Cast Misty Step without a spell slot or components."))
+    if GeneralFeatType.BOON_OF_FATE in selected_feats:
+        resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_FATE, GeneralFeatType.BOON_OF_FATE, RestType.SHORT_REST, "Roll 1d10 and add or subtract it from another creature's d20 Test."))
+    if GeneralFeatType.BOON_OF_RECOVERY in selected_feats:
+        resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_RECOVERY, GeneralFeatType.BOON_OF_RECOVERY, RestType.LONG_REST, "Regain hit points when reduced to 0 or by using a Bonus Action."))
+    return resources
 
 
-def feat_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbility]:
+def feat_single_use_resource(resource_id: FeatResourceId, feat_type: GeneralFeatType, reset: RestType, description: str) -> ResourceTracker:
+    return ResourceTracker(
+        id=resource_id.value,
+        name=enum_label(feat_type),
+        currentUses=1,
+        maxUses=1,
+        reset=reset,
+        activation=TimeEconomy.SPECIAL,
+        description=description,
+    )
+
+
+def feat_abilities(classes: list[CharacterClassLevel], feats=None) -> list[SheetAbility]:
     abilities: list[SheetAbility] = []
+    selected_feats = selected_general_feat_types(feats)
+    feat_ability_specs = [
+        (GeneralFeatType.HEALER, FeatAbilityId.HEALER, TimeEconomy.ACTION, None, "Use a Healer's Kit to restore hit points or stabilize a creature."),
+        (GeneralFeatType.LUCKY, FeatAbilityId.LUCKY_ADVANTAGE, TimeEconomy.SPECIAL, FeatResourceId.LUCK_POINTS, "Spend 1 Luck Point to gain Advantage on a D20 Test."),
+        (GeneralFeatType.LUCKY, FeatAbilityId.LUCKY_DISADVANTAGE, TimeEconomy.REACTION, FeatResourceId.LUCK_POINTS, "Spend 1 Luck Point to impose Disadvantage on an attack roll against you."),
+        (GeneralFeatType.OBSERVANT, FeatAbilityId.OBSERVANT_QUICK_SEARCH, TimeEconomy.BONUS_ACTION, None, "Take the Search action as a Bonus Action."),
+        (GeneralFeatType.TELEKINETIC, FeatAbilityId.TELEKINETIC_SHOVE, TimeEconomy.BONUS_ACTION, None, "Telekinetically shove one creature you can see within 30 feet."),
+        (GeneralFeatType.BOON_OF_COMBAT_PROWESS, FeatAbilityId.BOON_OF_COMBAT_PROWESS, TimeEconomy.SPECIAL, FeatResourceId.BOON_OF_COMBAT_PROWESS, "Turn a missed melee weapon attack into a hit."),
+        (GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, FeatAbilityId.BOON_OF_DIMENSIONAL_TRAVEL, TimeEconomy.ACTION, FeatResourceId.BOON_OF_DIMENSIONAL_TRAVEL, "Cast Misty Step without a spell slot or components."),
+        (GeneralFeatType.BOON_OF_FATE, FeatAbilityId.BOON_OF_FATE, TimeEconomy.REACTION, FeatResourceId.BOON_OF_FATE, "Roll 1d10 and add or subtract it from another creature's d20 Test."),
+        (GeneralFeatType.BOON_OF_RECOVERY, FeatAbilityId.BOON_OF_RECOVERY, TimeEconomy.BONUS_ACTION, FeatResourceId.BOON_OF_RECOVERY, "Regain hit points."),
+    ]
+    for feat_type, ability_id, activation, resource_id, description in feat_ability_specs:
+        if feat_type not in selected_feats:
+            continue
+        abilities.append(SheetAbility(
+            id=ability_id.value,
+            name=enum_label(feat_type),
+            source=enum_label(general_feat_category(feat_type)),
+            activation=activation,
+            description=description,
+            resourceId=resource_id.value if resource_id else None,
+        ))
     for style in selected_fighting_styles(classes):
         definition = FIGHTING_STYLE_FEATS.get(style)
         if definition is None:
@@ -839,6 +1253,30 @@ def feat_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbility]:
                     )
                 )
     return abilities
+
+
+def feat_hit_point_bonus(feats, total_level: int) -> int:
+    selected_feats = selected_general_feat_types(feats)
+    bonus = 0
+    if GeneralFeatType.BOON_OF_FORTITUDE in selected_feats:
+        bonus += 40
+    return bonus
+
+
+def feat_speed_bonus(feats) -> int:
+    selected_feats = selected_general_feat_types(feats)
+    bonus = 0
+    if GeneralFeatType.SPEEDY in selected_feats:
+        bonus += 10
+    if GeneralFeatType.MOBILE in selected_feats:
+        bonus += 10
+    if GeneralFeatType.BOON_OF_SPEED in selected_feats:
+        bonus += 30
+    return bonus
+
+
+def feat_initiative_bonus(feats, proficiency_bonus: int) -> int:
+    return proficiency_bonus if GeneralFeatType.ALERT in selected_general_feat_types(feats) else 0
 
 
 def armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:

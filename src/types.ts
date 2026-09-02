@@ -115,7 +115,7 @@ export type ConditionEffect = {
   durationLabel: string;
   description: string;
 };
-export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
+export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "skillProficiencies" | "expertise" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
 export type DamageType =
   | "acid"
   | "bludgeoning"
@@ -145,10 +145,9 @@ export type EquipmentType = "armor" | "gear" | "shield" | "weapon";
 export type ArmorCategory = "light" | "medium" | "heavy";
 export type SpellSchool = "abjuration" | "conjuration" | "divination" | "enchantment" | "evocation" | "illusion" | "necromancy" | "transmutation";
 export type SpellComponent = "verbal" | "somatic" | "material";
-export type SpellCastingTime = "action" | "reaction" | "hour" | "tenMinutes";
-export type SpellRangeType = "self" | "touch" | "distance";
+export type SpellRangeType = "self" | "touch" | "distance" | "sight" | "unlimited" | "special";
 export type SpellAreaShape = "none" | "radius" | "cone" | "cube" | "line" | "cylinder";
-export type SpellDurationUnit = "instantaneous" | "round" | "minute" | "hour";
+export type SpellDurationUnit = "instantaneous" | "round" | "minute" | "hour" | "day" | "untilDispelled" | "special";
 export type SpellNoArea = {
   shape: "none";
   shapeLabel: string;
@@ -286,12 +285,46 @@ export type CharacterBuilderOptions = {
   pointBuyCosts: Record<string, number>;
   pointBuyPoints: number;
   backgroundDetails: Record<string, CharacterBuilderBackgroundDetail>;
+  toolDetails: Record<string, CharacterBuilderToolDetail>;
 };
 
 export type CharacterBuilderBackgroundDetail = {
   abilityScores: CharacterBuilderOption[];
   toolOptions: CharacterBuilderOption[];
   equipmentChoices: CharacterBuilderOption[];
+  magicInitiateSpellChoices?: CharacterBuilderMagicInitiateSpellChoices | null;
+};
+
+export type CharacterBuilderToolDetail = {
+  category: string;
+  ability: AbilityType;
+  weightLb?: number | null;
+  cost: string;
+  utilizeActions: {
+    description: string;
+    dc: number;
+  }[];
+  craftOutputs: string[];
+  hasVariants: boolean;
+  variantParent?: string | null;
+};
+
+export type CharacterBuilderSpellOption = CharacterBuilderOption & {
+  school: SpellSchool;
+  level: number;
+  castingTime: TimeEconomy;
+  castingTimeLabel: string;
+  range: string;
+  duration: string;
+  components: string[];
+};
+
+export type CharacterBuilderMagicInitiateSpellChoices = {
+  spellList: string;
+  cantripsKnown: number;
+  firstLevelSpellsKnown: number;
+  cantrips: CharacterBuilderSpellOption[];
+  firstLevelSpells: CharacterBuilderSpellOption[];
 };
 
 export type CharacterBuilderDraft = {
@@ -306,6 +339,7 @@ export type CharacterBuilderDraft = {
   backgroundAbilityIncreases: AbilityScores;
   toolProficiency?: string;
   equipmentChoice: string;
+  magicInitiateSpells: string[];
 };
 
 export type CharacterSheet = {
@@ -404,8 +438,9 @@ export type CharacterSheet = {
     schoolLabel: string;
     castingAbility: AbilityType;
     castingAbilityLabel: string;
-    castingTime: SpellCastingTime;
+    castingTime: TimeEconomy;
     castingTimeLabel: string;
+    castingDuration?: SpellDuration;
     targeting: SpellTargeting;
     duration: SpellDuration;
     components: SpellComponent[];
@@ -442,6 +477,11 @@ export type CharacterSheet = {
     armorClass: number;
     armorClassBonus: number;
   }[];
+  purse: {
+    copper: number;
+    silver: number;
+    gold: number;
+  };
 };
 
 export type RollPayload = {

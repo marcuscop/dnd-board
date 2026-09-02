@@ -662,7 +662,7 @@
                         },
                         "level": {
                           "$type": "int",
-                          "value": 2
+                          "value": 1
                         }
                       }
                     }
@@ -1387,6 +1387,341 @@
                         "name": {
                           "$type": "str",
                           "value": "Harper Equipment Package"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": "Starting equipment package from background."
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "$type": "PartyMemberConfig",
+          "fields": {
+            "id": {
+              "$type": "str",
+              "value": "player-8"
+            },
+            "name": {
+              "$type": "str",
+              "value": "Gary"
+            },
+            "maxHp": {
+              "$type": "int",
+              "value": 11
+            },
+            "abilityScores": {
+              "$type": "AbilityScores",
+              "fields": {
+                "strength": {
+                  "$type": "int",
+                  "value": 8
+                },
+                "dexterity": {
+                  "$type": "int",
+                  "value": 17
+                },
+                "constitution": {
+                  "$type": "int",
+                  "value": 15
+                },
+                "intelligence": {
+                  "$type": "int",
+                  "value": 13
+                },
+                "wisdom": {
+                  "$type": "int",
+                  "value": 10
+                },
+                "charisma": {
+                  "$type": "int",
+                  "value": 12
+                }
+              }
+            },
+            "sheet": {
+              "$type": "PartyMemberSheet",
+              "fields": {
+                "race": {
+                  "$type": "str",
+                  "value": "Dwarf"
+                },
+                "background": {
+                  "$type": "str",
+                  "value": "Criminal"
+                },
+                "classes": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "CharacterClassLevel",
+                      "fields": {
+                        "name": {
+                          "$type": "ClassType",
+                          "value": "ROGUE"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        }
+                      }
+                    }
+                  ]
+                },
+                "speed": {
+                  "$type": "int",
+                  "value": 30
+                },
+                "skills": {
+                  "$type": "dict",
+                  "value": {
+                    "sleightOfHand": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    },
+                    "stealth": {
+                      "$type": "ProficiencyLevel",
+                      "value": "EXPERTISE"
+                    },
+                    "investigation": {
+                      "$type": "ProficiencyLevel",
+                      "value": "EXPERTISE"
+                    },
+                    "acrobatics": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    }
+                  }
+                },
+                "proficiencies": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "str",
+                      "value": "Thieves' Tools"
+                    }
+                  ]
+                },
+                "feats": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "alert"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Alert"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Player's Handbook (2024)"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "+5 initiative, cannot be surprised, and unseen attackers do not gain advantage."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "traits": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfdarkvision"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Darkvision"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "You have Darkvision with a range of 120 feet."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfdwarvenResilience"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Dwarven Resilience"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "You have resistance to Poison damage and advantage on saving throws to avoid or end the Poisoned condition."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfdwarvenToughness"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Dwarven Toughness"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Your Hit Point maximum increases by 1, and it increases by 1 again whenever you gain a level."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "dwarfstonecunning"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Stonecunning"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Dwarf"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "BONUS_ACTION"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "As a Bonus Action, gain Tremorsense with a range of 60 feet for 10 minutes. You can use this a number of times equal to your Proficiency Bonus per Long Rest."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "features": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "criminaltoolProficiency"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Tool Proficiency"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Criminal"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Gain proficiency with Thieves' Tools."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "damageResistances": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "DamageType",
+                      "value": "POISON"
+                    }
+                  ]
+                },
+                "equipment": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "criminalEquipmentPackage"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Criminal Equipment Package"
                         },
                         "equipped": {
                           "$type": "bool",

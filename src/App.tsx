@@ -1223,6 +1223,8 @@ function CharacterBuilderPanel({
   const memberOptions = useMemo(() => characterBuilderMemberOptions(isDm, playerKey, sheets), [isDm, playerKey, sheets]);
   const [draft, setDraft] = useState<CharacterBuilderDraft>(() => defaultCharacterBuilderDraft(memberOptions[0]?.value ?? playerKey));
   const backgroundDetail = options?.backgroundDetails[draft.background];
+  const selectedToolDetail = draft.toolProficiency ? options?.toolDetails[draft.toolProficiency] : undefined;
+  const magicInitiateChoices = backgroundDetail?.magicInitiateSpellChoices;
   const usesScorePool = draft.abilityScoreMethod !== ABILITY_SCORE_METHOD_POINT_BUY;
   const scorePool = draft.abilityScoreMethod === ABILITY_SCORE_METHOD_RANDOM ? draft.rolledAbilityScores : options?.standardArray ?? [];
   const availableScoreCounts = countScoreValues(scorePool);
@@ -1282,6 +1284,12 @@ function CharacterBuilderPanel({
     const otherAmount = amount === 2 ? 1 : 2;
     const otherAbility = ABILITY_SCORE_OPTIONS.find((option) => draft.backgroundAbilityIncreases[option.value] === otherAmount)?.value;
     updateDraft({ backgroundAbilityIncreases: abilityIncreasesForTwoOne(abilities, amount === 2 ? ability : otherAbility, amount === 1 ? ability : otherAbility) });
+  };
+
+  const updateMagicInitiateSpell = (index: number, spellId: string) => {
+    const nextSpells = [...draft.magicInitiateSpells];
+    nextSpells[index] = spellId;
+    updateDraft({ magicInitiateSpells: nextSpells });
   };
   const updateAbilityScoreMethod = (abilityScoreMethod: string) => {
     if (!options) {
@@ -1395,6 +1403,13 @@ function CharacterBuilderPanel({
               ))}
             </select>
           </label>
+          {selectedToolDetail && (
+            <div className="builder-detail-list">
+              <span>{selectedToolDetail.category} · {abilityLabel(selectedToolDetail.ability)} · {selectedToolDetail.cost}{selectedToolDetail.weightLb != null ? ` · ${selectedToolDetail.weightLb} lb.` : ""}</span>
+              {selectedToolDetail.utilizeActions.length > 0 && <small>Utilize: {selectedToolDetail.utilizeActions.map((action) => `${action.description} DC ${action.dc}`).join("; ")}</small>}
+              {selectedToolDetail.craftOutputs.length > 0 && <small>Craft: {selectedToolDetail.craftOutputs.join(", ")}</small>}
+            </div>
+          )}
           <label>
             Equipment
             <select value={draft.equipmentChoice} onChange={(event) => updateDraft({ equipmentChoice: event.currentTarget.value })}>
@@ -1405,6 +1420,43 @@ function CharacterBuilderPanel({
               ))}
             </select>
           </label>
+          {magicInitiateChoices && (
+            <div className="builder-spell-choices">
+              <div className="builder-subsection-title">Magic Initiate ({magicInitiateChoices.spellList})</div>
+              {Array.from({ length: magicInitiateChoices.cantripsKnown }).map((_, index) => (
+                <label key={`magic-initiate-cantrip-${index}`}>
+                  Cantrip {index + 1}
+                  <select value={draft.magicInitiateSpells[index] ?? ""} onChange={(event) => updateMagicInitiateSpell(index, event.currentTarget.value)}>
+                    {magicInitiateChoices.cantrips.map((option) => (
+                      <option key={option.value} value={option.value} disabled={draft.magicInitiateSpells.includes(option.value) && draft.magicInitiateSpells[index] !== option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+              {Array.from({ length: magicInitiateChoices.firstLevelSpellsKnown }).map((_, index) => {
+                const spellIndex = magicInitiateChoices.cantripsKnown + index;
+                return (
+                  <label key={`magic-initiate-first-${index}`}>
+                    1st-Level Spell
+                    <select value={draft.magicInitiateSpells[spellIndex] ?? ""} onChange={(event) => updateMagicInitiateSpell(spellIndex, event.currentTarget.value)}>
+                      {magicInitiateChoices.firstLevelSpells.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
+              <div className="builder-detail-list">
+                {draft.magicInitiateSpells.map((spellId) => selectedMagicInitiateSpellOption(magicInitiateChoices, spellId)).filter(Boolean).map((spell) => (
+                  <small key={spell!.value}>{spell!.label}: {spell!.level === 0 ? "Cantrip" : `Level ${spell!.level}`} · {spell!.range} · {spell!.duration} · {spell!.components.join(", ") || "None"}</small>
+                ))}
+              </div>
+            </div>
+          )}
           <label>
             Ability Boost
             <select value={backgroundIncreaseMode} onChange={(event) => updateIncreaseMode(event.currentTarget.value as "twoOne" | "oneEach")}>
@@ -1483,7 +1535,8 @@ function defaultCharacterBuilderDraft(playerKey: string): CharacterBuilderDraft 
     rolledAbilityScores: [],
     backgroundAbilityIncreases: abilityIncreasesForTwoOne(["dexterity", "constitution", "intelligence"], "dexterity", "constitution"),
     toolProficiency: "thievesTools",
-    equipmentChoice: "package"
+    equipmentChoice: "package",
+    magicInitiateSpells: []
   };
 }
 
@@ -1498,11 +1551,16 @@ function defaultBaseAbilityScores(): AbilityScores {
   };
 }
 
+function abilityLabel(ability: AbilityType): string {
+  return ABILITY_SCORE_OPTIONS.find((option) => option.value === ability)?.label ?? ability;
+}
+
 function normalizeCharacterBuilderDraft(draft: CharacterBuilderDraft, options: CharacterBuilderOptions): CharacterBuilderDraft {
   const detail = options.backgroundDetails[draft.background];
   if (!detail) return draft;
   const toolProficiency = detail.toolOptions.some((option) => option.value === draft.toolProficiency) ? draft.toolProficiency : detail.toolOptions[0]?.value;
   const equipmentChoice = detail.equipmentChoices.some((option) => option.value === draft.equipmentChoice) ? draft.equipmentChoice : detail.equipmentChoices[0]?.value ?? "package";
+  const magicInitiateSpells = normalizedMagicInitiateSpells(draft.magicInitiateSpells, detail);
   const abilities = detail.abilityScores.map((option) => option.value as AbilityType);
   const validIncreases = abilities.length > 0 && ABILITY_SCORE_OPTIONS.every((ability) => {
     const increase = draft.backgroundAbilityIncreases[ability.value];
@@ -1513,8 +1571,31 @@ function normalizeCharacterBuilderDraft(draft: CharacterBuilderDraft, options: C
     ...draft,
     toolProficiency,
     equipmentChoice,
+    magicInitiateSpells,
     backgroundAbilityIncreases: validIncreases && totalIncrease === 3 ? draft.backgroundAbilityIncreases : abilityIncreasesForMode("twoOne", abilities)
   };
+}
+
+function normalizedMagicInitiateSpells(selectedSpells: string[], detail: CharacterBuilderOptions["backgroundDetails"][string]): string[] {
+  const choices = detail.magicInitiateSpellChoices;
+  if (!choices) return [];
+  const selectedCantrips = selectedSpells.slice(0, choices.cantripsKnown).filter((spellId, index, spells) => choices.cantrips.some((option) => option.value === spellId) && spells.indexOf(spellId) === index);
+  const selectedFirstLevel = selectedSpells.slice(choices.cantripsKnown).filter((spellId) => choices.firstLevelSpells.some((option) => option.value === spellId));
+  const cantrips = [...selectedCantrips];
+  for (const option of choices.cantrips) {
+    if (cantrips.length >= choices.cantripsKnown) break;
+    if (!cantrips.includes(option.value)) cantrips.push(option.value);
+  }
+  const firstLevelSpells = selectedFirstLevel.slice(0, choices.firstLevelSpellsKnown);
+  for (const option of choices.firstLevelSpells) {
+    if (firstLevelSpells.length >= choices.firstLevelSpellsKnown) break;
+    if (!firstLevelSpells.includes(option.value)) firstLevelSpells.push(option.value);
+  }
+  return [...cantrips, ...firstLevelSpells];
+}
+
+function selectedMagicInitiateSpellOption(choices: NonNullable<CharacterBuilderOptions["backgroundDetails"][string]["magicInitiateSpellChoices"]>, spellId: string) {
+  return [...choices.cantrips, ...choices.firstLevelSpells].find((option) => option.value === spellId);
 }
 
 function baseAbilityScoresForMethod(method: string, options: CharacterBuilderOptions, rolledScores: number[]): AbilityScores {
@@ -2521,7 +2602,7 @@ function FullSheet({
         </div>
       </section>
 
-      {(sheet.features.length > 0 || sheet.proficiencies.length > 0 || sheet.equipment.length > 0) && (
+      {(sheet.features.length > 0 || sheet.proficiencies.length > 0 || sheet.equipment.length > 0 || hasPurseCoins(sheet)) && (
         <div className="sheet-columns">
           {sheet.features.length > 0 && (
             <section className="sheet-panel">
@@ -2556,6 +2637,17 @@ function FullSheet({
             <section className="sheet-panel">
               <h2>Proficiencies</h2>
               <div className="tag-list">{sheet.proficiencies.map((proficiency) => <span key={proficiency}>{proficiency}</span>)}</div>
+            </section>
+          )}
+
+          {hasPurseCoins(sheet) && (
+            <section className="sheet-panel">
+              <h2>Purse</h2>
+              <div className="purse-list">
+                <span>{sheet.purse.gold} GP</span>
+                <span>{sheet.purse.silver} SP</span>
+                <span>{sheet.purse.copper} CP</span>
+              </div>
             </section>
           )}
 
@@ -3234,6 +3326,10 @@ function equipmentSlotOptions(itemType: CharacterSheet["equipment"][number]["ite
   if (itemType === "shield") return ["carried", "mainHand", "offHand"];
   if (itemType === "weapon") return ["carried", "mainHand", "offHand", "twoHands"];
   return ["carried"];
+}
+
+function hasPurseCoins(sheet: CharacterSheet) {
+  return sheet.purse.gold > 0 || sheet.purse.silver > 0 || sheet.purse.copper > 0;
 }
 
 function shortAbilityName(ability: string) {

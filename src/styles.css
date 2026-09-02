@@ -721,6 +721,35 @@ canvas.is-dragging,
   gap: 8px;
 }
 
+.builder-detail-list {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid rgba(216, 156, 70, 0.24);
+  background: rgba(18, 14, 10, 0.42);
+  color: #f2e5c6;
+  font-size: 0.8rem;
+}
+
+.builder-detail-list small {
+  color: #c9b58d;
+}
+
+.builder-spell-choices {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.builder-subsection-title {
+  grid-column: 1 / -1;
+  color: #f2e5c6;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .ability-score-editor-meta {
   grid-column: 1 / -1;
   display: flex;
@@ -1150,6 +1179,22 @@ canvas.is-dragging,
 .equipment-list {
   display: grid;
   gap: 8px;
+}
+
+.purse-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.purse-list span {
+  border: 1px solid rgba(216, 156, 70, 0.32);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: rgba(72, 45, 20, 0.44);
+  color: #f7dfaa;
+  font-size: 0.86rem;
+  font-weight: 700;
 }
 
 .equipment-row {

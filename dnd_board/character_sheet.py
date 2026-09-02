@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum, auto
 from time import time_ns
 from types import SimpleNamespace, UnionType
@@ -45,6 +45,8 @@ class SheetSectionType(Enum):
 class ProgressionChoiceType(Enum):
     HIT_POINTS = auto()
     ABILITY_SCORE_IMPROVEMENT = auto()
+    SKILL_PROFICIENCIES = auto()
+    EXPERTISE = auto()
     SUBCLASS = auto()
     FIGHTING_STYLE = auto()
     BATTLE_MASTER_MANEUVERS = auto()
@@ -159,64 +161,457 @@ class SpellComponent(Enum):
 
 class SpellId(Enum):
     ABSORB_ELEMENTS = "Absorb Elements"
+    ACID_SPLASH = "Acid Splash"
+    AID = "Aid"
+    ALARM = "Alarm"
+    ALTER_SELF = "Alter Self"
+    ALUSTRIEL_S_MOONCLOAK = "Alustriel's Mooncloak"
+    ANIMAL_FRIENDSHIP = "Animal Friendship"
+    ANIMAL_MESSENGER = "Animal Messenger"
+    ANIMAL_SHAPES = "Animal Shapes"
+    ANIMATE_DEAD = "Animate Dead"
+    ANIMATE_OBJECTS = "Animate Objects"
+    ANTILIFE_SHELL = "Antilife Shell"
+    ANTIMAGIC_FIELD = "Antimagic Field"
+    ANTIPATHY_SYMPATHY = "Antipathy/Sympathy"
+    ARCANE_EYE = "Arcane Eye"
+    ARCANE_GATE = "Arcane Gate"
+    ARCANE_LOCK = "Arcane Lock"
+    ARCANE_VIGOR = "Arcane Vigor"
+    ARMOR_OF_AGATHYS = "Armor of Agathys"
+    ARMS_OF_HADAR = "Arms of Hadar"
+    ASTRAL_FLOOD = "Astral Flood"
+    ASTRAL_PROJECTION = "Astral Projection"
     AUGURY = "Augury"
+    AURA_OF_LIFE = "Aura of Life"
+    AURA_OF_PURITY = "Aura of Purity"
+    AURA_OF_VITALITY = "Aura of Vitality"
+    AWAKEN = "Awaken"
+    BACKLASH = "Backlash"
+    BANE = "Bane"
+    BANISHING_SMITE = "Banishing Smite"
+    BANISHMENT = "Banishment"
+    BARKSKIN = "Barkskin"
+    BEACON_OF_HOPE = "Beacon Of Hope"
+    BEAST_SENSE = "Beast Sense"
+    BEFUDDLEMENT = "Befuddlement"
+    BESTOW_CURSE = "Bestow Curse"
+    BIGBY_S_HAND = "Bigby's Hand"
+    BLADE_BARRIER = "Blade Barrier"
+    BLADE_OF_DISASTER = "Blade Of Disaster"
     BLADE_WARD = "Blade Ward"
+    BLESS = "Bless"
+    BLIGHT = "Blight"
+    BLINDING_SMITE = "Blinding Smite"
+    BLINDNESS_DEAFNESS = "Blindness/Deafness"
+    BLINK = "Blink"
+    BLUR = "Blur"
     BOOMING_BLADE = "Booming Blade"
     BURNING_HANDS = "Burning Hands"
+    BUZZING_BEE = "Buzzing Bee"
+    CACOPHONIC_SHIELD = "Cacophonic Shield"
+    CALL_LIGHTNING = "Call Lightning"
+    CALM_EMOTIONS = "Calm Emotions"
+    CHAIN_LIGHTNING = "Chain Lightning"
+    CHARM_MONSTER = "Charm Monster"
     CHARM_PERSON = "Charm Person"
     CHILL_TOUCH = "Chill Touch"
     CHROMATIC_ORB = "Chromatic Orb"
+    CIRCLE_OF_DEATH = "Circle Of Death"
+    CIRCLE_OF_POWER = "Circle Of Power"
+    CLAIRVOYANCE = "Clairvoyance"
+    CLONE = "Clone"
+    CLOUDKILL = "Cloudkill"
+    CLOUD_OF_DAGGERS = "Cloud Of Daggers"
+    COLOR_SPRAY = "Color Spray"
+    COMMAND = "Command"
+    COMMUNE = "Commune"
+    COMMUNE_WITH_NATURE = "Commune With Nature"
+    COMPELLED_DUEL = "Compelled Duel"
+    COMPREHEND_LANGUAGES = "Comprehend Languages"
+    COMPULSION = "Compulsion"
+    CONE_OF_COLD = "Cone Of Cold"
+    CONFUSION = "Confusion"
+    CONJURE_ANIMALS = "Conjure Animals"
+    CONJURE_BARRAGE = "Conjure Barrage"
+    CONJURE_CELESTIAL = "Conjure Celestial"
+    CONJURE_CONSTRUCTS = "Conjure Constructs"
+    CONJURE_ELEMENTAL = "Conjure Elemental"
+    CONJURE_FEY = "Conjure Fey"
+    CONJURE_MINOR_ELEMENTALS = "Conjure Minor Elementals"
+    CONJURE_VOLLEY = "Conjure Volley"
+    CONJURE_WOODLAND_BEINGS = "Conjure Woodland Beings"
+    CONTACT_OTHER_PLANE = "Contact Other Plane"
+    CONTAGION = "Contagion"
+    CONTINGENCY = "Contingency"
+    CONTINUAL_FLAME = "Continual Flame"
+    CONTROL_WATER = "Control Water"
+    CONTROL_WEATHER = "Control Weather"
+    CORDON_OF_ARROWS = "Cordon Of Arrows"
     COUNTERSPELL = "Counterspell"
+    CREATE_FOOD_AND_WATER = "Create Food And Water"
+    CREATE_OR_DESTROY_WATER = "Create or Destroy Water"
+    CREATE_UNDEAD = "Create Undead"
+    CREATION = "Creation"
+    CROWN_OF_MADNESS = "Crown Of Madness"
+    CRUSADER_S_MANTLE = "Crusader's Mantle"
+    CURE_WOUNDS = "Cure Wounds"
+    DANCING_LIGHTS = "Dancing Lights"
+    DARKNESS = "Darkness"
+    DARKVISION = "Darkvision"
+    DAYLIGHT = "Daylight"
+    DEATH_ARMOR = "Death Armor"
+    DEATH_WARD = "Death Ward"
+    DELAYED_BLAST_FIREBALL = "Delayed Blast Fireball"
+    DEMIPLANE = "Demiplane"
+    DERYAN_S_HELPFUL_HOMUNCULI = "Deryan's Helpful Homunculi"
+    DESTRUCTIVE_WAVE = "Destructive Wave"
+    DETECT_EVIL_AND_GOOD = "Detect Evil and Good"
     DETECT_MAGIC = "Detect Magic"
+    DETECT_POISON_AND_DISEASE = "Detect Poison and Disease"
+    DETECT_THOUGHTS = "Detect Thoughts"
+    DIMENSION_DOOR = "Dimension Door"
+    DIRGE = "Dirge"
     DISGUISE_SELF = "Disguise Self"
+    DISINTEGRATE = "Disintegrate"
+    DISPEL_EVIL_AND_GOOD = "Dispel Evil and Good"
+    DISPEL_MAGIC = "Dispel Magic"
+    DISSONANT_WHISPERS = "Dissonant Whispers"
+    DIVINATION = "Divination"
+    DIVINE_FAVOR = "Divine Favor"
+    DIVINE_SMITE = "Divine Smite"
+    DIVINE_WORD = "Divine Word"
+    DOMINATE_BEAST = "Dominate Beast"
+    DOMINATE_MONSTER = "Dominate Monster"
+    DOMINATE_PERSON = "Dominate Person"
+    DOOMTIDE = "Doomtide"
+    DRAGON_S_BREATH = "Dragon's Breath"
+    DRAWMIJ_S_INSTANT_SUMMONS = "Drawmij's Instant Summons"
+    DREAM = "Dream"
+    DRUIDCRAFT = "Druidcraft"
+    EARTHQUAKE = "Earthquake"
+    ELDRITCH_BLAST = "Eldritch Blast"
+    ELEMENTALISM = "Elementalism"
+    ELEMENTAL_WEAPON = "Elemental Weapon"
+    ELMINSTER_S_EFFULGENT_SPHERES = "Elminster's Effulgent Spheres"
+    ELMINSTER_S_ELUSION = "Elminster's Elusion"
+    ENHANCE_ABILITY = "Enhance Ability"
+    ENLARGE_REDUCE = "Enlarge/Reduce"
+    ENSNARING_STRIKE = "Ensnaring Strike"
+    ENTANGLE = "Entangle"
+    ENTHRALL = "Enthrall"
+    ETHEREALNESS = "Etherealness"
+    EVARD_S_BLACK_TENTACLES = "Evard's Black Tentacles"
+    EXPEDITIOUS_RETREAT = "Expeditious Retreat"
+    EYEBITE = "Eyebite"
+    FABRICATE = "Fabricate"
+    FAERIE_FIRE = "Faerie Fire"
+    FALSE_LIFE = "False Life"
+    FEAR = "Fear"
+    FEATHER_FALL = "Feather Fall"
+    FEIGN_DEATH = "Feign Death"
     FIND_FAMILIAR = "Find Familiar"
+    FIND_STEED = "Find Steed"
+    FIND_THE_PATH = "Find the Path"
+    FIND_TRAPS = "Find Traps"
+    FINGER_OF_DEATH = "Finger of Death"
+    FIREBALL = "Fireball"
     FIRE_BOLT = "Fire Bolt"
     FIRE_SHIELD = "Fire Shield"
-    FIREBALL = "Fireball"
+    FIRE_STORM = "Fire Storm"
+    FLAME_BLADE = "Flame Blade"
+    FLAME_STRIKE = "Flame Strike"
+    FLAMING_SPHERE = "Flaming Sphere"
+    FLESH_TO_STONE = "Flesh to Stone"
+    FLY = "Fly"
     FOG_CLOUD = "Fog Cloud"
+    FORBIDDANCE = "Forbiddance"
+    FORCECAGE = "Forcecage"
+    FORESIGHT = "Foresight"
+    FOUNT_OF_MOONLIGHT = "Fount of Moonlight"
+    FREEDOM_OF_MOVEMENT = "Freedom of Movement"
+    FRIENDS = "Friends"
+    GASEOUS_FORM = "Gaseous Form"
+    GATE = "Gate"
+    GEAS = "Geas"
+    GENTLE_REPOSE = "Gentle Repose"
+    GIANT_INSECT = "Giant Insect"
+    GLIBNESS = "Glibness"
+    GLOBE_OF_INVULNERABILITY = "Globe of Invulnerability"
+    GLYPH_OF_WARDING = "Glyph of Warding"
+    GOODBERRY = "Goodberry"
+    GRASPING_VINE = "Grasping Vine"
+    GREASE = "Grease"
+    GREATER_INVISIBILITY = "Greater Invisibility"
+    GREATER_RESTORATION = "Greater Restoration"
     GREEN_FLAME_BLADE = "Green-Flame Blade"
+    GUARDIAN_OF_FAITH = "Guardian of Faith"
+    GUARDS_AND_WARDS = "Guards and Wards"
+    GUIDANCE = "Guidance"
+    GUIDING_BOLT = "Guiding Bolt"
+    GUST_OF_WIND = "Gust of Wind"
+    HAIL_OF_THORNS = "Hail of Thorns"
+    HALLOW = "Hallow"
+    HALLUCINATORY_TERRAIN = "Hallucinatory Terrain"
+    HARM = "Harm"
+    HASTE = "Haste"
+    HEAL = "Heal"
+    HEALING_WORD = "Healing Word"
+    HEAT_METAL = "Heat Metal"
+    HELLISH_REBUKE = "Hellish Rebuke"
+    HEROES_FEAST = "Heroes' Feast"
+    HEROISM = "Heroism"
+    HEX = "Hex"
+    HOLD_MONSTER = "Hold Monster"
+    HOLD_PERSON = "Hold Person"
+    HOLY_AURA = "Holy Aura"
+    HOLY_STAR_OF_MYSTRA = "Holy Star of Mystra"
+    HOMUNCULUS_SERVANT = "Homunculus Servant"
+    HUNGER_OF_HADAR = "Hunger of Hadar"
+    HUNTER_S_MARK = "Hunter's Mark"
+    HYPNOTIC_PATTERN = "Hypnotic Pattern"
+    ICE_KNIFE = "Ice Knife"
     ICE_STORM = "Ice Storm"
+    IDENTIFY = "Identify"
+    ILLUSORY_SCRIPT = "Illusory Script"
+    IMPRISONMENT = "Imprisonment"
+    INCENDIARY_CLOUD = "Incendiary Cloud"
+    INFLICT_WOUNDS = "Inflict Wounds"
+    INSECT_PLAGUE = "Insect Plague"
+    INSIDIOUS_RHYTHM = "Insidious Rhythm"
+    INVISIBILITY = "Invisibility"
+    JALLARZI_S_STORM_OF_RADIANCE = "Jallarzi's Storm of Radiance"
+    JUMP = "Jump"
+    KNOCK = "Knock"
+    LAERAL_S_SILVER_LANCE = "Laeral's Silver Lance"
+    LEGEND_LORE = "Legend Lore"
+    LEOMUND_S_LAMENTABLE_BELABORMENT = "Leomund's Lamentable Belaborment"
+    LEOMUND_S_SECRET_CHEST = "Leomund's Secret Chest"
+    LEOMUND_S_TINY_HUT = "Leomund's Tiny Hut"
+    LESSER_RESTORATION = "Lesser Restoration"
+    LEVITATE = "Levitate"
     LIGHT = "Light"
+    LIGHTNING_ARROW = "Lightning Arrow"
     LIGHTNING_BOLT = "Lightning Bolt"
+    LOCATE_ANIMALS_OR_PLANTS = "Locate Animals or Plants"
+    LOCATE_CREATURE = "Locate Creature"
+    LOCATE_OBJECT = "Locate Object"
+    LONGSTRIDER = "Longstrider"
+    MAGE_ARMOR = "Mage Armor"
     MAGE_HAND = "Mage Hand"
+    MAGIC_CIRCLE = "Magic Circle"
+    MAGIC_JAR = "Magic Jar"
     MAGIC_MISSILE = "Magic Missile"
+    MAGIC_MOUTH = "Magic Mouth"
+    MAGIC_WEAPON = "Magic Weapon"
+    MAJOR_IMAGE = "Major Image"
+    MASS_CURE_WOUNDS = "Mass Cure Wounds"
+    MASS_HEAL = "Mass Heal"
+    MASS_HEALING_WORD = "Mass Healing Word"
+    MASS_SUGGESTION = "Mass Suggestion"
+    MAZE = "Maze"
+    MELD_INTO_STONE = "Meld into Stone"
+    MELF_S_ACID_ARROW = "Melf's Acid Arrow"
+    MENDING = "Mending"
+    MESSAGE = "Message"
+    METEOR_SWARM = "Meteor Swarm"
+    MIND_BLANK = "Mind Blank"
     MIND_SLIVER = "Mind Sliver"
+    MIND_SPIKE = "Mind Spike"
     MINOR_ILLUSION = "Minor Illusion"
+    MIRAGE_ARCANE = "Mirage Arcane"
+    MIRROR_IMAGE = "Mirror Image"
+    MISLEAD = "Mislead"
+    MISTY_STEP = "Misty Step"
+    MODIFY_MEMORY = "Modify Memory"
+    MOONBEAM = "Moonbeam"
+    MORDENKAINEN_S_FAITHFUL_HOUND = "Mordenkainen's Faithful Hound"
+    MORDENKAINEN_S_MAGNIFICENT_MANSION = "Mordenkainen's Magnificent Mansion"
+    MORDENKAINEN_S_PRIVATE_SANCTUM = "Mordenkainen's Private Sanctum"
+    MORDENKAINEN_S_SWORD = "Mordenkainen's Sword"
+    MOVE_EARTH = "Move Earth"
+    NONDETECTION = "Nondetection"
+    NYSTUL_S_MAGIC_AURA = "Nystul's Magic Aura"
+    OTILUKE_S_FREEZING_SPHERE = "Otiluke's Freezing Sphere"
+    OTILUKE_S_RESILIENT_SPHERE = "Otiluke's Resilient Sphere"
+    OTTO_S_IRRESISTIBLE_DANCE = "Otto's Irresistible Dance"
+    PASSWALL = "Passwall"
+    PASS_WITHOUT_TRACE = "Pass without Trace"
+    PHANTASMAL_FORCE = "Phantasmal Force"
+    PHANTASMAL_KILLER = "Phantasmal Killer"
+    PHANTOM_STEED = "Phantom Steed"
+    PLANAR_ALLY = "Planar Ally"
+    PLANAR_BINDING = "Planar Binding"
+    PLANE_SHIFT = "Plane Shift"
+    PLANT_GROWTH = "Plant Growth"
+    POISON_SPRAY = "Poison Spray"
+    POLYMORPH = "Polymorph"
+    POWER_WORD_FORTIFY = "Power Word Fortify"
+    POWER_WORD_HEAL = "Power Word Heal"
+    POWER_WORD_KILL = "Power Word Kill"
+    POWER_WORD_STUN = "Power Word Stun"
+    PRAYER_OF_HEALING = "Prayer of Healing"
     PRESTIDIGITATION = "Prestidigitation"
+    PRISMATIC_SPRAY = "Prismatic Spray"
+    PRISMATIC_WALL = "Prismatic Wall"
+    PRODUCE_FLAME = "Produce Flame"
+    PROGRAMMED_ILLUSION = "Programmed Illusion"
+    PROJECT_IMAGE = "Project Image"
+    PROTECTION_FROM_ENERGY = "Protection from Energy"
     PROTECTION_FROM_EVIL_AND_GOOD = "Protection from Evil and Good"
+    PROTECTION_FROM_POISON = "Protection from Poison"
+    PURIFY_FOOD_AND_DRINK = "Purify Food and Drink"
+    RAISE_DEAD = "Raise Dead"
+    RARY_S_TELEPATHIC_BOND = "Rary's Telepathic Bond"
+    RAY_OF_ENFEEBLEMENT = "Ray of Enfeeblement"
     RAY_OF_FROST = "Ray of Frost"
+    RAY_OF_SICKNESS = "Ray of Sickness"
+    REGENERATE = "Regenerate"
+    REINCARNATE = "Reincarnate"
+    REMOVE_CURSE = "Remove Curse"
+    RESISTANCE = "Resistance"
+    RESURRECTION = "Resurrection"
+    REVERSE_GRAVITY = "Reverse Gravity"
+    REVIVIFY = "Revivify"
+    ROPE_TRICK = "Rope Trick"
+    SACRED_FLAME = "Sacred Flame"
+    SANCTUARY = "Sanctuary"
     SCORCHING_RAY = "Scorching Ray"
+    SCRYING = "Scrying"
+    SEARING_ORB = "Searing Orb"
+    SEARING_SMITE = "Searing Smite"
+    SEEMING = "Seeming"
+    SEE_INVISIBILITY = "See Invisibility"
+    SENDING = "Sending"
+    SEQUESTER = "Sequester"
+    SHAPECHANGE = "Shapechange"
     SHATTER = "Shatter"
     SHIELD = "Shield"
+    SHIELD_OF_FAITH = "Shield of Faith"
+    SHILLELAGH = "Shillelagh"
+    SHINING_SMITE = "Shining Smite"
     SHOCKING_GRASP = "Shocking Grasp"
+    SILENCE = "Silence"
+    SILENT_IMAGE = "Silent Image"
+    SIMBUL_S_SYNOSTODWEOMER = "Simbul's Synostodweomer"
+    SIMULACRUM = "Simulacrum"
     SLEEP = "Sleep"
+    SLEET_STORM = "Sleet Storm"
+    SLOW = "Slow"
+    SONGAL_S_ELEMENTAL_SUFFUSION = "Songal's Elemental Suffusion"
+    SORCEROUS_BURST = "Sorcerous Burst"
+    SPARE_THE_DYING = "Spare the Dying"
+    SPEAK_WITH_ANIMALS = "Speak with Animals"
     SPEAK_WITH_DEAD = "Speak with Dead"
+    SPEAK_WITH_PLANTS = "Speak with Plants"
+    SPELLFIRE_FLARE = "Spellfire Flare"
+    SPELLFIRE_STORM = "Spellfire Storm"
+    SPIDER_CLIMB = "Spider Climb"
+    SPIKE_GROWTH = "Spike Growth"
+    SPIRITUAL_WEAPON = "Spiritual Weapon"
+    SPIRIT_GUARDIANS = "Spirit Guardians"
+    STAGGERING_SMITE = "Staggering Smite"
+    STARRY_WISP = "Starry Wisp"
+    STEEL_WIND_STRIKE = "Steel Wind Strike"
+    STICKS_TO_SNAKES = "Sticks to Snakes"
+    STINKING_CLOUD = "Stinking Cloud"
+    STONESKIN = "Stoneskin"
+    STONE_SHAPE = "Stone Shape"
+    STORM_OF_VENGEANCE = "Storm of Vengeance"
+    SUGGESTION = "Suggestion"
+    SUMMON_ABERRATION = "Summon Aberration"
+    SUMMON_BEAST = "Summon Beast"
+    SUMMON_CELESTIAL = "Summon Celestial"
+    SUMMON_CONSTRUCT = "Summon Construct"
+    SUMMON_DRAGON = "Summon Dragon"
+    SUMMON_ELEMENTAL = "Summon Elemental"
+    SUMMON_FEY = "Summon Fey"
+    SUMMON_FIEND = "Summon Fiend"
+    SUMMON_UNDEAD = "Summon Undead"
+    SUNBEAM = "Sunbeam"
+    SUNBURST = "Sunburst"
+    SWIFT_QUIVER = "Swift Quiver"
+    SYLUNE_S_VIPER = "Sylune's Viper"
+    SYMBOL = "Symbol"
+    SYNAPTIC_STATIC = "Synaptic Static"
+    TASHA_S_BUBBLING_CAULDRON = "Tasha's Bubbling Cauldron"
+    TASHA_S_HIDEOUS_LAUGHTER = "Tasha's Hideous Laughter"
     TELEKINESIS = "Telekinesis"
+    TELEPATHY = "Telepathy"
+    TELEPORT = "Teleport"
+    TELEPORTATION_CIRCLE = "Teleportation Circle"
+    TENSER_S_FLOATING_DISK = "Tenser's Floating Disk"
+    THAUMATURGY = "Thaumaturgy"
+    THORN_WHIP = "Thorn Whip"
+    THUNDERCLAP = "Thunderclap"
+    THUNDEROUS_SMITE = "Thunderous Smite"
     THUNDERWAVE = "Thunderwave"
+    TIME_STOP = "Time Stop"
+    TOLL_THE_DEAD = "Toll the Dead"
+    TONGUES = "Tongues"
+    TORTOISE_SHELL = "Tortoise Shell"
+    TRANSPORT_VIA_PLANTS = "Transport via Plants"
+    TREE_STRIDE = "Tree Stride"
+    TRUE_POLYMORPH = "True Polymorph"
+    TRUE_RESURRECTION = "True Resurrection"
+    TRUE_SEEING = "True Seeing"
+    TRUE_STRIKE = "True Strike"
+    TSUNAMI = "Tsunami"
+    UNSEEN_SERVANT = "Unseen Servant"
+    VAMPIRIC_TOUCH = "Vampiric Touch"
+    VICIOUS_MOCKERY = "Vicious Mockery"
+    VITRIOLIC_SPHERE = "Vitriolic Sphere"
+    VOID_STAR = "Void Star"
+    WALL_OF_FIRE = "Wall of Fire"
+    WALL_OF_FORCE = "Wall of Force"
+    WALL_OF_ICE = "Wall of Ice"
+    WALL_OF_STONE = "Wall of Stone"
+    WALL_OF_THORNS = "Wall of Thorns"
+    WARDAWAY = "Wardaway"
+    WARDING_BOND = "Warding Bond"
     WARDING_WIND = "Warding Wind"
+    WATER_BREATHING = "Water Breathing"
+    WATER_WALK = "Water Walk"
+    WEB = "Web"
+    WEIRD = "Weird"
+    WIND_WALK = "Wind Walk"
+    WIND_WALL = "Wind Wall"
+    WISH = "Wish"
+    WITCH_BOLT = "Witch Bolt"
+    WORD_OF_RADIANCE = "Word of Radiance"
+    WORD_OF_RECALL = "Word of Recall"
+    WRATHFUL_SMITE = "Wrathful Smite"
+    YOLANDE_S_REGAL_PRESENCE = "Yolande's Regal Presence"
+    ZONE_OF_TRUTH = "Zone of Truth"
+
 
 
 class SpellSource(Enum):
     ARCANE_TRICKSTER = "Arcane Trickster"
+    ARTIFICER = "Artificer"
+    BARD = "Bard"
+    CLERIC = "Cleric"
+    DRUID = "Druid"
     ELDRITCH_KNIGHT = "Eldritch Knight"
+    MAGIC_INITIATE = "Magic Initiate"
     MONSTER_HUNTER = "Monster Hunter"
+    PALADIN = "Paladin"
     PHANTOM = "Phantom"
     PSI_WARRIOR = "Psi Warrior"
+    RANGER = "Ranger"
     SCION_OF_THE_THREE = "Scion of the Three"
+    SORCERER = "Sorcerer"
+    WARLOCK = "Warlock"
     WIZARD = "Wizard"
-
-
-class SpellCastingTime(Enum):
-    ACTION = "1 action"
-    REACTION = "1 reaction"
-    HOUR = "1 hour"
-    TEN_MINUTES = "10 minutes"
 
 
 class SpellRangeType(Enum):
     SELF = auto()
     TOUCH = auto()
     DISTANCE = auto()
+    SIGHT = auto()
+    UNLIMITED = auto()
+    SPECIAL = auto()
 
 
 class SpellAreaShape(Enum):
@@ -233,6 +628,9 @@ class SpellDurationUnit(Enum):
     ROUND = auto()
     MINUTE = auto()
     HOUR = auto()
+    DAY = auto()
+    UNTIL_DISPELLED = auto()
+    SPECIAL = auto()
 
 
 @dataclass(frozen=True)
@@ -306,6 +704,10 @@ class SpellDuration:
     def summary(self) -> str:
         if self.unit == SpellDurationUnit.INSTANTANEOUS:
             return "Instantaneous"
+        if self.unit == SpellDurationUnit.UNTIL_DISPELLED:
+            return "Until dispelled"
+        if self.unit == SpellDurationUnit.SPECIAL:
+            return "Special"
         unit = enum_label(self.unit).lower()
         plural = "s" if self.amount != 1 else ""
         prefix = "Up to " if self.maximum else ""
@@ -361,6 +763,29 @@ class AttackRangeType(Enum):
 class WeaponCategory(Enum):
     MELEE = auto()
     RANGED = auto()
+
+
+class CurrencyUnit(Enum):
+    CP = "CP"
+    SP = "SP"
+    GP = "GP"
+
+
+@dataclass(frozen=True)
+class Money:
+    quantity: int = 0
+    unit: CurrencyUnit = CurrencyUnit.GP
+
+    @property
+    def label(self) -> str:
+        return f"{self.quantity} {self.unit.value}"
+
+
+@dataclass
+class Purse:
+    copper: int = 0
+    silver: int = 0
+    gold: int = 0
 
 
 class EquipmentType(Enum):
@@ -432,9 +857,18 @@ class RestType(Enum):
 
 class ClassType(Enum):
     ADVENTURER = auto()
+    ARTIFICER = auto()
+    BARD = auto()
+    CLERIC = auto()
     CREATURE = auto()
+    DRUID = auto()
     FIGHTER = auto()
+    PALADIN = auto()
+    RANGER = auto()
     ROGUE = auto()
+    SORCERER = auto()
+    WARLOCK = auto()
+    WIZARD = auto()
 
 
 class FightingStyleType(Enum):
@@ -682,15 +1116,22 @@ class SpellEntry:
     level: int
     school: SpellSchool
     castingAbility: AbilityType
-    castingTime: SpellCastingTime
+    castingTime: TimeEconomy
     targeting: SpellTargeting
     duration: SpellDuration
     components: list[SpellComponent]
     description: str
     concentration: bool = False
     ritual: bool = False
+    castingDuration: SpellDuration | None = None
     resourceId: str | None = None
     reset: RestType = RestType.NONE
+
+    @api_field
+    def castingTimeLabel(self) -> str:
+        if self.castingDuration is not None:
+            return self.castingDuration.summary
+        return enum_label(self.castingTime)
 
 
 @dataclass
@@ -733,6 +1174,7 @@ class PartyMemberSheet:
     damageImmunities: list[DamageType] | None = None
     attacks: list[AttackAction] | None = None
     equipment: list[EquipmentItem] | None = None
+    purse: Purse | None = None
 
 
 @dataclass
@@ -791,6 +1233,7 @@ class CharacterSheet:
     damageImmunities: list[DamageType]
     attacks: list[AttackAction]
     equipment: list[EquipmentItem]
+    purse: Purse = field(default_factory=Purse)
 
 
 @dataclass
@@ -917,13 +1360,13 @@ def build_character_sheet(
     ability_modifiers = ability_modifier_map(ability_scores)
     skill_proficiencies = sheet_config.skills if sheet_config and sheet_config.skills else {}
     save_proficiencies = set(sheet_config.savingThrowProficiencies if sheet_config and sheet_config.savingThrowProficiencies else default_save_proficiencies(classes))
-    resources = apply_resource_overrides(sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes, ability_scores), resource_overrides)
-    feat_abilities = default_feat_abilities(classes)
+    configured_spells = sheet_config.spells if sheet_config and sheet_config.spells else []
+    configured_feats = sheet_config.feats if sheet_config and sheet_config.feats else []
+    resources = apply_resource_overrides(sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes, ability_scores, configured_feats, proficiency_bonus), resource_overrides)
+    feat_abilities = default_feat_abilities(classes, configured_feats)
     subclass_abilities = default_subclass_abilities(classes)
     abilities = [*resource_roll_abilities(resources), *feat_abilities, *subclass_abilities]
     features = default_features(classes)
-    configured_spells = sheet_config.spells if sheet_config and sheet_config.spells else []
-    configured_feats = sheet_config.feats if sheet_config and sheet_config.feats else []
     hit_point_increases = sheet_config.hitPointIncreases if sheet_config and sheet_config.hitPointIncreases else []
     ability_score_improvements = sheet_config.abilityScoreImprovements if sheet_config and sheet_config.abilityScoreImprovements else []
     feat_eligibility_sheet = SimpleNamespace(
@@ -937,15 +1380,18 @@ def build_character_sheet(
         abilities=abilities,
         spells=configured_spells,
     )
-    pending_choices = default_progression_choices(classes, configured_spells, hit_point_increases, ability_score_improvements, configured_feats, feat_eligibility_sheet)
+    pending_choices = default_progression_choices(classes, configured_spells, hit_point_increases, ability_score_improvements, skill_proficiencies, configured_feats, feat_eligibility_sheet)
     spells = [*default_spells(classes), *default_spellcasting_spells(classes, configured_spells)]
     if sheet_config:
         features = [*(sheet_config.traits or []), *features, *(sheet_config.features or []), *(sheet_config.feats or [])]
     equipment = apply_equipment_slot_overrides(sheet_config.equipment if sheet_config and sheet_config.equipment else [], equipment_slot_overrides or {})
+    purse = sheet_config.purse if sheet_config and sheet_config.purse else Purse()
     armor_class = base_armor_class(sheet_config, equipment, dexterity_modifier)
     armor_class += default_armor_class_bonus(classes, equipment)
     attacks = sheet_config.attacks if sheet_config and sheet_config.attacks else default_attacks(kind)
     attacks = default_feat_attacks(classes, equipment, attacks)
+    max_hp += default_feat_hit_point_bonus(configured_feats, total_level)
+    speed = (sheet_config.speed if sheet_config and sheet_config.speed is not None else 30) + default_feat_speed_bonus(configured_feats)
 
     return CharacterSheet(
         id=token_id,
@@ -964,8 +1410,8 @@ def build_character_sheet(
         abilityScores=ability_scores,
         abilityModifiers=ability_modifiers,
         armorClass=armor_class,
-        initiativeBonus=dexterity_modifier,
-        speed=sheet_config.speed if sheet_config and sheet_config.speed is not None else 30,
+        initiativeBonus=dexterity_modifier + default_feat_initiative_bonus(configured_feats, proficiency_bonus),
+        speed=speed,
         savingThrows=build_saving_throws(ability_modifiers, save_proficiencies, proficiency_bonus),
         skills=build_skills(ability_modifiers, skill_proficiencies, proficiency_bonus),
         passiveChecks=build_passive_checks(ability_modifiers, skill_proficiencies, proficiency_bonus),
@@ -981,6 +1427,7 @@ def build_character_sheet(
         damageImmunities=sheet_config.damageImmunities if sheet_config and sheet_config.damageImmunities else [],
         attacks=attacks,
         equipment=equipment,
+        purse=purse,
     )
 
 
@@ -1419,7 +1866,7 @@ def default_attacks(kind: TokenKind) -> list[AttackAction]:
     ]
 
 
-def default_resources(classes: list[CharacterClassLevel], ability_scores: AbilityScores | None = None) -> list[ResourceTracker]:
+def default_resources(classes: list[CharacterClassLevel], ability_scores: AbilityScores | None = None, feats: list[SheetFeature] | None = None, proficiency_bonus: int = 2) -> list[ResourceTracker]:
     from dnd_board.rules.classes.fighter.archetypes import fighter_subclass_resources
     from dnd_board.rules.classes.fighter.base import fighter_resources
     from dnd_board.rules.classes.rogue.archetypes import rogue_subclass_resources
@@ -1432,7 +1879,7 @@ def default_resources(classes: list[CharacterClassLevel], ability_scores: Abilit
         *fighter_subclass_resources(classes, ability_scores),
         *rogue_resources(classes),
         *rogue_subclass_resources(classes, ability_scores),
-        *feat_resources(classes),
+        *feat_resources(classes, feats, proficiency_bonus),
     ]
     superiority_dice = combat_superiority_resource(classes)
     if superiority_dice is not None:
@@ -1501,10 +1948,28 @@ def default_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
     return [*fighter_features(classes), *rogue_features(classes)]
 
 
-def default_feat_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbility]:
+def default_feat_abilities(classes: list[CharacterClassLevel], feats: list[SheetFeature] | None = None) -> list[SheetAbility]:
     from dnd_board.rules.feats import feat_abilities
 
-    return feat_abilities(classes)
+    return feat_abilities(classes, feats)
+
+
+def default_feat_hit_point_bonus(feats: list[SheetFeature], total_level: int) -> int:
+    from dnd_board.rules.feats import feat_hit_point_bonus
+
+    return feat_hit_point_bonus(feats, total_level)
+
+
+def default_feat_speed_bonus(feats: list[SheetFeature]) -> int:
+    from dnd_board.rules.feats import feat_speed_bonus
+
+    return feat_speed_bonus(feats)
+
+
+def default_feat_initiative_bonus(feats: list[SheetFeature], proficiency_bonus: int) -> int:
+    from dnd_board.rules.feats import feat_initiative_bonus
+
+    return feat_initiative_bonus(feats, proficiency_bonus)
 
 
 def default_subclass_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbility]:
@@ -1534,12 +1999,13 @@ def default_progression_choices(
     spells: list[SpellEntry],
     hit_point_increases: list[int],
     ability_score_improvements: list[str],
+    skill_proficiencies: dict[str, ProficiencyLevel] | None = None,
     feats: list[SheetFeature] | None = None,
     feat_eligibility_sheet=None,
 ) -> list[ProgressionChoice]:
     from dnd_board.rules.progression import progression_choices
 
-    return progression_choices(classes, spells, hit_point_increases, ability_score_improvements, feats, feat_eligibility_sheet)
+    return progression_choices(classes, spells, hit_point_increases, ability_score_improvements, skill_proficiencies or {}, feats, feat_eligibility_sheet)
 
 
 def default_armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:
@@ -1728,6 +2194,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             FighterSubclassRollActionType,
             CharacterClassLevel,
             ClassType,
+            CurrencyUnit,
             DamageType,
             DiceType,
             ConditionType,
@@ -1750,10 +2217,12 @@ def typed_json_registry() -> dict[str, type[Any]]:
             PartyManifest,
             PartyMemberConfig,
             PartyMemberSheet,
+            Money,
             ProgressionChoice,
             ProgressionChoiceOption,
             ProgressionChoiceType,
             ProficiencyLevel,
+            Purse,
             RestType,
             RollAction,
             RollLogEntry,
@@ -1765,7 +2234,6 @@ def typed_json_registry() -> dict[str, type[Any]]:
             RuneType,
             SkillType,
             SpellAreaShape,
-            SpellCastingTime,
             SpellComponent,
             SpellConeArea,
             SpellCubeArea,
@@ -1887,6 +2355,12 @@ def spell_target_range_label(targeting: SpellTargeting) -> str:
         return "Self"
     if targeting.rangeType == SpellRangeType.TOUCH:
         return "Touch"
+    if targeting.rangeType == SpellRangeType.SIGHT:
+        return "Sight"
+    if targeting.rangeType == SpellRangeType.UNLIMITED:
+        return "Unlimited"
+    if targeting.rangeType == SpellRangeType.SPECIAL:
+        return "Special"
     return f"{targeting.distanceFeet} ft"
 
 

@@ -12,6 +12,12 @@ from dnd_board.character_sheet import (
     PartyMemberConfig,
     PartyMemberSheet,
     ProgressionChoiceOption,
+    ResourceTracker,
+    RestType,
+    SpellEntry,
+    SpellId,
+    SpellSource,
+    TimeEconomy,
     enum_key,
     enum_label,
     enum_value,
@@ -19,6 +25,7 @@ from dnd_board.character_sheet import (
 )
 from dnd_board.rules.backgrounds import (
     BackgroundEquipmentChoice,
+    BackgroundOriginFeatType,
     BackgroundType,
     ToolType,
     background_definition,
@@ -27,6 +34,7 @@ from dnd_board.rules.backgrounds import (
     background_feats,
     background_hit_point_bonus,
     background_label,
+    background_purse,
     background_skill_proficiencies,
     background_tool_options,
 )
@@ -73,6 +81,7 @@ class CharacterBuilderPayloadField(Enum):
     BACKGROUND_ABILITY_INCREASES = "backgroundAbilityIncreases"
     TOOL_PROFICIENCY = "toolProficiency"
     EQUIPMENT_CHOICE = "equipmentChoice"
+    MAGIC_INITIATE_SPELLS = "magicInitiateSpells"
 
 
 class CharacterBuilderOptionField(Enum):
@@ -84,6 +93,7 @@ class CharacterBuilderOptionField(Enum):
     POINT_BUY_COSTS = "pointBuyCosts"
     POINT_BUY_POINTS = "pointBuyPoints"
     BACKGROUND_DETAILS = "backgroundDetails"
+    TOOL_DETAILS = "toolDetails"
 
 
 CharacterBuilderOrigin = TypeVar("CharacterBuilderOrigin", SpeciesType, BackgroundType)
@@ -100,10 +110,13 @@ class CharacterBuilderRequest:
     ability_score_method: AbilityScoreGenerationMethod
     tool_proficiency: ToolType | None
     equipment_choice: BackgroundEquipmentChoice
+    magic_initiate_spells: tuple[SpellId, ...]
     ability_scores: AbilityScores
 
 
 def character_builder_options() -> dict[str, Any]:
+    from dnd_board.rules.tools import serialized_tool_details
+
     return {
         option_key(CharacterBuilderOptionField.CLASSES): serialize_options(enum_options(SUPPORTED_CLASS_TYPES)),
         option_key(CharacterBuilderOptionField.RACES): serialize_options(enum_options(SpeciesType)),
@@ -113,6 +126,7 @@ def character_builder_options() -> dict[str, Any]:
         option_key(CharacterBuilderOptionField.POINT_BUY_COSTS): POINT_BUY_SCORE_COSTS,
         option_key(CharacterBuilderOptionField.POINT_BUY_POINTS): POINT_BUY_POINTS,
         option_key(CharacterBuilderOptionField.BACKGROUND_DETAILS): background_details(),
+        option_key(CharacterBuilderOptionField.TOOL_DETAILS): serialized_tool_details(),
     }
 
 
@@ -133,6 +147,7 @@ def character_builder_request_from_payload(payload: dict[str, Any], *, default_m
     )
     tool_proficiency = selected_tool_from_payload(background, payload_value(payload, CharacterBuilderPayloadField.TOOL_PROFICIENCY))
     equipment_choice = enum_value(BackgroundEquipmentChoice, payload_value(payload, CharacterBuilderPayloadField.EQUIPMENT_CHOICE, enum_key(BackgroundEquipmentChoice.PACKAGE))) or BackgroundEquipmentChoice.PACKAGE
+    magic_initiate_spells = magic_initiate_spells_from_payload(background, payload_value(payload, CharacterBuilderPayloadField.MAGIC_INITIATE_SPELLS, ()))
 
     return CharacterBuilderRequest(
         member_id=clean_text(payload_value(payload, CharacterBuilderPayloadField.MEMBER_ID), default_member_id, 40),
@@ -144,6 +159,7 @@ def character_builder_request_from_payload(payload: dict[str, Any], *, default_m
         ability_score_method=ability_score_method,
         tool_proficiency=tool_proficiency,
         equipment_choice=equipment_choice,
+        magic_initiate_spells=magic_initiate_spells,
         ability_scores=ability_scores,
     )
 
@@ -170,7 +186,10 @@ def build_party_member_config(request: CharacterBuilderRequest) -> PartyMemberCo
             feats=background_feats(request.background) or None,
             traits=species_traits(request.race) or None,
             features=background_features_for_tool(request.background, request.tool_proficiency) or None,
-            equipment=background_equipment(request.background, request.equipment_choice) or None,
+            resources=background_spell_resources(request.background, request.magic_initiate_spells) or None,
+            spells=background_spell_entries(request.background, request.magic_initiate_spells) or None,
+            equipment=background_equipment(request.background, request.equipment_choice, request.tool_proficiency) or None,
+            purse=background_purse(request.background, request.equipment_choice),
             damageResistances=list(species.damageResistances) or None,
         ),
     )
@@ -206,6 +225,7 @@ def background_details() -> dict[str, dict[str, Any]]:
             "abilityScores": serialize_options(enum_options(background_ability_options(background_type))),
             "toolOptions": serialize_options(enum_options(background_tool_options(background_type))),
             "equipmentChoices": serialize_options(enum_options(BackgroundEquipmentChoice)),
+            "magicInitiateSpellChoices": magic_initiate_spell_choices(background_type),
         }
         for background_type in BackgroundType
     }
@@ -298,6 +318,121 @@ def background_ability_increases_from_payload(value: Any, background: Background
 def background_ability_options(background: BackgroundType) -> tuple[AbilityType, ...]:
     options = background_definition(background).abilityScores
     return options or tuple(AbilityType)
+
+
+def magic_initiate_spell_choices(background: BackgroundType) -> dict[str, Any] | None:
+    from dnd_board.rules.spells import spell_entries_for_list
+
+    spell_list = magic_initiate_spell_list(background)
+    if spell_list is None:
+        return None
+    casting_ability = magic_initiate_casting_ability(background)
+    cantrips = spell_entries_for_list(spell_list, exact_level=0, source=SpellSource.MAGIC_INITIATE, casting_ability=casting_ability)
+    first_level_spells = spell_entries_for_list(spell_list, exact_level=1, source=SpellSource.MAGIC_INITIATE, casting_ability=casting_ability)
+    return {
+        "spellList": spell_list.value,
+        "cantripsKnown": 2,
+        "firstLevelSpellsKnown": 1,
+        "cantrips": serialize_spell_options(cantrips),
+        "firstLevelSpells": serialize_spell_options(first_level_spells),
+    }
+
+
+def magic_initiate_spells_from_payload(background: BackgroundType, value: Any) -> tuple[SpellId, ...]:
+    spell_list = magic_initiate_spell_list(background)
+    if spell_list is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("Choose Magic Initiate spells")
+    selected: list[SpellId] = []
+    for item in value:
+        spell_id = enum_value(SpellId, item)
+        if spell_id is None:
+            raise ValueError("Choose valid Magic Initiate spells")
+        selected.append(spell_id)
+    if len(set(selected)) != len(selected):
+        raise ValueError("Choose each Magic Initiate spell once")
+    cantrip_options = {option["value"] for option in magic_initiate_spell_choices(background)["cantrips"]}
+    first_level_options = {option["value"] for option in magic_initiate_spell_choices(background)["firstLevelSpells"]}
+    cantrips = [spell_id for spell_id in selected if enum_key(spell_id) in cantrip_options]
+    first_level_spells = [spell_id for spell_id in selected if enum_key(spell_id) in first_level_options]
+    if len(cantrips) != 2 or len(first_level_spells) != 1 or len(selected) != 3:
+        raise ValueError("Choose two cantrips and one 1st-level spell for Magic Initiate")
+    return tuple(selected)
+
+
+def background_spell_entries(background: BackgroundType, selected_spells: tuple[SpellId, ...]) -> list[SpellEntry]:
+    from dnd_board.rules.spells import spell_entry_for_list
+
+    spell_list = magic_initiate_spell_list(background)
+    if spell_list is None:
+        return []
+    casting_ability = magic_initiate_casting_ability(background)
+    spells = []
+    for spell_id in selected_spells:
+        spell = spell_entry_for_list(spell_id, spell_list, source=SpellSource.MAGIC_INITIATE, casting_ability=casting_ability)
+        if spell is not None and spell.level == 1:
+            spell.resourceId = magic_initiate_resource_id(spell.id)
+            spell.reset = RestType.LONG_REST
+        spells.append(spell)
+    return [spell for spell in spells if spell is not None]
+
+
+def background_spell_resources(background: BackgroundType, selected_spells: tuple[SpellId, ...]) -> list[ResourceTracker]:
+    spells = background_spell_entries(background, selected_spells)
+    return [
+        ResourceTracker(
+            id=magic_initiate_resource_id(spell.id),
+            name=f"{enum_label(spell.id)} Free Cast",
+            currentUses=1,
+            maxUses=1,
+            reset=RestType.LONG_REST,
+            activation=TimeEconomy.ACTION,
+            description=f"Cast {enum_label(spell.id)} once without expending a spell slot. Resets on a Long Rest.",
+            source=enum_label(SpellSource.MAGIC_INITIATE),
+        )
+        for spell in spells
+        if spell.level == 1
+    ]
+
+
+def magic_initiate_resource_id(spell_id: SpellId) -> str:
+    return f"magicInitiate{enum_key(spell_id)[0].upper()}{enum_key(spell_id)[1:]}FreeCast"
+
+
+def magic_initiate_spell_list(background: BackgroundType):
+    from dnd_board.rules.spells import SpellListType
+
+    feat = background_definition(background).feat
+    return {
+        BackgroundOriginFeatType.MAGIC_INITIATE_CLERIC: SpellListType.CLERIC,
+        BackgroundOriginFeatType.MAGIC_INITIATE_DRUID: SpellListType.DRUID,
+        BackgroundOriginFeatType.MAGIC_INITIATE_WIZARD: SpellListType.WIZARD,
+    }.get(feat)
+
+
+def magic_initiate_casting_ability(background: BackgroundType) -> AbilityType:
+    feat = background_definition(background).feat
+    if feat == BackgroundOriginFeatType.MAGIC_INITIATE_WIZARD:
+        return AbilityType.INTELLIGENCE
+    return AbilityType.WISDOM
+
+
+def serialize_spell_options(spells: list[SpellEntry]) -> list[dict[str, Any]]:
+    return [
+        {
+            "value": enum_key(spell.id),
+            "label": enum_label(spell.id),
+            "school": enum_key(spell.school),
+            "level": spell.level,
+            "castingTime": enum_key(spell.castingTime),
+            "castingTimeLabel": spell.castingTimeLabel,
+            "range": spell.targeting.summary,
+            "duration": spell.duration.summary,
+            "components": [enum_label(component) for component in spell.components],
+        }
+        for spell in spells
+    ]
 
 
 def selected_tool_from_payload(background: BackgroundType, value: Any) -> ToolType | None:
