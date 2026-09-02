@@ -43,7 +43,7 @@ from dnd_board.rules.species import SpeciesType, species_definition, species_hit
 
 
 CHARACTER_BUILDER_STARTING_LEVEL = 1
-SUPPORTED_CLASS_TYPES = (ClassType.FIGHTER, ClassType.ROGUE)
+SUPPORTED_CLASS_TYPES = (ClassType.FIGHTER, ClassType.ROGUE, ClassType.WIZARD)
 STANDARD_ARRAY_SCORES = (15, 14, 13, 12, 10, 8)
 POINT_BUY_POINTS = 27
 POINT_BUY_SCORE_COSTS = {
@@ -133,7 +133,7 @@ def character_builder_options() -> dict[str, Any]:
 def character_builder_request_from_payload(payload: dict[str, Any], *, default_member_id: str, default_owner: str) -> CharacterBuilderRequest:
     class_type = enum_value(ClassType, payload_value(payload, CharacterBuilderPayloadField.CLASS_NAME, enum_key(ClassType.FIGHTER)))
     if class_type not in SUPPORTED_CLASS_TYPES:
-        raise ValueError("Choose Fighter or Rogue")
+        raise ValueError("Choose Fighter, Rogue, or Wizard")
 
     race = origin_from_payload(SpeciesType, payload_value(payload, CharacterBuilderPayloadField.RACE), SpeciesType.HUMAN)
     background = origin_from_payload(BackgroundType, payload_value(payload, CharacterBuilderPayloadField.BACKGROUND), BackgroundType.WAYFARER)

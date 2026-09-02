@@ -2687,12 +2687,12 @@ function SheetSpellList({
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   sheet: CharacterSheet;
 }) {
-  if (sheet.spells.length === 0) return null;
+  if (sheet.spells.length === 0 && sheet.spellbook.length === 0) return null;
 
   return (
     <section className="sheet-panel">
       <h2>Spells</h2>
-      <div className="spell-list">
+      {sheet.spells.length > 0 && <div className="spell-list">
         {sheet.spells.map((spell) => {
           const resource = spell.resourceId ? sheet.resources.find((candidate) => candidate.id === spell.resourceId) : undefined;
           const tags = [
@@ -2705,7 +2705,7 @@ function SheetSpellList({
           ].filter(Boolean);
 
           return (
-            <article className="spell-row" key={spell.id}>
+            <article className="spell-row" key={`${spell.source}:${spell.id}`}>
               <div>
                 <strong>{spell.nameLabel}</strong>
                 <span>{tags.join(" · ")}</span>
@@ -2726,7 +2726,34 @@ function SheetSpellList({
             </article>
           );
         })}
-      </div>
+      </div>}
+      {sheet.spellbook.length > 0 && (
+        <>
+          <h3>Spellbook</h3>
+          <div className="spell-list">
+            {sheet.spellbook.map((spell) => {
+              const tags = [
+                spell.level === 0 ? "Cantrip" : `Level ${spell.level}`,
+                spell.schoolLabel,
+                spell.ritual ? "Ritual" : "",
+                spell.concentration ? "Concentration" : ""
+              ].filter(Boolean);
+
+              return (
+                <article className="spell-row" key={`spellbook:${spell.id}`}>
+                  <div>
+                    <strong>{spell.nameLabel}</strong>
+                    <span>{tags.join(" · ")}</span>
+                    <small>
+                      {spell.castingTimeLabel} · {spell.targeting.summary} · {spell.duration.summary} · {spell.componentsLabel.join(", ")}
+                    </small>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      )}
     </section>
   );
 }

@@ -41,6 +41,7 @@ from dnd_board.character_sheet import (
     RestType,
     SheetSectionType,
     SkillType,
+    SpellEntry,
     SpellSource,
     TokenKind,
     build_attack_roll_payload,
@@ -70,7 +71,24 @@ from dnd_board.character_builder import (
     character_builder_request_from_payload,
     payload_key,
 )
-from dnd_board.rules.progression import ProgressionChoiceId, apply_progression_choice, class_hit_die, fighter_asi_levels_up_to, fighter_skill_option_types, fighter_skill_proficiency_count, parse_progression_choice_id, prune_progression_choices, rogue_asi_levels_up_to, rogue_expertise_count, rogue_skill_option_types, rogue_skill_proficiency_count, update_class_level
+from dnd_board.rules.progression import (
+    ProgressionChoiceId,
+    apply_progression_choice,
+    class_hit_die,
+    fighter_asi_levels_up_to,
+    fighter_skill_option_types,
+    fighter_skill_proficiency_count,
+    parse_progression_choice_id,
+    prune_progression_choices,
+    rogue_asi_levels_up_to,
+    rogue_expertise_count,
+    rogue_skill_option_types,
+    rogue_skill_proficiency_count,
+    update_class_level,
+    wizard_asi_levels_up_to,
+    wizard_skill_option_types,
+    wizard_skill_proficiency_count,
+)
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -443,6 +461,12 @@ async def update_sheet_progression_choice(room_id: str, sheet_id: str, choice_id
             sanitize_asset_id(sheet_id),
             lambda member: apply_member_ability_score_improvement(member, [str(value) for value in values]),
         )
+    elif parsed_choice_id == ProgressionChoiceId.WIZARD_ABILITY_SCORE_IMPROVEMENT:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_ability_score_improvement(member, [str(value) for value in values]),
+        )
     elif parsed_choice_id == ProgressionChoiceId.FIGHTER_SKILL_PROFICIENCIES:
         updated_member = update_party_member_config(
             room.id,
@@ -454,6 +478,12 @@ async def update_sheet_progression_choice(room_id: str, sheet_id: str, choice_id
             room.id,
             sanitize_asset_id(sheet_id),
             lambda member: apply_member_rogue_skill_proficiencies(member, [str(value) for value in values]),
+        )
+    elif parsed_choice_id == ProgressionChoiceId.WIZARD_SKILL_PROFICIENCIES:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_wizard_skill_proficiencies(member, [str(value) for value in values]),
         )
     elif parsed_choice_id == ProgressionChoiceId.ROGUE_EXPERTISE:
         updated_member = update_party_member_config(
@@ -472,6 +502,24 @@ async def update_sheet_progression_choice(room_id: str, sheet_id: str, choice_id
             room.id,
             sanitize_asset_id(sheet_id),
             lambda member: apply_member_arcane_trickster_spells(member, [str(value) for value in values]),
+        )
+    elif parsed_choice_id == ProgressionChoiceId.WIZARD_CANTRIPS:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_wizard_cantrips(member, [str(value) for value in values]),
+        )
+    elif parsed_choice_id == ProgressionChoiceId.WIZARD_SPELLBOOK_SPELLS:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_wizard_spellbook_spells(member, [str(value) for value in values]),
+        )
+    elif parsed_choice_id == ProgressionChoiceId.WIZARD_PREPARED_SPELLS:
+        updated_member = update_party_member_config(
+            room.id,
+            sanitize_asset_id(sheet_id),
+            lambda member: apply_member_wizard_prepared_spells(member, [str(value) for value in values]),
         )
     elif parsed_choice_id is None:
         raise HTTPException(status_code=400, detail="Invalid progression choice")
@@ -1911,6 +1959,7 @@ def set_member_class_levels(member: PartyMemberConfig, classes: list[CharacterCl
     prune_member_ability_score_improvements(member)
     prune_member_eldritch_knight_spells(member)
     prune_member_arcane_trickster_spells(member)
+    prune_member_wizard_spells(member)
 
 
 def set_member_condition(member: PartyMemberConfig, condition: ConditionType, active: bool) -> None:
@@ -2008,6 +2057,76 @@ def apply_member_arcane_trickster_spells(member: PartyMemberConfig, values: list
     member.sheet.spells = [*other_spells, *spells]
 
 
+def apply_member_wizard_cantrips(member: PartyMemberConfig, values: list[str]) -> None:
+    from dnd_board.rules.classes.wizard.base import is_wizard_cantrip_selection_valid
+
+    wizard = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.WIZARD), None)
+    if wizard is None or wizard.level < 1:
+        raise HTTPException(status_code=400, detail="Wizard spellcasting is not available")
+
+    spells = wizard_spells_from_values(values)
+    if not is_wizard_cantrip_selection_valid(wizard.level, spells):
+        raise HTTPException(status_code=400, detail="Choose legal Wizard cantrips")
+
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[wizard])
+    other_spells = [spell for spell in member.sheet.spells or [] if spell.source != SpellSource.WIZARD or spell.level > 0]
+    member.sheet.spells = [*other_spells, *spells]
+
+
+def apply_member_wizard_spellbook_spells(member: PartyMemberConfig, values: list[str]) -> None:
+    from dnd_board.rules.classes.wizard.base import is_wizard_spellbook_selection_valid
+
+    wizard = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.WIZARD), None)
+    if wizard is None or wizard.level < 1:
+        raise HTTPException(status_code=400, detail="Wizard spellbook is not available")
+
+    spells = wizard_spells_from_values(values)
+    if not is_wizard_spellbook_selection_valid(wizard.level, spells):
+        raise HTTPException(status_code=400, detail="Choose legal Wizard spellbook spells")
+
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[wizard])
+    member.sheet.spellbook = spells
+    member.sheet.spells = [
+        spell
+        for spell in member.sheet.spells or []
+        if spell.source != SpellSource.WIZARD or spell.level == 0 or any(spell.id == spellbook_spell.id for spellbook_spell in spells)
+    ]
+
+
+def apply_member_wizard_prepared_spells(member: PartyMemberConfig, values: list[str]) -> None:
+    from dnd_board.rules.classes.wizard.base import is_wizard_prepared_spell_selection_valid
+
+    wizard = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.WIZARD), None)
+    if wizard is None or wizard.level < 1:
+        raise HTTPException(status_code=400, detail="Wizard spellcasting is not available")
+
+    spells = wizard_spells_from_values(values)
+    if not is_wizard_prepared_spell_selection_valid(wizard.level, spells):
+        raise HTTPException(status_code=400, detail="Choose legal prepared Wizard spells")
+    spellbook_ids = {spell.id for spell in member.sheet.spellbook or []} if member.sheet else set()
+    if spellbook_ids and any(spell.id not in spellbook_ids for spell in spells):
+        raise HTTPException(status_code=400, detail="Prepared Wizard spells must be in your spellbook")
+
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[wizard])
+    other_spells = [spell for spell in member.sheet.spells or [] if spell.source != SpellSource.WIZARD or spell.level == 0]
+    member.sheet.spells = [*other_spells, *spells]
+
+
+def wizard_spells_from_values(values: list[str]) -> list[SpellEntry]:
+    from dnd_board.rules.classes.wizard.base import wizard_catalog_spell
+
+    spells = []
+    for spell_id in unique_clean_values(values):
+        spell = wizard_catalog_spell(spell_id)
+        if spell is None:
+            raise HTTPException(status_code=400, detail="Invalid Wizard spell")
+        spells.append(spell)
+    return spells
+
+
 def apply_member_fighter_skill_proficiencies(member: PartyMemberConfig, values: list[str]) -> None:
     fighter = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.FIGHTER), None)
     if fighter is None or fighter.level < 1:
@@ -2078,6 +2197,30 @@ def apply_member_rogue_expertise(member: PartyMemberConfig, values: list[str]) -
         member.sheet = PartyMemberSheet(classes=[rogue])
     for skill in selected_skills:
         skills[enum_key(skill)] = ProficiencyLevel.EXPERTISE
+    member.sheet.skills = skills or None
+
+
+def apply_member_wizard_skill_proficiencies(member: PartyMemberConfig, values: list[str]) -> None:
+    wizard = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.WIZARD), None)
+    if wizard is None or wizard.level < 1:
+        raise HTTPException(status_code=400, detail="Wizard skill proficiencies are not available")
+
+    selected_skills = parse_skill_choices(values)
+    expected_count = wizard_skill_proficiency_count(wizard)
+    if len(selected_skills) != expected_count:
+        raise HTTPException(status_code=400, detail=f"Choose {expected_count} Wizard skill proficiencies")
+
+    wizard_options = set(wizard_skill_option_types())
+    if any(skill not in wizard_options for skill in selected_skills):
+        raise HTTPException(status_code=400, detail="Invalid Wizard skill proficiency")
+
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet(classes=[wizard])
+    skills = dict(member.sheet.skills or {})
+    for skill in selected_skills:
+        skill_key = enum_key(skill)
+        if skills.get(skill_key) != ProficiencyLevel.EXPERTISE:
+            skills[skill_key] = ProficiencyLevel.PROFICIENT
     member.sheet.skills = skills or None
 
 
@@ -2283,7 +2426,12 @@ def prune_member_ability_score_improvements(member: PartyMemberConfig) -> None:
 def expected_member_ability_score_improvements(classes: list[CharacterClassLevel]) -> int:
     fighter = next((character_class for character_class in classes if character_class.name == ClassType.FIGHTER), None)
     rogue = next((character_class for character_class in classes if character_class.name == ClassType.ROGUE), None)
-    return (fighter_asi_levels_up_to(fighter.level) if fighter is not None else 0) + (rogue_asi_levels_up_to(rogue.level) if rogue is not None else 0)
+    wizard = next((character_class for character_class in classes if character_class.name == ClassType.WIZARD), None)
+    return (
+        (fighter_asi_levels_up_to(fighter.level) if fighter is not None else 0)
+        + (rogue_asi_levels_up_to(rogue.level) if rogue is not None else 0)
+        + (wizard_asi_levels_up_to(wizard.level) if wizard is not None else 0)
+    )
 
 
 def apply_constitution_hp_delta(member: PartyMemberConfig, previous_score: int, next_score: int) -> None:
@@ -2332,6 +2480,29 @@ def prune_member_arcane_trickster_spells(member: PartyMemberConfig) -> None:
         *other_spells,
         *pruned_arcane_trickster_spells(rogue.level, arcane_trickster_spells),
     ] or None
+
+
+def prune_member_wizard_spells(member: PartyMemberConfig) -> None:
+    from dnd_board.rules.classes.wizard.base import pruned_wizard_spellbook, pruned_wizard_spells
+
+    if member.sheet is None:
+        return
+
+    wizard = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.WIZARD), None)
+    if wizard is None or wizard.level < 1:
+        return
+
+    pruned_spellbook = pruned_wizard_spellbook(wizard.level, member.sheet.spellbook or [])
+    member.sheet.spellbook = pruned_spellbook or None
+    spellbook_ids = {spell.id for spell in pruned_spellbook}
+    if member.sheet.spells:
+        wizard_spells = [
+            spell
+            for spell in member.sheet.spells
+            if spell.source == SpellSource.WIZARD and (spell.level == 0 or not spellbook_ids or spell.id in spellbook_ids)
+        ]
+        other_spells = [spell for spell in member.sheet.spells if spell.source != SpellSource.WIZARD]
+        member.sheet.spells = [*other_spells, *pruned_wizard_spells(wizard.level, wizard_spells)] or None
 
 
 def unique_clean_values(values: list[str]) -> list[str]:

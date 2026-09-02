@@ -1166,6 +1166,7 @@ class PartyMemberSheet:
     features: list[SheetFeature] | None = None
     resources: list[ResourceTracker] | None = None
     spells: list[SpellEntry] | None = None
+    spellbook: list[SpellEntry] | None = None
     hitPointIncreases: list[int] | None = None
     abilityScoreImprovements: list[str] | None = None
     conditions: list[ConditionType] | None = None
@@ -1226,6 +1227,7 @@ class CharacterSheet:
     abilities: list[SheetAbility]
     features: list[SheetFeature]
     spells: list[SpellEntry]
+    spellbook: list[SpellEntry]
     proficiencies: list[str]
     conditions: list[ConditionType]
     damageResistances: list[DamageType]
@@ -1361,6 +1363,7 @@ def build_character_sheet(
     skill_proficiencies = sheet_config.skills if sheet_config and sheet_config.skills else {}
     save_proficiencies = set(sheet_config.savingThrowProficiencies if sheet_config and sheet_config.savingThrowProficiencies else default_save_proficiencies(classes))
     configured_spells = sheet_config.spells if sheet_config and sheet_config.spells else []
+    configured_spellbook = sheet_config.spellbook if sheet_config and sheet_config.spellbook else []
     configured_feats = sheet_config.feats if sheet_config and sheet_config.feats else []
     resources = apply_resource_overrides(sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes, ability_scores, configured_feats, proficiency_bonus), resource_overrides)
     feat_abilities = default_feat_abilities(classes, configured_feats)
@@ -1380,7 +1383,7 @@ def build_character_sheet(
         abilities=abilities,
         spells=configured_spells,
     )
-    pending_choices = default_progression_choices(classes, configured_spells, hit_point_increases, ability_score_improvements, skill_proficiencies, configured_feats, feat_eligibility_sheet)
+    pending_choices = default_progression_choices(classes, configured_spells, hit_point_increases, ability_score_improvements, skill_proficiencies, configured_feats, feat_eligibility_sheet, spellbook=configured_spellbook)
     spells = [*default_spells(classes), *default_spellcasting_spells(classes, configured_spells)]
     if sheet_config:
         features = [*(sheet_config.traits or []), *features, *(sheet_config.features or []), *(sheet_config.feats or [])]
@@ -1420,6 +1423,7 @@ def build_character_sheet(
         abilities=abilities,
         features=features,
         spells=spells,
+        spellbook=configured_spellbook,
         proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
         conditions=sheet_config.conditions if sheet_config and sheet_config.conditions else [],
         damageResistances=sheet_config.damageResistances if sheet_config and sheet_config.damageResistances else [],
@@ -1848,6 +1852,8 @@ def default_save_proficiencies(classes: list[CharacterClassLevel]) -> list[Abili
         proficiencies.extend([AbilityType.STRENGTH, AbilityType.CONSTITUTION])
     if primary == ClassType.ROGUE:
         proficiencies.extend([AbilityType.DEXTERITY, AbilityType.INTELLIGENCE])
+    if primary == ClassType.WIZARD:
+        proficiencies.extend([AbilityType.INTELLIGENCE, AbilityType.WISDOM])
     if any(character_class.name == ClassType.ROGUE and character_class.level >= 15 for character_class in classes):
         proficiencies.extend([AbilityType.WISDOM, AbilityType.CHARISMA])
     return list(dict.fromkeys(proficiencies))
@@ -1871,6 +1877,8 @@ def default_resources(classes: list[CharacterClassLevel], ability_scores: Abilit
     from dnd_board.rules.classes.fighter.base import fighter_resources
     from dnd_board.rules.classes.rogue.archetypes import rogue_subclass_resources
     from dnd_board.rules.classes.rogue.base import rogue_resources
+    from dnd_board.rules.classes.wizard.archetypes import wizard_subclass_resources
+    from dnd_board.rules.classes.wizard.base import wizard_resources
     from dnd_board.rules.feats import feat_resources
     from dnd_board.rules.shared.combat_superiority import combat_superiority_resource
 
@@ -1879,6 +1887,8 @@ def default_resources(classes: list[CharacterClassLevel], ability_scores: Abilit
         *fighter_subclass_resources(classes, ability_scores),
         *rogue_resources(classes),
         *rogue_subclass_resources(classes, ability_scores),
+        *wizard_resources(classes),
+        *wizard_subclass_resources(classes),
         *feat_resources(classes, feats, proficiency_bonus),
     ]
     superiority_dice = combat_superiority_resource(classes)
@@ -1944,8 +1954,9 @@ def apply_equipment_slot_overrides(equipment: list[EquipmentItem], overrides: di
 def default_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
     from dnd_board.rules.classes.fighter.base import fighter_features
     from dnd_board.rules.classes.rogue.base import rogue_features
+    from dnd_board.rules.classes.wizard.base import wizard_features
 
-    return [*fighter_features(classes), *rogue_features(classes)]
+    return [*fighter_features(classes), *rogue_features(classes), *wizard_features(classes)]
 
 
 def default_feat_abilities(classes: list[CharacterClassLevel], feats: list[SheetFeature] | None = None) -> list[SheetAbility]:
@@ -1976,8 +1987,9 @@ def default_subclass_abilities(classes: list[CharacterClassLevel]) -> list[Sheet
     from dnd_board.rules.classes.fighter.archetypes import fighter_subclass_abilities
     from dnd_board.rules.classes.rogue.archetypes import rogue_subclass_abilities
     from dnd_board.rules.classes.rogue.base import rogue_abilities
+    from dnd_board.rules.classes.wizard.archetypes import wizard_subclass_abilities
 
-    return [*fighter_subclass_abilities(classes), *rogue_abilities(classes), *rogue_subclass_abilities(classes)]
+    return [*fighter_subclass_abilities(classes), *rogue_abilities(classes), *rogue_subclass_abilities(classes), *wizard_subclass_abilities(classes)]
 
 
 def default_spells(classes: list[CharacterClassLevel]) -> list[SpellEntry]:
@@ -2002,10 +2014,12 @@ def default_progression_choices(
     skill_proficiencies: dict[str, ProficiencyLevel] | None = None,
     feats: list[SheetFeature] | None = None,
     feat_eligibility_sheet=None,
+    *,
+    spellbook: list[SpellEntry] | None = None,
 ) -> list[ProgressionChoice]:
     from dnd_board.rules.progression import progression_choices
 
-    return progression_choices(classes, spells, hit_point_increases, ability_score_improvements, skill_proficiencies or {}, feats, feat_eligibility_sheet)
+    return progression_choices(classes, spells, hit_point_increases, ability_score_improvements, skill_proficiencies or {}, feats, feat_eligibility_sheet, spellbook=spellbook)
 
 
 def default_armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:
@@ -2172,6 +2186,8 @@ def typed_json_registry() -> dict[str, type[Any]]:
     from dnd_board.rules.classes.fighter.base import FighterSubclassType
     from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, RogueSubclassAttackType, RogueSubclassResourceType, RogueSubclassRollActionType
     from dnd_board.rules.classes.rogue.base import RogueAbilityType, RogueFeatureType, RogueResourceType, RogueSubclassType
+    from dnd_board.rules.classes.wizard.archetypes import WizardSubclassFeatureType, WizardSubclassResourceType
+    from dnd_board.rules.classes.wizard.base import WizardFeatureType, WizardResourceType, WizardSubclassType
     from dnd_board.rules.shared.combat_superiority import BattleMasterResourceType, MonsterHunterSuperiorityActionType, ScoutSuperiorityActionType
 
     return {
@@ -2255,6 +2271,11 @@ def typed_json_registry() -> dict[str, type[Any]]:
             TimeEconomy,
             WeaponProperty,
             WeaponCategory,
+            WizardFeatureType,
+            WizardResourceType,
+            WizardSubclassFeatureType,
+            WizardSubclassResourceType,
+            WizardSubclassType,
         ]
     }
 

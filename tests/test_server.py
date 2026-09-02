@@ -1392,7 +1392,7 @@ def test_level_sheet_rejects_invalid_class(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
 
-    response = client.post("/api/rooms/level-invalid-class-test/sheet/player-1/level?playerKey=dm&delta=1&className=wizard")
+    response = client.post("/api/rooms/level-invalid-class-test/sheet/player-1/level?playerKey=dm&delta=1&className=bard")
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid class"

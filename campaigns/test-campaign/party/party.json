@@ -931,11 +931,11 @@
             },
             "name": {
               "$type": "str",
-              "value": "Bilbo"
+              "value": "New Character"
             },
             "maxHp": {
               "$type": "int",
-              "value": 20
+              "value": 12
             },
             "abilityScores": {
               "$type": "AbilityScores",
@@ -946,11 +946,11 @@
                 },
                 "dexterity": {
                   "$type": "int",
-                  "value": 18
+                  "value": 15
                 },
                 "constitution": {
                   "$type": "int",
-                  "value": 17
+                  "value": 16
                 },
                 "intelligence": {
                   "$type": "int",
@@ -958,7 +958,7 @@
                 },
                 "wisdom": {
                   "$type": "int",
-                  "value": 11
+                  "value": 10
                 },
                 "charisma": {
                   "$type": "int",
@@ -975,7 +975,7 @@
                 },
                 "background": {
                   "$type": "str",
-                  "value": "Criminal"
+                  "value": "Sage"
                 },
                 "classes": {
                   "$type": "list",
@@ -989,7 +989,7 @@
                         },
                         "level": {
                           "$type": "int",
-                          "value": 2
+                          "value": 1
                         }
                       }
                     }
@@ -1002,11 +1002,27 @@
                 "skills": {
                   "$type": "dict",
                   "value": {
-                    "sleightOfHand": {
+                    "arcana": {
                       "$type": "ProficiencyLevel",
                       "value": "PROFICIENT"
                     },
-                    "stealth": {
+                    "history": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    },
+                    "acrobatics": {
+                      "$type": "ProficiencyLevel",
+                      "value": "EXPERTISE"
+                    },
+                    "persuasion": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    },
+                    "sleightOfHand": {
+                      "$type": "ProficiencyLevel",
+                      "value": "EXPERTISE"
+                    },
+                    "intimidation": {
                       "$type": "ProficiencyLevel",
                       "value": "PROFICIENT"
                     }
@@ -1017,7 +1033,7 @@
                   "items": [
                     {
                       "$type": "str",
-                      "value": "Thieves' Tools"
+                      "value": "Calligrapher's Supplies"
                     }
                   ]
                 },
@@ -1029,11 +1045,11 @@
                       "fields": {
                         "id": {
                           "$type": "str",
-                          "value": "alert"
+                          "value": "magicInitiate"
                         },
                         "name": {
                           "$type": "str",
-                          "value": "Alert"
+                          "value": "Magic Initiate (Wizard)"
                         },
                         "source": {
                           "$type": "str",
@@ -1045,7 +1061,7 @@
                         },
                         "description": {
                           "$type": "str",
-                          "value": "+5 initiative, cannot be surprised, and unseen attackers do not gain advantage."
+                          "value": "Learn two cantrips and one 1st-level spell from a class list."
                         }
                       }
                     }
@@ -1164,7 +1180,7 @@
                       "fields": {
                         "id": {
                           "$type": "str",
-                          "value": "criminaltoolProficiency"
+                          "value": "sagetoolProficiency"
                         },
                         "name": {
                           "$type": "str",
@@ -1172,7 +1188,7 @@
                         },
                         "source": {
                           "$type": "str",
-                          "value": "Criminal"
+                          "value": "Sage"
                         },
                         "activation": {
                           "$type": "TimeEconomy",
@@ -1180,18 +1196,384 @@
                         },
                         "description": {
                           "$type": "str",
-                          "value": "Gain proficiency with Thieves' Tools."
+                          "value": "Gain proficiency with Calligrapher's Supplies."
                         }
                       }
                     }
                   ]
                 },
-                "hitPointIncreases": {
+                "resources": {
                   "$type": "list",
                   "items": [
                     {
-                      "$type": "int",
-                      "value": 8
+                      "$type": "ResourceTracker",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "magicInitiateAlarmFreeCast"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Alarm Free Cast"
+                        },
+                        "currentUses": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "maxUses": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "LONG_REST"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Cast Alarm once without expending a spell slot. Resets on a Long Rest."
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Magic Initiate"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "spells": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "ACID_SPLASH"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "ACID_SPLASH"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "MAGIC_INITIATE"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "EVOCATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 60
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "INSTANTANEOUS"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Sorcerer, Wizard. Casting time: Action. Range: 60 ft. Components: Verbal, Somatic. Duration: Instantaneous."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "BLADE_WARD"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "BLADE_WARD"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "MAGIC_INITIATE"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "SELF"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Bard, Sorcerer, Warlock, Wizard. Casting time: Action. Range: Self. Components: Verbal, Somatic. Duration: Up to 1 minute."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "ALARM"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "ALARM"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "MAGIC_INITIATE"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "SPECIAL"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 30
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "HOUR"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 8
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Ranger, Wizard. Casting time: 1 minute. Range: 30 ft. Components: Verbal, Somatic, Material. Duration: 8 hours."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "castingDuration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "resourceId": {
+                          "$type": "str",
+                          "value": "magicInitiateAlarmFreeCast"
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "LONG_REST"
+                        }
+                      }
                     }
                   ]
                 },
@@ -1212,11 +1594,11 @@
                       "fields": {
                         "id": {
                           "$type": "str",
-                          "value": "criminalEquipmentPackage"
+                          "value": "quarterstaff"
                         },
                         "name": {
                           "$type": "str",
-                          "value": "Criminal Equipment Package"
+                          "value": "Quarterstaff"
                         },
                         "equipped": {
                           "$type": "bool",
@@ -1232,7 +1614,187 @@
                         },
                         "notes": {
                           "$type": "str",
-                          "value": "Starting equipment package from background."
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "WEAPON"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "calligraphersSupplies"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Calligrapher's Supplies"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": "Tool from background equipment."
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "book-history"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Book (history)"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "parchment"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Parchment"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 8
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "robe"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Robe"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
                         },
                         "itemType": {
                           "$type": "EquipmentType",
@@ -1253,6 +1815,23 @@
                       }
                     }
                   ]
+                },
+                "purse": {
+                  "$type": "Purse",
+                  "fields": {
+                    "copper": {
+                      "$type": "int",
+                      "value": 0
+                    },
+                    "silver": {
+                      "$type": "int",
+                      "value": 0
+                    },
+                    "gold": {
+                      "$type": "int",
+                      "value": 8
+                    }
+                  }
                 }
               }
             }
@@ -1267,30 +1846,30 @@
             },
             "name": {
               "$type": "str",
-              "value": "Freddy"
+              "value": "Blah"
             },
             "maxHp": {
               "$type": "int",
-              "value": 12
+              "value": 32
             },
             "abilityScores": {
               "$type": "AbilityScores",
               "fields": {
                 "strength": {
                   "$type": "int",
-                  "value": 14
+                  "value": 10
                 },
                 "dexterity": {
                   "$type": "int",
-                  "value": 14
+                  "value": 15
                 },
                 "constitution": {
                   "$type": "int",
-                  "value": 15
+                  "value": 14
                 },
                 "intelligence": {
                   "$type": "int",
-                  "value": 12
+                  "value": 15
                 },
                 "wisdom": {
                   "$type": "int",
@@ -1298,7 +1877,7 @@
                 },
                 "charisma": {
                   "$type": "int",
-                  "value": 8
+                  "value": 12
                 }
               }
             },
@@ -1307,11 +1886,11 @@
               "fields": {
                 "race": {
                   "$type": "str",
-                  "value": "Boggart"
+                  "value": "Gnome"
                 },
                 "background": {
                   "$type": "str",
-                  "value": "Harper"
+                  "value": "Acolyte"
                 },
                 "classes": {
                   "$type": "list",
@@ -1321,20 +1900,15 @@
                       "fields": {
                         "name": {
                           "$type": "ClassType",
-                          "value": "FIGHTER"
+                          "value": "WIZARD"
                         },
                         "level": {
                           "$type": "int",
-                          "value": 1
+                          "value": 6
                         },
-                        "fightingStyles": {
-                          "$type": "list",
-                          "items": [
-                            {
-                              "$type": "FightingStyleType",
-                              "value": "PROTECTION"
-                            }
-                          ]
+                        "subclass": {
+                          "$type": "WizardSubclassType",
+                          "value": "ILLUSIONIST"
                         }
                       }
                     }
@@ -1344,6 +1918,58 @@
                   "$type": "int",
                   "value": 30
                 },
+                "skills": {
+                  "$type": "dict",
+                  "value": {
+                    "insight": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    },
+                    "religion": {
+                      "$type": "ProficiencyLevel",
+                      "value": "PROFICIENT"
+                    }
+                  }
+                },
+                "proficiencies": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "str",
+                      "value": "Calligrapher's Supplies"
+                    }
+                  ]
+                },
+                "feats": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "magicInitiate"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Magic Initiate (Cleric)"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Player's Handbook (2024)"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Learn two cantrips and one 1st-level spell from a class list."
+                        }
+                      }
+                    }
+                  ]
+                },
                 "traits": {
                   "$type": "list",
                   "items": [
@@ -1352,15 +1978,15 @@
                       "fields": {
                         "id": {
                           "$type": "str",
-                          "value": "boggartspeciesTraits"
+                          "value": "gnomedarkvision"
                         },
                         "name": {
                           "$type": "str",
-                          "value": "Species Traits"
+                          "value": "Darkvision"
                         },
                         "source": {
                           "$type": "str",
-                          "value": "Boggart"
+                          "value": "Gnome"
                         },
                         "activation": {
                           "$type": "TimeEconomy",
@@ -1368,9 +1994,376 @@
                         },
                         "description": {
                           "$type": "str",
-                          "value": "Detailed species mechanics are not implemented yet."
+                          "value": "You have Darkvision with a range of 60 feet."
                         }
                       }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "gnomegnomishCunning"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Gnomish Cunning"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Gnome"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "You have advantage on Intelligence, Wisdom, and Charisma saving throws."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "gnomegnomishLineage"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Gnomish Lineage"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Gnome"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Choose Forest Gnome or Rock Gnome for additional magical traits."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "features": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "acolytetoolProficiency"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Tool Proficiency"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Acolyte"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "PASSIVE"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Gain proficiency with Calligrapher's Supplies."
+                        }
+                      }
+                    }
+                  ]
+                },
+                "resources": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "ResourceTracker",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "magicInitiateBaneFreeCast"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Bane Free Cast"
+                        },
+                        "currentUses": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "maxUses": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "LONG_REST"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Cast Bane once without expending a spell slot. Resets on a Long Rest."
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Magic Initiate"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "spells": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "GUIDANCE"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "GUIDANCE"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "MAGIC_INITIATE"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "DIVINATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "WISDOM"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "TOUCH"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Cleric, Druid. Casting time: Action. Range: Touch. Components: Verbal, Somatic. Duration: Up to 1 minute."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "BANE"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "BANE"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "MAGIC_INITIATE"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ENCHANTMENT"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "WISDOM"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 30
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Bard, Cleric, Warlock. Casting time: Action. Range: 30 ft. Components: Verbal, Somatic, Material. Duration: Up to 1 minute."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "resourceId": {
+                          "$type": "str",
+                          "value": "magicInitiateBaneFreeCast"
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "LONG_REST"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "hitPointIncreases": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "int",
+                      "value": 6
+                    },
+                    {
+                      "$type": "int",
+                      "value": 6
+                    },
+                    {
+                      "$type": "int",
+                      "value": 6
+                    },
+                    {
+                      "$type": "int",
+                      "value": 6
+                    }
+                  ]
+                },
+                "abilityScoreImprovements": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "str",
+                      "value": "strength:2"
                     }
                   ]
                 },
@@ -1382,11 +2375,11 @@
                       "fields": {
                         "id": {
                           "$type": "str",
-                          "value": "harperEquipmentPackage"
+                          "value": "calligraphersSupplies"
                         },
                         "name": {
                           "$type": "str",
-                          "value": "Harper Equipment Package"
+                          "value": "Calligrapher's Supplies"
                         },
                         "equipped": {
                           "$type": "bool",
@@ -1402,7 +2395,187 @@
                         },
                         "notes": {
                           "$type": "str",
-                          "value": "Starting equipment package from background."
+                          "value": "Tool from background equipment."
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "book-prayers"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Book (prayers)"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "holysymbol"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Holy Symbol"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "parchment"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Parchment"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 10
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "robe"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Robe"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
                         },
                         "itemType": {
                           "$type": "EquipmentType",
@@ -1423,6 +2596,23 @@
                       }
                     }
                   ]
+                },
+                "purse": {
+                  "$type": "Purse",
+                  "fields": {
+                    "copper": {
+                      "$type": "int",
+                      "value": 0
+                    },
+                    "silver": {
+                      "$type": "int",
+                      "value": 0
+                    },
+                    "gold": {
+                      "$type": "int",
+                      "value": 8
+                    }
+                  }
                 }
               }
             }
@@ -1437,11 +2627,11 @@
             },
             "name": {
               "$type": "str",
-              "value": "Gary"
+              "value": "Wiz"
             },
             "maxHp": {
               "$type": "int",
-              "value": 11
+              "value": 14
             },
             "abilityScores": {
               "$type": "AbilityScores",
@@ -1477,11 +2667,11 @@
               "fields": {
                 "race": {
                   "$type": "str",
-                  "value": "Dwarf"
+                  "value": "Orc"
                 },
                 "background": {
                   "$type": "str",
-                  "value": "Criminal"
+                  "value": "Ice Fisher"
                 },
                 "classes": {
                   "$type": "list",
@@ -1491,11 +2681,11 @@
                       "fields": {
                         "name": {
                           "$type": "ClassType",
-                          "value": "ROGUE"
+                          "value": "WIZARD"
                         },
                         "level": {
                           "$type": "int",
-                          "value": 1
+                          "value": 2
                         }
                       }
                     }
@@ -1508,19 +2698,19 @@
                 "skills": {
                   "$type": "dict",
                   "value": {
-                    "sleightOfHand": {
+                    "animalHandling": {
                       "$type": "ProficiencyLevel",
                       "value": "PROFICIENT"
                     },
-                    "stealth": {
+                    "athletics": {
                       "$type": "ProficiencyLevel",
-                      "value": "EXPERTISE"
+                      "value": "PROFICIENT"
                     },
-                    "investigation": {
+                    "arcana": {
                       "$type": "ProficiencyLevel",
-                      "value": "EXPERTISE"
+                      "value": "PROFICIENT"
                     },
-                    "acrobatics": {
+                    "religion": {
                       "$type": "ProficiencyLevel",
                       "value": "PROFICIENT"
                     }
@@ -1531,7 +2721,7 @@
                   "items": [
                     {
                       "$type": "str",
-                      "value": "Thieves' Tools"
+                      "value": "Woodcarver's Tools"
                     }
                   ]
                 },
@@ -1573,7 +2763,32 @@
                       "fields": {
                         "id": {
                           "$type": "str",
-                          "value": "dwarfdarkvision"
+                          "value": "orcadrenalineRush"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Adrenaline Rush"
+                        },
+                        "source": {
+                          "$type": "str",
+                          "value": "Orc"
+                        },
+                        "activation": {
+                          "$type": "TimeEconomy",
+                          "value": "BONUS_ACTION"
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "As a Bonus Action, Dash and gain Temporary Hit Points. Uses refresh on a Short or Long Rest."
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SheetFeature",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "orcdarkvision"
                         },
                         "name": {
                           "$type": "str",
@@ -1581,7 +2796,7 @@
                         },
                         "source": {
                           "$type": "str",
-                          "value": "Dwarf"
+                          "value": "Orc"
                         },
                         "activation": {
                           "$type": "TimeEconomy",
@@ -1598,15 +2813,15 @@
                       "fields": {
                         "id": {
                           "$type": "str",
-                          "value": "dwarfdwarvenResilience"
+                          "value": "orcrelentlessEndurance"
                         },
                         "name": {
                           "$type": "str",
-                          "value": "Dwarven Resilience"
+                          "value": "Relentless Endurance"
                         },
                         "source": {
                           "$type": "str",
-                          "value": "Dwarf"
+                          "value": "Orc"
                         },
                         "activation": {
                           "$type": "TimeEconomy",
@@ -1614,57 +2829,7 @@
                         },
                         "description": {
                           "$type": "str",
-                          "value": "You have resistance to Poison damage and advantage on saving throws to avoid or end the Poisoned condition."
-                        }
-                      }
-                    },
-                    {
-                      "$type": "SheetFeature",
-                      "fields": {
-                        "id": {
-                          "$type": "str",
-                          "value": "dwarfdwarvenToughness"
-                        },
-                        "name": {
-                          "$type": "str",
-                          "value": "Dwarven Toughness"
-                        },
-                        "source": {
-                          "$type": "str",
-                          "value": "Dwarf"
-                        },
-                        "activation": {
-                          "$type": "TimeEconomy",
-                          "value": "PASSIVE"
-                        },
-                        "description": {
-                          "$type": "str",
-                          "value": "Your Hit Point maximum increases by 1, and it increases by 1 again whenever you gain a level."
-                        }
-                      }
-                    },
-                    {
-                      "$type": "SheetFeature",
-                      "fields": {
-                        "id": {
-                          "$type": "str",
-                          "value": "dwarfstonecunning"
-                        },
-                        "name": {
-                          "$type": "str",
-                          "value": "Stonecunning"
-                        },
-                        "source": {
-                          "$type": "str",
-                          "value": "Dwarf"
-                        },
-                        "activation": {
-                          "$type": "TimeEconomy",
-                          "value": "BONUS_ACTION"
-                        },
-                        "description": {
-                          "$type": "str",
-                          "value": "As a Bonus Action, gain Tremorsense with a range of 60 feet for 10 minutes. You can use this a number of times equal to your Proficiency Bonus per Long Rest."
+                          "value": "When reduced to 0 Hit Points but not killed outright, drop to 1 Hit Point instead once per Long Rest."
                         }
                       }
                     }
@@ -1678,7 +2843,7 @@
                       "fields": {
                         "id": {
                           "$type": "str",
-                          "value": "criminaltoolProficiency"
+                          "value": "iceFishertoolProficiency"
                         },
                         "name": {
                           "$type": "str",
@@ -1686,7 +2851,7 @@
                         },
                         "source": {
                           "$type": "str",
-                          "value": "Criminal"
+                          "value": "Ice Fisher"
                         },
                         "activation": {
                           "$type": "TimeEconomy",
@@ -1694,18 +2859,1672 @@
                         },
                         "description": {
                           "$type": "str",
-                          "value": "Gain proficiency with Thieves' Tools."
+                          "value": "Gain proficiency with Woodcarver's Tools."
                         }
                       }
                     }
                   ]
                 },
-                "damageResistances": {
+                "spells": {
                   "$type": "list",
                   "items": [
                     {
-                      "$type": "DamageType",
-                      "value": "POISON"
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "FIRE_BOLT"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "FIRE_BOLT"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "EVOCATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 120
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "INSTANTANEOUS"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Sorcerer, Wizard. Casting time: Action. Range: 120 ft. Components: Verbal, Somatic. Duration: Instantaneous."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "MIND_SLIVER"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "MIND_SLIVER"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ENCHANTMENT"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 60
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "ROUND"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Sorcerer, Warlock, Wizard. Casting time: Action. Range: 60 ft. Components: Verbal. Duration: 1 round."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "LIGHT"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "LIGHT"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "EVOCATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "TOUCH"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "HOUR"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Bard, Cleric, Sorcerer, Wizard. Casting time: Action. Range: Touch. Components: Verbal, Material. Duration: 1 hour."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "LONGSTRIDER"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "LONGSTRIDER"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "TRANSMUTATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "TOUCH"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "HOUR"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Bard, Druid, Ranger, Wizard. Casting time: Action. Range: Touch. Components: Verbal, Somatic, Material. Duration: 1 hour."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "PROTECTION_FROM_EVIL_AND_GOOD"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "PROTECTION_FROM_EVIL_AND_GOOD"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "TOUCH"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 10
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Cleric, Druid, Paladin, Warlock, Wizard. Casting time: Action. Range: Touch. Components: Verbal, Somatic, Material. Duration: Up to 10 minutes. Material component has a listed cost. Material component is consumed."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "MAGE_ARMOR"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "MAGE_ARMOR"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "TOUCH"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "HOUR"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 8
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Sorcerer, Wizard. Casting time: Action. Range: Touch. Components: Verbal, Somatic, Material. Duration: 8 hours."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "ICE_KNIFE"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "ICE_KNIFE"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "CONJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 60
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "INSTANTANEOUS"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Druid, Sorcerer, Wizard. Casting time: Action. Range: 60 ft. Components: Somatic, Material. Duration: Instantaneous."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "TASHA_S_HIDEOUS_LAUGHTER"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "TASHA_S_HIDEOUS_LAUGHTER"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ENCHANTMENT"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 30
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Bard, Warlock, Wizard. Casting time: Action. Range: 30 ft. Components: Verbal, Somatic, Material. Duration: Up to 1 minute."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "spellbook": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "ICE_KNIFE"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "ICE_KNIFE"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "CONJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 60
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "INSTANTANEOUS"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Druid, Sorcerer, Wizard. Casting time: Action. Range: 60 ft. Components: Somatic, Material. Duration: Instantaneous."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "MAGE_ARMOR"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "MAGE_ARMOR"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "TOUCH"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "HOUR"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 8
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Sorcerer, Wizard. Casting time: Action. Range: Touch. Components: Verbal, Somatic, Material. Duration: 8 hours."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "PROTECTION_FROM_EVIL_AND_GOOD"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "PROTECTION_FROM_EVIL_AND_GOOD"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "TOUCH"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 10
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Cleric, Druid, Paladin, Warlock, Wizard. Casting time: Action. Range: Touch. Components: Verbal, Somatic, Material. Duration: Up to 10 minutes. Material component has a listed cost. Material component is consumed."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "DETECT_MAGIC"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "DETECT_MAGIC"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "DIVINATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "SELF"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 10
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Bard, Cleric, Druid, Paladin, Ranger, Sorcerer, Warlock, Wizard. Casting time: Action. Range: Self. Components: Verbal, Somatic. Duration: Up to 10 minutes."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "FOG_CLOUD"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "FOG_CLOUD"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "CONJURATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 120
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "HOUR"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Druid, Ranger, Sorcerer, Wizard. Casting time: Action. Range: 120 ft. Components: Verbal, Somatic. Duration: Up to 1 hour."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "EXPEDITIOUS_RETREAT"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "EXPEDITIOUS_RETREAT"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "TRANSMUTATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "BONUS_ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "SELF"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 10
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Sorcerer, Warlock, Wizard. Casting time: Bonus Action. Range: Self. Components: Verbal, Somatic. Duration: Up to 10 minutes."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "TASHA_S_HIDEOUS_LAUGHTER"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "TASHA_S_HIDEOUS_LAUGHTER"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ENCHANTMENT"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 30
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Bard, Warlock, Wizard. Casting time: Action. Range: 30 ft. Components: Verbal, Somatic, Material. Duration: Up to 1 minute."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "LONGSTRIDER"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "LONGSTRIDER"
+                        },
+                        "source": {
+                          "$type": "SpellSource",
+                          "value": "WIZARD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "TRANSMUTATION"
+                        },
+                        "castingAbility": {
+                          "$type": "AbilityType",
+                          "value": "INTELLIGENCE"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "TOUCH"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "HOUR"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Bard, Druid, Ranger, Wizard. Casting time: Action. Range: Touch. Components: Verbal, Somatic, Material. Duration: 1 hour."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "reset": {
+                          "$type": "RestType",
+                          "value": "NONE"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "hitPointIncreases": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "int",
+                      "value": 6
                     }
                   ]
                 },
@@ -1717,11 +4536,11 @@
                       "fields": {
                         "id": {
                           "$type": "str",
-                          "value": "criminalEquipmentPackage"
+                          "value": "woodcarversTools"
                         },
                         "name": {
                           "$type": "str",
-                          "value": "Criminal Equipment Package"
+                          "value": "Woodcarver's Tools"
                         },
                         "equipped": {
                           "$type": "bool",
@@ -1737,7 +4556,457 @@
                         },
                         "notes": {
                           "$type": "str",
-                          "value": "Starting equipment package from background."
+                          "value": "Tool from background equipment."
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "basket"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Basket"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "blockandtackle"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Block and Tackle"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "bucket"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Bucket"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "chain"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Chain"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "huntingtrap"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Hunting Trap"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "net"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Net"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "pole"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Pole"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "rations"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Rations"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 3
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "rope"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Rope"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
+                        },
+                        "itemType": {
+                          "$type": "EquipmentType",
+                          "value": "GEAR"
+                        },
+                        "slot": {
+                          "$type": "EquipmentSlot",
+                          "value": "CARRIED"
+                        },
+                        "armorClass": {
+                          "$type": "int",
+                          "value": 0
+                        },
+                        "armorClassBonus": {
+                          "$type": "int",
+                          "value": 0
+                        }
+                      }
+                    },
+                    {
+                      "$type": "EquipmentItem",
+                      "fields": {
+                        "id": {
+                          "$type": "str",
+                          "value": "travelersclothes"
+                        },
+                        "name": {
+                          "$type": "str",
+                          "value": "Traveler's Clothes"
+                        },
+                        "equipped": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "quantity": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "weight": {
+                          "$type": "float",
+                          "value": 0.0
+                        },
+                        "notes": {
+                          "$type": "str",
+                          "value": ""
                         },
                         "itemType": {
                           "$type": "EquipmentType",
@@ -1758,6 +5027,23 @@
                       }
                     }
                   ]
+                },
+                "purse": {
+                  "$type": "Purse",
+                  "fields": {
+                    "copper": {
+                      "$type": "int",
+                      "value": 0
+                    },
+                    "silver": {
+                      "$type": "int",
+                      "value": 0
+                    },
+                    "gold": {
+                      "$type": "int",
+                      "value": 32
+                    }
+                  }
                 }
               }
             }
