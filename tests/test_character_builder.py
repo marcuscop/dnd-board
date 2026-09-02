@@ -9,15 +9,23 @@ from dnd_board.character_builder import (
     CharacterBuilderOptionField,
     CharacterBuilderPayloadField,
     build_party_member_config,
+    background_skill_proficiency_types,
     character_builder_options,
     character_builder_request_from_payload,
+    class_expertise_from_payload,
+    class_skill_proficiencies_from_payload,
+    fighting_style_from_payload,
     fixed_hit_point_increases,
     fixed_max_hp,
     option_key,
     payload_key,
     selected_tool_from_payload,
+    wizard_cantrips_from_payload,
+    wizard_prepared_spells_from_payload,
+    wizard_spell_entries_from_payload,
+    wizard_spellbook_spells_from_payload,
 )
-from dnd_board.character_sheet import AbilityScores, AbilityType, ClassType, DamageType, EquipmentType, PartyManifest, ProficiencyLevel, RestType, SkillType, SpellId, SpellSource, enum_key, enum_label, typed_json_to_value
+from dnd_board.character_sheet import AbilityScores, AbilityType, ClassType, DamageType, EquipmentType, FightingStyleType, PartyManifest, ProficiencyLevel, RestType, SkillType, SpellId, SpellSource, enum_key, enum_label, typed_json_to_value
 from dnd_board.rules.backgrounds import BackgroundEquipmentChoice, BackgroundFeatureType, BackgroundType, ToolType, background_definition, background_equipment, background_feats, background_skill_proficiencies, background_tool_options
 from dnd_board.rules.feats import GeneralFeatType
 from dnd_board.rules.progression import ProgressionChoiceId
@@ -122,6 +130,16 @@ def test_character_builder_builds_level_one_rogue_with_background_tool_and_packa
             },
             payload_key(CharacterBuilderPayloadField.TOOL_PROFICIENCY): enum_key(ToolType.THIEVES_TOOLS),
             payload_key(CharacterBuilderPayloadField.EQUIPMENT_CHOICE): enum_key(BackgroundEquipmentChoice.PACKAGE),
+            payload_key(CharacterBuilderPayloadField.CLASS_SKILL_PROFICIENCIES): [
+                enum_key(SkillType.SLEIGHT_OF_HAND),
+                enum_key(SkillType.STEALTH),
+                enum_key(SkillType.PERCEPTION),
+                enum_key(SkillType.INVESTIGATION),
+            ],
+            payload_key(CharacterBuilderPayloadField.CLASS_EXPERTISE): [
+                enum_key(SkillType.STEALTH),
+                enum_key(SkillType.PERCEPTION),
+            ],
         },
         default_member_id="player-1",
         default_owner="player-1",
@@ -140,7 +158,12 @@ def test_character_builder_builds_level_one_rogue_with_background_tool_and_packa
     assert member.sheet.race == "Dwarf"
     assert member.sheet.background == "Criminal"
     assert member.sheet.speed == 30
-    assert member.sheet.skills == {enum_key(SkillType.SLEIGHT_OF_HAND): ProficiencyLevel.PROFICIENT, enum_key(SkillType.STEALTH): ProficiencyLevel.PROFICIENT}
+    assert member.sheet.skills == {
+        enum_key(SkillType.SLEIGHT_OF_HAND): ProficiencyLevel.PROFICIENT,
+        enum_key(SkillType.STEALTH): ProficiencyLevel.EXPERTISE,
+        enum_key(SkillType.PERCEPTION): ProficiencyLevel.EXPERTISE,
+        enum_key(SkillType.INVESTIGATION): ProficiencyLevel.PROFICIENT,
+    }
     assert member.sheet.damageResistances == [DamageType.POISON]
     assert member.sheet.proficiencies == ["Thieves' Tools"]
     assert {trait.name for trait in member.sheet.traits or []} >= {enum_label(SpeciesTraitType.DARKVISION), enum_label(SpeciesTraitType.DWARVEN_RESILIENCE), enum_label(SpeciesTraitType.DWARVEN_TOUGHNESS), enum_label(SpeciesTraitType.STONECUNNING)}
@@ -193,7 +216,11 @@ def test_character_builder_applies_species_speed_background_tough_hp_and_gold() 
     assert member.maxHp == fixed_max_hp(ClassType.FIGHTER, 1, AbilityScores(17, 10, 15, 8, 13, 12), SpeciesType.GOLIATH, BackgroundType.FARMER)
     assert member.maxHp == 14
     assert member.sheet.speed == 35
-    assert member.sheet.skills == {enum_key(SkillType.ANIMAL_HANDLING): ProficiencyLevel.PROFICIENT, enum_key(SkillType.NATURE): ProficiencyLevel.PROFICIENT}
+    assert member.sheet.skills == {
+        enum_key(SkillType.ACROBATICS): ProficiencyLevel.PROFICIENT,
+        enum_key(SkillType.ANIMAL_HANDLING): ProficiencyLevel.PROFICIENT,
+        enum_key(SkillType.NATURE): ProficiencyLevel.PROFICIENT,
+    }
     assert member.sheet.proficiencies == ["Carpenter's Tools"]
     assert {feat.name for feat in member.sheet.feats or []} == {enum_label(GeneralFeatType.TOUGH)}
     assert {trait.name for trait in member.sheet.traits or []} >= {enum_label(SpeciesTraitType.GIANT_ANCESTRY), enum_label(SpeciesTraitType.LARGE_FORM), enum_label(SpeciesTraitType.POWERFUL_BUILD)}
@@ -245,6 +272,68 @@ def test_character_builder_adds_magic_initiate_spells_from_background() -> None:
     assert member.sheet.resources is not None
     assert [(resource.id, resource.currentUses, resource.maxUses, resource.reset) for resource in member.sheet.resources] == [
         ("magicInitiateMagicMissileFreeCast", 1, 1, RestType.LONG_REST)
+    ]
+
+
+def test_character_builder_builds_level_one_wizard_spellbook_and_prepared_spells() -> None:
+    payload = valid_character_builder_payload()
+    payload[payload_key(CharacterBuilderPayloadField.CLASS_NAME)] = enum_key(ClassType.WIZARD)
+    payload[payload_key(CharacterBuilderPayloadField.BACKGROUND)] = enum_key(BackgroundType.SAGE)
+    payload[payload_key(CharacterBuilderPayloadField.BACKGROUND_ABILITY_INCREASES)] = {
+        enum_key(AbilityType.INTELLIGENCE): 2,
+        enum_key(AbilityType.WISDOM): 1,
+    }
+    payload[payload_key(CharacterBuilderPayloadField.CLASS_SKILL_PROFICIENCIES)] = [
+        enum_key(SkillType.ARCANA),
+        enum_key(SkillType.INVESTIGATION),
+    ]
+    payload[payload_key(CharacterBuilderPayloadField.MAGIC_INITIATE_SPELLS)] = [
+        enum_key(SpellId.PRESTIDIGITATION),
+        enum_key(SpellId.MINOR_ILLUSION),
+        enum_key(SpellId.MAGIC_MISSILE),
+    ]
+    payload[payload_key(CharacterBuilderPayloadField.WIZARD_CANTRIPS)] = [
+        enum_key(SpellId.MAGE_HAND),
+        enum_key(SpellId.FIRE_BOLT),
+        enum_key(SpellId.LIGHT),
+    ]
+    payload[payload_key(CharacterBuilderPayloadField.WIZARD_SPELLBOOK_SPELLS)] = [
+        enum_key(SpellId.MAGIC_MISSILE),
+        enum_key(SpellId.SHIELD),
+        enum_key(SpellId.DETECT_MAGIC),
+        enum_key(SpellId.SLEEP),
+        enum_key(SpellId.FEATHER_FALL),
+        enum_key(SpellId.MAGE_ARMOR),
+    ]
+    payload[payload_key(CharacterBuilderPayloadField.WIZARD_PREPARED_SPELLS)] = [
+        enum_key(SpellId.MAGIC_MISSILE),
+        enum_key(SpellId.SHIELD),
+        enum_key(SpellId.DETECT_MAGIC),
+        enum_key(SpellId.SLEEP),
+    ]
+    request = character_builder_request_from_payload(payload, default_member_id="player-1", default_owner="player-1")
+    member = build_party_member_config(request)
+
+    assert member.sheet.spellbook is not None
+    assert [spell.id for spell in member.sheet.spellbook] == [
+        SpellId.MAGIC_MISSILE,
+        SpellId.SHIELD,
+        SpellId.DETECT_MAGIC,
+        SpellId.SLEEP,
+        SpellId.FEATHER_FALL,
+        SpellId.MAGE_ARMOR,
+    ]
+    assert member.sheet.spells is not None
+    assert [spell.id for spell in member.sheet.spells if spell.source == SpellSource.WIZARD and spell.level == 0] == [
+        SpellId.MAGE_HAND,
+        SpellId.FIRE_BOLT,
+        SpellId.LIGHT,
+    ]
+    assert [spell.id for spell in member.sheet.spells if spell.source == SpellSource.WIZARD and spell.level > 0] == [
+        SpellId.MAGIC_MISSILE,
+        SpellId.SHIELD,
+        SpellId.DETECT_MAGIC,
+        SpellId.SLEEP,
     ]
 
 
@@ -309,23 +398,11 @@ def test_character_builder_created_fighter_can_choose_class_skills(tmp_path, mon
 
     assert create_response.status_code == 200
     created_sheet = next(sheet for sheet in create_response.json()["sheets"] if sheet["id"] == "player-5")
-    assert created_sheet["pendingChoices"][0]["id"] == ProgressionChoiceId.FIGHTER_SKILL_PROFICIENCIES.value
-    assert created_sheet["pendingChoices"][0]["choiceType"] == "skillProficiencies"
-    assert created_sheet["pendingChoices"][0]["minimum"] == 2
-    assert created_sheet["pendingChoices"][0]["maximum"] == 2
-    assert created_sheet["pendingChoices"][0]["selected"] == [enum_key(SkillType.ANIMAL_HANDLING)]
-
-    skill_response = client.post(
-        f"/api/rooms/fighter-skill-campaign/sheet/player-5/choices/{ProgressionChoiceId.FIGHTER_SKILL_PROFICIENCIES.value}?playerKey=dm",
-        json={"values": [enum_key(SkillType.ANIMAL_HANDLING), enum_key(SkillType.ATHLETICS)]},
-    )
-
-    assert skill_response.status_code == 200
-    skill_sheet = skill_response.json()["sheet"]
-    skill_proficiencies = {skill["name"]: skill["proficiency"] for skill in skill_sheet["skills"]}
+    skill_proficiencies = {skill["name"]: skill["proficiency"] for skill in created_sheet["skills"]}
     assert skill_proficiencies[enum_key(SkillType.ANIMAL_HANDLING)] == "proficient"
-    assert skill_proficiencies[enum_key(SkillType.ATHLETICS)] == "proficient"
-    assert skill_sheet["pendingChoices"][0]["id"] == ProgressionChoiceId.FIGHTER_FIGHTING_STYLES.value
+    assert skill_proficiencies[enum_key(SkillType.ACROBATICS)] == "proficient"
+    assert created_sheet["classes"][0]["fightingStyles"] == [enum_key(FightingStyleType.ARCHERY)]
+    assert created_sheet["pendingChoices"] == []
 
 
 def test_character_builder_supports_point_buy_and_random_score_methods() -> None:
@@ -415,11 +492,7 @@ def test_character_builder_create_endpoint_writes_room_campaign_manifest(tmp_pat
     assert sheet["background"] == "Criminal"
     assert sheet["characterClass"] == {"name": "rogue", "nameLabel": "Rogue", "level": 1}
     assert "subclass" not in sheet["classes"][0]
-    assert sheet["pendingChoices"][0]["id"] == ProgressionChoiceId.ROGUE_SKILL_PROFICIENCIES.value
-    assert sheet["pendingChoices"][0]["choiceType"] == "skillProficiencies"
-    assert sheet["pendingChoices"][0]["minimum"] == 4
-    assert sheet["pendingChoices"][0]["maximum"] == 4
-    assert sheet["pendingChoices"][0]["selected"] == [enum_key(SkillType.SLEIGHT_OF_HAND), enum_key(SkillType.STEALTH)]
+    assert sheet["pendingChoices"] == []
 
     manifest_path = tmp_path / "builder-campaign" / "party" / "party.json"
     manifest = typed_json_to_value(json.loads(manifest_path.read_text(encoding="utf-8")), PartyManifest)
@@ -454,31 +527,13 @@ def test_character_builder_created_rogue_can_choose_class_skills_and_expertise(t
     )
 
     assert create_response.status_code == 200
-    skill_response = client.post(
-        f"/api/rooms/rogue-skill-campaign/sheet/player-5/choices/{ProgressionChoiceId.ROGUE_SKILL_PROFICIENCIES.value}?playerKey=dm",
-        json={"values": [enum_key(SkillType.SLEIGHT_OF_HAND), enum_key(SkillType.STEALTH), enum_key(SkillType.PERCEPTION), enum_key(SkillType.INVESTIGATION)]},
-    )
-
-    assert skill_response.status_code == 200
-    skill_sheet = skill_response.json()["sheet"]
-    assert skill_sheet["pendingChoices"][0]["id"] == ProgressionChoiceId.ROGUE_EXPERTISE.value
-    assert skill_sheet["pendingChoices"][0]["choiceType"] == "expertise"
-    assert skill_sheet["pendingChoices"][0]["minimum"] == 2
-    assert skill_sheet["pendingChoices"][0]["maximum"] == 2
-    assert {option["value"] for option in skill_sheet["pendingChoices"][0]["options"]} >= {enum_key(SkillType.SLEIGHT_OF_HAND), enum_key(SkillType.STEALTH), enum_key(SkillType.PERCEPTION), enum_key(SkillType.INVESTIGATION)}
-
-    expertise_response = client.post(
-        f"/api/rooms/rogue-skill-campaign/sheet/player-5/choices/{ProgressionChoiceId.ROGUE_EXPERTISE.value}?playerKey=dm",
-        json={"values": [enum_key(SkillType.STEALTH), enum_key(SkillType.PERCEPTION)]},
-    )
-
-    assert expertise_response.status_code == 200
-    expertise_sheet = expertise_response.json()["sheet"]
-    skill_proficiencies = {skill["name"]: skill["proficiency"] for skill in expertise_sheet["skills"]}
-    assert skill_proficiencies[enum_key(SkillType.STEALTH)] == "expertise"
-    assert skill_proficiencies[enum_key(SkillType.PERCEPTION)] == "expertise"
-    assert skill_proficiencies[enum_key(SkillType.INVESTIGATION)] == "proficient"
-    assert expertise_sheet["pendingChoices"] == []
+    sheet = next(sheet for sheet in create_response.json()["sheets"] if sheet["id"] == "player-5")
+    skill_proficiencies = {skill["name"]: skill["proficiency"] for skill in sheet["skills"]}
+    assert skill_proficiencies[enum_key(SkillType.ACROBATICS)] == "expertise"
+    assert skill_proficiencies[enum_key(SkillType.ATHLETICS)] == "expertise"
+    assert skill_proficiencies[enum_key(SkillType.SLEIGHT_OF_HAND)] == "proficient"
+    assert skill_proficiencies[enum_key(SkillType.STEALTH)] == "proficient"
+    assert sheet["pendingChoices"] == []
 
 
 def test_player_slot_url_can_create_character_for_empty_slot(tmp_path, monkeypatch) -> None:
@@ -681,6 +736,74 @@ def test_character_builder_non_magic_background_ignores_magic_initiate_payload_a
     request = character_builder_request_from_payload(payload, default_member_id="player-1", default_owner="player-1")
 
     assert request.magic_initiate_spells == ()
+
+
+def test_character_builder_defaults_level_one_class_choices() -> None:
+    wizard_payload = valid_character_builder_payload()
+    wizard_payload[payload_key(CharacterBuilderPayloadField.CLASS_NAME)] = enum_key(ClassType.WIZARD)
+    wizard_request = character_builder_request_from_payload(wizard_payload, default_member_id="player-1", default_owner="player-1")
+
+    assert wizard_request.class_skill_proficiencies == (SkillType.ARCANA, SkillType.HISTORY)
+    assert wizard_request.wizard_cantrips == (SpellId.ACID_SPLASH, SpellId.BLADE_WARD, SpellId.CHILL_TOUCH)
+    assert len(wizard_request.wizard_spellbook_spells) == 6
+    assert wizard_request.wizard_prepared_spells == wizard_request.wizard_spellbook_spells[:4]
+    assert class_skill_proficiencies_from_payload(
+        ClassType.FIGHTER,
+        [enum_key(SkillType.ACROBATICS), enum_key(SkillType.ACROBATICS), enum_key(SkillType.ATHLETICS)],
+    ) == (SkillType.ACROBATICS, SkillType.ATHLETICS)
+    assert fighting_style_from_payload(ClassType.ROGUE, None) is None
+    assert fighting_style_from_payload(ClassType.FIGHTER, enum_key(FightingStyleType.DEFENSE)) == FightingStyleType.DEFENSE
+    assert wizard_cantrips_from_payload(ClassType.ROGUE, []) == ()
+    assert wizard_spellbook_spells_from_payload(ClassType.ROGUE, []) == ()
+    assert wizard_prepared_spells_from_payload(ClassType.ROGUE, [], ()) == ()
+
+
+def test_character_builder_rejects_invalid_level_one_class_choices() -> None:
+    with pytest.raises(ValueError, match="class skill proficiencies"):
+        class_skill_proficiencies_from_payload(ClassType.FIGHTER, "bad")
+    with pytest.raises(ValueError, match="valid skills"):
+        class_skill_proficiencies_from_payload(ClassType.FIGHTER, ["bad", enum_key(SkillType.ATHLETICS)])
+    with pytest.raises(ValueError, match="Choose 2 class skill"):
+        class_skill_proficiencies_from_payload(ClassType.FIGHTER, [enum_key(SkillType.ATHLETICS)])
+    with pytest.raises(ValueError, match="valid class skill"):
+        class_skill_proficiencies_from_payload(ClassType.FIGHTER, [enum_key(SkillType.ARCANA), enum_key(SkillType.ATHLETICS)])
+    with pytest.raises(ValueError, match="Rogue Expertise skills"):
+        class_expertise_from_payload(ClassType.ROGUE, "bad", BackgroundType.CRIMINAL, (SkillType.STEALTH, SkillType.PERCEPTION))
+    with pytest.raises(ValueError, match="Choose 2 Rogue Expertise"):
+        class_expertise_from_payload(ClassType.ROGUE, [enum_key(SkillType.STEALTH)], BackgroundType.CRIMINAL, (SkillType.STEALTH, SkillType.PERCEPTION))
+    with pytest.raises(ValueError, match="requires a skill proficiency"):
+        class_expertise_from_payload(ClassType.ROGUE, [enum_key(SkillType.ARCANA), enum_key(SkillType.RELIGION)], BackgroundType.CRIMINAL, (SkillType.STEALTH, SkillType.PERCEPTION))
+    with pytest.raises(ValueError, match="Fighter Fighting Style"):
+        fighting_style_from_payload(ClassType.FIGHTER, "bad")
+    with pytest.raises(ValueError, match="Wizard spells"):
+        wizard_spell_entries_from_payload("bad")
+    with pytest.raises(ValueError, match="valid Wizard spells"):
+        wizard_spell_entries_from_payload(["bad"])
+    with pytest.raises(ValueError, match="valid Wizard spells"):
+        wizard_spell_entries_from_payload([enum_key(SpellId.CURE_WOUNDS)])
+    with pytest.raises(ValueError, match="each Wizard spell once"):
+        wizard_spell_entries_from_payload([enum_key(SpellId.MAGE_HAND), enum_key(SpellId.MAGE_HAND)])
+    with pytest.raises(ValueError, match="Wizard cantrips"):
+        wizard_cantrips_from_payload(ClassType.WIZARD, [enum_key(SpellId.MAGE_HAND), enum_key(SpellId.FIRE_BOLT), enum_key(SpellId.MAGIC_MISSILE)])
+    with pytest.raises(ValueError, match="spellbook"):
+        wizard_spellbook_spells_from_payload(ClassType.WIZARD, [enum_key(SpellId.MAGIC_MISSILE)])
+    with pytest.raises(ValueError, match="prepared Wizard"):
+        wizard_prepared_spells_from_payload(ClassType.WIZARD, [enum_key(SpellId.MAGE_HAND), enum_key(SpellId.FIRE_BOLT), enum_key(SpellId.LIGHT), enum_key(SpellId.MENDING)], (SpellId.MAGE_HAND,))
+    with pytest.raises(ValueError, match="must be in your spellbook"):
+        wizard_prepared_spells_from_payload(
+            ClassType.WIZARD,
+            [enum_key(SpellId.MAGIC_MISSILE), enum_key(SpellId.SHIELD), enum_key(SpellId.DETECT_MAGIC), enum_key(SpellId.SLEEP)],
+            (SpellId.MAGIC_MISSILE, SpellId.SHIELD, SpellId.DETECT_MAGIC, SpellId.FEATHER_FALL),
+        )
+
+
+def test_background_skill_proficiency_types_ignores_invalid_or_nonproficient_entries(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "dnd_board.character_builder.background_skill_proficiencies",
+        lambda _background: {"arcana": ProficiencyLevel.PROFICIENT, "bad": ProficiencyLevel.PROFICIENT, "history": ProficiencyLevel.EXPERTISE},
+    )
+
+    assert background_skill_proficiency_types(BackgroundType.SAGE) == [SkillType.ARCANA]
 
 
 def test_character_builder_default_tool_and_fixed_hp_edge_branches(monkeypatch) -> None:

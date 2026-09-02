@@ -281,7 +281,19 @@ def rogue_subclass_resources(classes: list[CharacterClassLevel], ability_scores:
     if subclass == RogueSubclassType.ARCANE_TRICKSTER and rogue_level_value >= 3:
         progression = arcane_trickster_spellcasting(rogue_level_value)
         for resource_type, slot_level, max_uses in arcane_trickster_spell_slot_resources(progression):
-            resources.append(ResourceTracker(enum_key(resource_type), enum_label(resource_type), max_uses, max_uses, RestType.LONG_REST, TimeEconomy.ACTION, f"Spend to cast an Arcane Trickster spell using a level {slot_level} spell slot.", source=enum_label(RogueSubclassType.ARCANE_TRICKSTER)))
+            resources.append(
+                ResourceTracker(
+                    id=enum_key(resource_type),
+                    name=enum_label(resource_type),
+                    currentUses=max_uses,
+                    maxUses=max_uses,
+                    reset=RestType.LONG_REST,
+                    activation=TimeEconomy.ACTION,
+                    description=f"Spend to cast an Arcane Trickster spell using a level {slot_level} spell slot.",
+                    source=enum_label(RogueSubclassType.ARCANE_TRICKSTER),
+                    spellSlotLevel=slot_level,
+                )
+            )
     if subclass == RogueSubclassType.ARCANE_TRICKSTER and rogue_level_value >= 17:
         resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.SPELL_THIEF), enum_label(RogueSubclassResourceType.SPELL_THIEF), 1, 1, RestType.LONG_REST, TimeEconomy.REACTION, "Negate and steal a spell that targets you or includes you in its area after the caster fails an Intelligence save.", source=enum_label(RogueSubclassType.ARCANE_TRICKSTER)))
     if subclass == RogueSubclassType.PHANTOM and rogue_level_value >= 3:

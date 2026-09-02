@@ -1239,6 +1239,7 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                     activation=TimeEconomy.ACTION,
                     description=f"Spend to cast an Eldritch Knight spell using a level {slot_level} spell slot.",
                     source=enum_label(FighterSubclassType.ELDRITCH_KNIGHT),
+                    spellSlotLevel=slot_level,
                 )
             )
     if subclass == FighterSubclassType.ARCANE_ARCHER and fighter_level_value >= 3:

@@ -14,6 +14,7 @@ from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, R
 from dnd_board.rules.classes.rogue.base import RogueSubclassType
 from dnd_board.rules.feats import general_feat_feature
 from dnd_board.rules.sources import RuleSource, rule_source_label
+from dnd_board.rules.spells import spell_entry, wizard_spell_entry
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -46,6 +47,7 @@ from dnd_board.character_sheet import (
     RestType,
     SheetSectionType,
     SkillType,
+    SpellId,
     SpellSource,
     TimeEconomy,
     WeaponCategory,
@@ -1177,6 +1179,183 @@ def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
     assert dm_socket.messages[0]["roll"] == own_roll_body
     assert dm_socket.messages[0]["logEntry"]["roll"] == own_roll_body
     assert player_socket.messages[0] == dm_socket.messages[0]
+
+
+def test_player_can_roll_fire_bolt_spell_attack_and_scaled_damage(tmp_path, monkeypatch) -> None:
+    fire_bolt = spell_entry(SpellId.FIRE_BOLT)
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    assert fire_bolt is not None
+    assert burning_hands is not None
+    write_party_campaign(
+        tmp_path,
+        "spell-roll-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Evoker",
+            maxHp=44,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[fire_bolt, burning_hands]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Dodger",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=5)], savingThrowProficiencies=[AbilityType.DEXTERITY]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4 if maximum in (6, 10) else 12)
+    client = TestClient(server.app)
+
+    attack = client.post("/api/rooms/spell-roll-test/sheet/player-1/spells/fireBolt/rolls/attack?playerKey=player-1")
+    damage = client.post("/api/rooms/spell-roll-test/sheet/player-1/spells/fireBolt/rolls/damage?playerKey=player-1")
+    burning_hands_damage = client.post("/api/rooms/spell-roll-test/sheet/player-1/spells/burningHands/rolls/damage?playerKey=player-1&spellSlotLevel=3")
+    unavailable_slot = client.post("/api/rooms/spell-roll-test/sheet/player-1/spells/burningHands/rolls/damage?playerKey=player-1&spellSlotLevel=4")
+    too_low_slot = client.post("/api/rooms/spell-roll-test/sheet/player-1/spells/burningHands/rolls/damage?playerKey=player-1&spellSlotLevel=0")
+    missing_spell = client.post("/api/rooms/spell-roll-test/sheet/player-1/spells/missing/rolls/damage?playerKey=player-1")
+
+    assert attack.status_code == 200
+    assert damage.status_code == 200
+    assert burning_hands_damage.status_code == 200
+    assert unavailable_slot.status_code == 400
+    assert too_low_slot.status_code == 400
+    assert missing_spell.status_code == 404
+    attack_roll = attack.json()["roll"]
+    damage_roll = damage.json()["roll"]
+    assert attack_roll["source"] == {
+        "section": "spells",
+        "sectionLabel": "Spells",
+        "sourceId": "fireBolt",
+        "actionId": "attackVsArmorClass",
+    }
+    assert attack_roll["label"] == "Spell Attack"
+    assert attack_roll["modifier"] == 7
+    assert attack_roll["total"] == 19
+    assert attack_roll["damageType"] == "fire"
+    assert damage_roll["source"] == {
+        "section": "spells",
+        "sectionLabel": "Spells",
+        "sourceId": "fireBolt",
+        "actionId": "damage-0",
+    }
+    assert damage_roll["label"] == "Spell Damage"
+    assert damage_roll["die"] == "2d10"
+    assert damage_roll["total"] == 8
+    assert damage_roll["damageType"] == "fire"
+    burning_hands_roll = burning_hands_damage.json()["roll"]
+    assert burning_hands_roll["source"]["sourceId"] == "burningHands"
+    assert burning_hands_roll["source"]["actionId"] == "damage-0-slot-3"
+    assert burning_hands_roll["die"] == "5d6"
+    assert burning_hands_roll["total"] == 20
+    assert burning_hands_roll["damageType"] == "fire"
+    assert burning_hands_roll["damageSavingThrow"] == "dexterity"
+    assert burning_hands_roll["damageSaveDc"] == 15
+    assert burning_hands_roll["damageSaveOutcome"] == "halfDamage"
+
+    resolution = client.post(f"/api/rooms/spell-roll-test/rolls/{burning_hands_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    dodger = client.get("/api/rooms/spell-roll-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    resolution_body = resolution.json()["resolution"]
+
+    assert resolution.status_code == 200
+    assert dodger["hp"] == {"current": 20, "max": 30, "temporary": 0}
+    assert "passes DC 15 Dexterity save for half damage" in resolution_body["outcome"]
+    assert resolution_body["responseRolls"][0]["label"] == "Dexterity Save"
+    assert resolution_body["responseRolls"][0]["total"] == 18
+
+
+def test_player_can_roll_tashas_hideous_laughter_effect_and_dm_can_preserve_roll(tmp_path, monkeypatch) -> None:
+    tasha = wizard_spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
+    assert tasha is not None
+    assert tasha.effects is not None
+    stale_tasha = replace(
+        tasha,
+        effects=[
+            replace(
+                tasha.effects[0],
+                conditions=[
+                    replace(condition, removalTrigger=None, removalAdvantage=False)
+                    for condition in tasha.effects[0].conditions or []
+                ],
+            )
+        ],
+    )
+    write_party_campaign(
+        tmp_path,
+        "tasha-effect-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Enchanter",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)],
+                spells=[stale_tasha],
+                attacks=[
+                    AttackAction(
+                        "staff",
+                        "Quarterstaff",
+                        AbilityType.STRENGTH,
+                        1,
+                        DiceType.D6,
+                        damageType=DamageType.BLUDGEONING,
+                    )
+                ],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=12, intelligence=10, wisdom=8, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    server_rolls = iter([1, 2, 20])
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(server_rolls) if maximum == 20 else 4)
+    client = TestClient(server.app)
+
+    effect_response = client.post("/api/rooms/tasha-effect-test/sheet/player-1/spells/tashaSHideousLaughter/rolls/effect?playerKey=player-1")
+
+    assert effect_response.status_code == 200
+    effect_roll = effect_response.json()["roll"]
+    assert effect_roll["source"]["sourceId"] == "tashaSHideousLaughter"
+    assert effect_roll["source"]["actionId"] == "condition-0"
+    assert effect_roll["label"] == "Spell Effect"
+    assert [effect["condition"] for effect in effect_roll["conditionEffects"]] == ["prone", "incapacitated"]
+    assert {effect["savingThrow"] for effect in effect_roll["conditionEffects"]} == {"wisdom"}
+    assert {effect["saveDc"] for effect in effect_roll["conditionEffects"]} == {15}
+
+    resolution = client.post(
+        f"/api/rooms/tasha-effect-test/rolls/{effect_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2&preserveRoll=true"
+    )
+    target = client.get("/api/rooms/tasha-effect-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    pending = client.get("/api/rooms/tasha-effect-test/sheet?playerKey=dm").json()["pendingRolls"]
+    resolution_body = resolution.json()["resolution"]
+
+    assert resolution.status_code == 200
+    assert set(target["conditions"]) >= {"prone", "incapacitated"}
+    assert "fails DC 15 Wisdom save and gains Prone, and Incapacitated" in resolution_body["outcome"]
+    assert len(resolution_body["responseRolls"]) == 1
+    assert resolution_body["responseRolls"][0]["label"] == "Wisdom Save"
+    assert resolution_body["responseRolls"][0]["total"] == 0
+    assert effect_roll["id"] in {roll["id"] for roll in pending}
+    assert any(roll["label"] == "Wisdom Save" for roll in pending)
+
+    damage_response = client.post("/api/rooms/tasha-effect-test/sheet/player-1/rolls/damage?playerKey=player-1&attackId=staff")
+    damage_roll = damage_response.json()["roll"]
+    damage_resolution = client.post(f"/api/rooms/tasha-effect-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    cleared_target = client.get("/api/rooms/tasha-effect-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    damage_resolution_body = damage_resolution.json()["resolution"]
+
+    assert damage_response.status_code == 200
+    assert damage_resolution.status_code == 200
+    assert set(cleared_target["conditions"]).isdisjoint({"prone", "incapacitated"})
+    assert "passes DC 15 Wisdom save with Advantage after taking damage and ends Prone, and Incapacitated" in damage_resolution_body["outcome"]
+    assert damage_resolution_body["responseRolls"][0]["dice"] == [2, 20]
+    assert damage_resolution_body["responseRolls"][0]["die"] == "2d20kh1"
+    assert damage_resolution_body["responseRolls"][0]["total"] == 19
 
 
 def test_player_can_roll_ability_check_and_saving_throw(tmp_path, monkeypatch) -> None:

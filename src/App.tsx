@@ -8,6 +8,7 @@ const DEFAULT_BOARD_HEIGHT = 720;
 const MOVE_FPS = 12;
 const FOG_PAINT_FPS = 16;
 const FOG_MIN_POINT_DISTANCE = 8;
+const SHEET_SYNC_INTERVAL_MS = 10000;
 const MIN_TOKEN_RADIUS = 8;
 const MAX_TOKEN_RADIUS = 480;
 const WS_URL = import.meta.env.VITE_WS_URL ?? getDefaultWebSocketUrl();
@@ -87,6 +88,7 @@ export function App() {
   const canvasHoverRef = useRef<BrushPreview | null>(null);
   const dragRef = useRef<{ tokenId: string; lastSentAt: number } | null>(null);
   const fogPaintRef = useRef<{ lastSentAt: number; lastX: number; lastY: number; radius: number } | null>(null);
+  const sheetLoadInFlightRef = useRef(false);
   const pendingTokenRadiiRef = useRef<Map<string, number>>(new Map());
   const pendingResizeRequestsRef = useRef<Set<Promise<void>>>(new Set());
   const [players, setPlayers] = useState<PlayerSummary[]>([]);
@@ -212,7 +214,12 @@ export function App() {
       }
 
       if (message.type === "roll_resolved") {
-        setRolls((current) => (message.resolution.responseRolls ?? []).reduce(upsertPendingRoll, current.filter((roll) => roll.id !== message.rollId)));
+        setRolls((current) =>
+          (message.resolution.responseRolls ?? []).reduce(
+            upsertPendingRoll,
+            message.preserveRoll ? current : current.filter((roll) => roll.id !== message.rollId)
+          )
+        );
         setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
         setSheets((current) => applyResolvedRollToSheetState(current, message.resolution));
         return;
@@ -226,8 +233,10 @@ export function App() {
     return () => socket.close();
   }, [applyRoomState]);
 
-  const loadSheets = useCallback(async () => {
-    setSheetStatus("loading");
+  const loadSheets = useCallback(async (showLoading = true) => {
+    if (sheetLoadInFlightRef.current) return;
+    sheetLoadInFlightRef.current = true;
+    if (showLoading) setSheetStatus("loading");
     try {
       const response = await fetch(`/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet?playerKey=${encodeURIComponent(playerKey)}`);
       if (!response.ok) {
@@ -242,13 +251,15 @@ export function App() {
     } catch (error) {
       console.error(error);
       setSheetStatus("error");
+    } finally {
+      sheetLoadInFlightRef.current = false;
     }
   }, [playerKey]);
 
   useEffect(() => {
     if (view !== "sheet") return;
     void loadSheets();
-    const intervalId = window.setInterval(() => void loadSheets(), 1500);
+    const intervalId = window.setInterval(() => void loadSheets(false), SHEET_SYNC_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
   }, [loadSheets, view]);
 
@@ -688,6 +699,52 @@ export function App() {
     [loadSheets, playerKey]
   );
 
+  const rollSpellAttack = useCallback(
+    async (sheet: CharacterSheet, spellId: string) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/attack?playerKey=${encodeURIComponent(playerKey)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      await loadSheets();
+    },
+    [loadSheets, playerKey]
+  );
+
+  const rollSpellDamage = useCallback(
+    async (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => {
+      const slotQuery = spellSlotLevel === undefined ? "" : `&spellSlotLevel=${encodeURIComponent(spellSlotLevel)}`;
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/damage?playerKey=${encodeURIComponent(playerKey)}&effectIndex=${encodeURIComponent(effectIndex)}${slotQuery}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      await loadSheets();
+    },
+    [loadSheets, playerKey]
+  );
+
+  const rollSpellEffect = useCallback(
+    async (sheet: CharacterSheet, spellId: string, effectIndex: number) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/effect?playerKey=${encodeURIComponent(playerKey)}&effectIndex=${encodeURIComponent(effectIndex)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      await loadSheets();
+    },
+    [loadSheets, playerKey]
+  );
+
   const updateResource = useCallback(
     async (sheet: CharacterSheet, resourceId: string, currentUses: number) => {
       const response = await fetch(
@@ -847,6 +904,9 @@ export function App() {
         onRollAbilityCheck={rollAbilityCheck}
         onRollResourceAction={rollResourceAction}
         onRollSavingThrow={rollSavingThrow}
+        onRollSpellAttack={rollSpellAttack}
+        onRollSpellDamage={rollSpellDamage}
+        onRollSpellEffect={rollSpellEffect}
         onClearSheetRolls={clearSheetRolls}
         onRestSheets={restSheets}
         onUpdateProgressionChoice={updateProgressionChoice}
@@ -1037,6 +1097,9 @@ type SheetViewProps = {
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, abilityId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
+  onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
+  onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
+  onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onRestSheets: (rest: "short" | "long") => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateCondition: (sheet: CharacterSheet, condition: ConditionType, active: boolean) => void;
@@ -1051,7 +1114,7 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollSpellEffect, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -1063,14 +1126,14 @@ function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onCle
   const canDropRoll = isDm && isTargetableRoll(draggingRoll);
 
   const applyRollToSheet = useCallback(
-    async (rollId: string, target: CharacterSheet) => {
+    async (rollId: string, target: CharacterSheet, preserveRoll = false) => {
       if (!isTargetableRoll(rolls.find((roll) => roll.id === rollId))) {
         setDraggingRollId(null);
         setDropTargetSheetId(null);
         return;
       }
       try {
-        const params = new URLSearchParams({ playerKey, targetSheetId: target.id });
+        const params = new URLSearchParams({ playerKey, targetSheetId: target.id, preserveRoll: String(preserveRoll) });
         const response = await fetch(`/api/rooms/${encodeURIComponent(getInitialRoomId())}/rolls/${encodeURIComponent(rollId)}/resolve?${params}`, {
           method: "POST"
         });
@@ -1130,6 +1193,9 @@ function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onCle
           onRollDamage={onRollDamage}
           onRollResourceAction={onRollResourceAction}
           onRollSavingThrow={onRollSavingThrow}
+          onRollSpellAttack={onRollSpellAttack}
+          onRollSpellDamage={onRollSpellDamage}
+          onRollSpellEffect={onRollSpellEffect}
           onUpdateProgressionChoice={onUpdateProgressionChoice}
           onUpdateCondition={onUpdateCondition}
           onUpdateEquipmentSlot={onUpdateEquipmentSlot}
@@ -1222,6 +1288,7 @@ function CharacterBuilderPanel({
   const [saving, setSaving] = useState(false);
   const memberOptions = useMemo(() => characterBuilderMemberOptions(isDm, playerKey, sheets), [isDm, playerKey, sheets]);
   const [draft, setDraft] = useState<CharacterBuilderDraft>(() => defaultCharacterBuilderDraft(memberOptions[0]?.value ?? playerKey));
+  const classDetail = options?.classDetails[draft.className];
   const backgroundDetail = options?.backgroundDetails[draft.background];
   const selectedToolDetail = draft.toolProficiency ? options?.toolDetails[draft.toolProficiency] : undefined;
   const magicInitiateChoices = backgroundDetail?.magicInitiateSpellChoices;
@@ -1272,6 +1339,21 @@ function CharacterBuilderPanel({
       return;
     }
     setDraft((current) => normalizeCharacterBuilderDraft({ ...current, background }, options));
+  };
+  const updateClass = (className: string) => {
+    if (!options) {
+      updateDraft({ className });
+      return;
+    }
+    setDraft((current) => normalizeCharacterBuilderDraft({ ...current, className }, options));
+  };
+  const updateStringList = (field: keyof Pick<CharacterBuilderDraft, "classSkillProficiencies" | "classExpertise" | "wizardCantrips" | "wizardSpellbookSpells" | "wizardPreparedSpells">, index: number, value: string) => {
+    if (!options) return;
+    setDraft((current) => {
+      const next = [...current[field]];
+      next[index] = value;
+      return normalizeCharacterBuilderDraft({ ...current, [field]: next }, options);
+    });
   };
   const updateIncreaseMode = (mode: "twoOne" | "oneEach") => {
     if (!backgroundDetail) return;
@@ -1354,7 +1436,7 @@ function CharacterBuilderPanel({
           </label>
           <label>
             Class
-            <select value={draft.className} onChange={(event) => updateDraft({ className: event.currentTarget.value })}>
+            <select value={draft.className} onChange={(event) => updateClass(event.currentTarget.value)}>
               {options.classes.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -1457,6 +1539,93 @@ function CharacterBuilderPanel({
               </div>
             </div>
           )}
+          {classDetail && classDetail.skillProficiencies.maximum > 0 && (
+            <div className="builder-spell-choices">
+              <div className="builder-subsection-title">Class Skills</div>
+              {Array.from({ length: classDetail.skillProficiencies.maximum }).map((_, index) => (
+                <label key={`class-skill-${index}`}>
+                  Skill {index + 1}
+                  <select value={draft.classSkillProficiencies[index] ?? ""} onChange={(event) => updateStringList("classSkillProficiencies", index, event.currentTarget.value)}>
+                    {(classDetail.skillProficiencies.options ?? []).map((option) => (
+                      <option key={option.value} value={option.value} disabled={draft.classSkillProficiencies.includes(option.value) && draft.classSkillProficiencies[index] !== option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
+          {classDetail && classDetail.fightingStyles.maximum > 0 && (
+            <label>
+              Fighting Style
+              <select value={draft.fightingStyle} onChange={(event) => updateDraft({ fightingStyle: event.currentTarget.value })}>
+                {(classDetail.fightingStyles.options ?? []).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {classDetail && classDetail.expertise.maximum > 0 && (
+            <div className="builder-spell-choices">
+              <div className="builder-subsection-title">Expertise</div>
+              {Array.from({ length: classDetail.expertise.maximum }).map((_, index) => (
+                <label key={`class-expertise-${index}`}>
+                  Skill {index + 1}
+                  <select value={draft.classExpertise[index] ?? ""} onChange={(event) => updateStringList("classExpertise", index, event.currentTarget.value)}>
+                    {expertiseOptions(draft, classDetail, backgroundDetail).map((option) => (
+                      <option key={option.value} value={option.value} disabled={draft.classExpertise.includes(option.value) && draft.classExpertise[index] !== option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
+          {classDetail && classDetail.wizardSpells.cantripsKnown > 0 && (
+            <div className="builder-spell-choices">
+              <div className="builder-subsection-title">Wizard Spells</div>
+              {Array.from({ length: classDetail.wizardSpells.cantripsKnown }).map((_, index) => (
+                <label key={`wizard-cantrip-${index}`}>
+                  Cantrip {index + 1}
+                  <select value={draft.wizardCantrips[index] ?? ""} onChange={(event) => updateStringList("wizardCantrips", index, event.currentTarget.value)}>
+                    {classDetail.wizardSpells.cantrips.map((option) => (
+                      <option key={option.value} value={option.value} disabled={draft.wizardCantrips.includes(option.value) && draft.wizardCantrips[index] !== option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+              {Array.from({ length: classDetail.wizardSpells.spellbookSpellsKnown }).map((_, index) => (
+                <label key={`wizard-spellbook-${index}`}>
+                  Spellbook {index + 1}
+                  <select value={draft.wizardSpellbookSpells[index] ?? ""} onChange={(event) => updateStringList("wizardSpellbookSpells", index, event.currentTarget.value)}>
+                    {classDetail.wizardSpells.spellbookSpells.map((option) => (
+                      <option key={option.value} value={option.value} disabled={draft.wizardSpellbookSpells.includes(option.value) && draft.wizardSpellbookSpells[index] !== option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+              {Array.from({ length: classDetail.wizardSpells.preparedSpellsKnown }).map((_, index) => (
+                <label key={`wizard-prepared-${index}`}>
+                  Prepared {index + 1}
+                  <select value={draft.wizardPreparedSpells[index] ?? ""} onChange={(event) => updateStringList("wizardPreparedSpells", index, event.currentTarget.value)}>
+                    {wizardPreparedOptions(draft, classDetail).map((option) => (
+                      <option key={option.value} value={option.value} disabled={draft.wizardPreparedSpells.includes(option.value) && draft.wizardPreparedSpells[index] !== option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
           <label>
             Ability Boost
             <select value={backgroundIncreaseMode} onChange={(event) => updateIncreaseMode(event.currentTarget.value as "twoOne" | "oneEach")}>
@@ -1536,7 +1705,13 @@ function defaultCharacterBuilderDraft(playerKey: string): CharacterBuilderDraft 
     backgroundAbilityIncreases: abilityIncreasesForTwoOne(["dexterity", "constitution", "intelligence"], "dexterity", "constitution"),
     toolProficiency: "thievesTools",
     equipmentChoice: "package",
-    magicInitiateSpells: []
+    magicInitiateSpells: [],
+    classSkillProficiencies: [],
+    classExpertise: [],
+    fightingStyle: "",
+    wizardCantrips: [],
+    wizardSpellbookSpells: [],
+    wizardPreparedSpells: []
   };
 }
 
@@ -1557,10 +1732,19 @@ function abilityLabel(ability: AbilityType): string {
 
 function normalizeCharacterBuilderDraft(draft: CharacterBuilderDraft, options: CharacterBuilderOptions): CharacterBuilderDraft {
   const detail = options.backgroundDetails[draft.background];
+  const classDetail = options.classDetails[draft.className];
   if (!detail) return draft;
   const toolProficiency = detail.toolOptions.some((option) => option.value === draft.toolProficiency) ? draft.toolProficiency : detail.toolOptions[0]?.value;
   const equipmentChoice = detail.equipmentChoices.some((option) => option.value === draft.equipmentChoice) ? draft.equipmentChoice : detail.equipmentChoices[0]?.value ?? "package";
   const magicInitiateSpells = normalizedMagicInitiateSpells(draft.magicInitiateSpells, detail);
+  const classSkillProficiencies = classDetail ? normalizedSelectedOptions(draft.classSkillProficiencies, classDetail.skillProficiencies.options ?? [], classDetail.skillProficiencies.maximum) : [];
+  const classExpertise = classDetail ? normalizedSelectedOptions(draft.classExpertise, expertiseOptions({ ...draft, classSkillProficiencies }, classDetail, detail), classDetail.expertise.maximum) : [];
+  const fightingStyle = classDetail && classDetail.fightingStyles.maximum > 0
+    ? normalizedSelectedOptions([draft.fightingStyle], classDetail.fightingStyles.options ?? [], 1)[0] ?? ""
+    : "";
+  const wizardCantrips = classDetail ? normalizedSelectedOptions(draft.wizardCantrips, classDetail.wizardSpells.cantrips, classDetail.wizardSpells.cantripsKnown) : [];
+  const wizardSpellbookSpells = classDetail ? normalizedSelectedOptions(draft.wizardSpellbookSpells, classDetail.wizardSpells.spellbookSpells, classDetail.wizardSpells.spellbookSpellsKnown) : [];
+  const wizardPreparedSpells = classDetail ? normalizedSelectedOptions(draft.wizardPreparedSpells, wizardPreparedOptions({ ...draft, wizardSpellbookSpells }, classDetail), classDetail.wizardSpells.preparedSpellsKnown) : [];
   const abilities = detail.abilityScores.map((option) => option.value as AbilityType);
   const validIncreases = abilities.length > 0 && ABILITY_SCORE_OPTIONS.every((ability) => {
     const increase = draft.backgroundAbilityIncreases[ability.value];
@@ -1572,8 +1756,44 @@ function normalizeCharacterBuilderDraft(draft: CharacterBuilderDraft, options: C
     toolProficiency,
     equipmentChoice,
     magicInitiateSpells,
+    classSkillProficiencies,
+    classExpertise,
+    fightingStyle,
+    wizardCantrips,
+    wizardSpellbookSpells,
+    wizardPreparedSpells,
     backgroundAbilityIncreases: validIncreases && totalIncrease === 3 ? draft.backgroundAbilityIncreases : abilityIncreasesForMode("twoOne", abilities)
   };
+}
+
+function normalizedSelectedOptions(selectedValues: string[], options: { value: string; label: string }[], count: number): string[] {
+  if (count <= 0) return [];
+  const selected = selectedValues.filter((value, index, values) => options.some((option) => option.value === value) && values.indexOf(value) === index).slice(0, count);
+  for (const option of options) {
+    if (selected.length >= count) break;
+    if (!selected.includes(option.value)) selected.push(option.value);
+  }
+  return selected;
+}
+
+function expertiseOptions(draft: CharacterBuilderDraft, classDetail?: CharacterBuilderOptions["classDetails"][string], backgroundDetail?: CharacterBuilderOptions["backgroundDetails"][string]) {
+  const optionMap = new Map<string, { value: string; label: string }>();
+  for (const skill of backgroundDetail?.skillProficiencies ?? []) optionMap.set(skill.value, skill);
+  const classSkillOptions = classDetail?.skillProficiencies.options ?? [];
+  for (const skill of draft.classSkillProficiencies) {
+    optionMap.set(skill, classSkillOptions.find((option) => option.value === skill) ?? { value: skill, label: skillLabel(skill) });
+  }
+  return [...optionMap.values()];
+}
+
+function skillLabel(skill: string): string {
+  return skill.replace(/([A-Z])/g, " $1").replace(/^./, (value) => value.toUpperCase());
+}
+
+function wizardPreparedOptions(draft: CharacterBuilderDraft, classDetail: CharacterBuilderOptions["classDetails"][string]) {
+  const spellbook = new Set(draft.wizardSpellbookSpells);
+  const options = classDetail.wizardSpells.spellbookSpells.filter((option) => spellbook.has(option.value));
+  return options.length > 0 ? options : classDetail.wizardSpells.preparedSpells;
 }
 
 function normalizedMagicInitiateSpells(selectedSpells: string[], detail: CharacterBuilderOptions["backgroundDetails"][string]): string[] {
@@ -1736,7 +1956,7 @@ function SheetSection({
   sheets: CharacterSheet[];
   canDrop: boolean;
   dropTargetSheetId: string | null;
-  onApplyRoll: (rollId: string, target: CharacterSheet) => void;
+  onApplyRoll: (rollId: string, target: CharacterSheet, preserveRoll?: boolean) => void;
   onClearSheetRolls: (sheet: CharacterSheet) => void;
   onDragRollEnd: () => void;
   onDragRollStart: (rollId: string) => void;
@@ -1806,7 +2026,7 @@ function SheetCard({
   canDrop: boolean;
   draggingRollId: string | null;
   isDropTarget: boolean;
-  onApplyRoll: (rollId: string, target: CharacterSheet) => void;
+  onApplyRoll: (rollId: string, target: CharacterSheet, preserveRoll?: boolean) => void;
   onClearSheetRolls: (sheet: CharacterSheet) => void;
   onDragRollEnd: () => void;
   onDragRollStart: (rollId: string) => void;
@@ -1838,7 +2058,7 @@ function SheetCard({
       onDrop={(event) => {
         if (!canDrop || !draggingRollId) return;
         event.preventDefault();
-        onApplyRoll(draggingRollId, sheet);
+        onApplyRoll(draggingRollId, sheet, event.shiftKey);
       }}
     >
       <button className="sheet-portrait" onClick={onExpand} aria-label={`Open ${sheet.name}`}>
@@ -2417,6 +2637,9 @@ function FullSheet({
   onRollDamage,
   onRollResourceAction,
   onRollSavingThrow,
+  onRollSpellAttack,
+  onRollSpellDamage,
+  onRollSpellEffect,
   onUpdateProgressionChoice,
   onUpdateCondition,
   onUpdateEquipmentSlot,
@@ -2438,6 +2661,9 @@ function FullSheet({
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
+  onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
+  onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
+  onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateCondition: (sheet: CharacterSheet, condition: ConditionType, active: boolean) => void;
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
@@ -2565,7 +2791,19 @@ function FullSheet({
         onUpdateResource={onUpdateResource}
       />
 
-      <SheetSpellList canRoll={canRoll} sheet={sheet} onUpdateResource={onUpdateResource} />
+      <SheetSpellList
+        canRoll={canRoll}
+        pendingRolls={pendingRolls}
+        resolvedRolls={resolvedRolls}
+        rollDraggable={rollDraggable}
+        sheet={sheet}
+        onDragRollEnd={onDragRollEnd}
+        onDragRollStart={onDragRollStart}
+        onRollSpellAttack={onRollSpellAttack}
+        onRollSpellDamage={onRollSpellDamage}
+        onRollSpellEffect={onRollSpellEffect}
+        onUpdateResource={onUpdateResource}
+      />
 
       <section className="attack-list sheet-panel">
         <h2>Attacks</h2>
@@ -2680,13 +2918,30 @@ function FullSheet({
 
 function SheetSpellList({
   canRoll,
+  onDragRollEnd,
+  onDragRollStart,
+  onRollSpellAttack,
+  onRollSpellDamage,
+  onRollSpellEffect,
   onUpdateResource,
+  pendingRolls,
+  resolvedRolls = [],
+  rollDraggable,
   sheet
 }: {
   canRoll: boolean;
+  onDragRollEnd: () => void;
+  onDragRollStart: (rollId: string) => void;
+  onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
+  onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
+  onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
+  pendingRolls: RollPayload[];
+  resolvedRolls?: RollLogEntry[];
+  rollDraggable: boolean;
   sheet: CharacterSheet;
 }) {
+  const [selectedSpellSlots, setSelectedSpellSlots] = useState<Record<string, number>>({});
   if (sheet.spells.length === 0 && sheet.spellbook.length === 0) return null;
 
   return (
@@ -2695,6 +2950,11 @@ function SheetSpellList({
       {sheet.spells.length > 0 && <div className="spell-list">
         {sheet.spells.map((spell) => {
           const resource = spell.resourceId ? sheet.resources.find((candidate) => candidate.id === spell.resourceId) : undefined;
+          const matchingRolls = pendingRolls.filter((roll) => rollMatchesSource(roll, SheetSectionType.SPELLS, spell.id));
+          const matchingResolvedRolls = resolvedRolls.filter((entry) => rollMatchesSource(entry.roll, SheetSectionType.SPELLS, spell.id));
+          const damageEffects = spellDamageEffects(spell);
+          const conditionEffects = spellConditionEffects(spell);
+          const slotLevelsByDamageEffect = new Map(damageEffects.map((effectIndex) => [effectIndex, spellDamageSlotLevels(sheet, spell, effectIndex)]));
           const tags = [
             spell.sourceLabel,
             spell.level === 0 ? "Cantrip" : `Level ${spell.level}`,
@@ -2723,6 +2983,57 @@ function SheetSpellList({
                 />
               )}
               {spell.description && <p>{spell.description}</p>}
+              {(spellHasAttackRoll(spell) || damageEffects.length > 0 || conditionEffects.length > 0 || matchingRolls.length > 0 || matchingResolvedRolls.length > 0) && (
+                <div className="inline-roll-area">
+                  {(spellHasAttackRoll(spell) || damageEffects.length > 0 || conditionEffects.length > 0) && (
+                    <div className="roll-action-buttons">
+                      {spellHasAttackRoll(spell) && (
+                        <button disabled={!canRoll} onClick={() => onRollSpellAttack(sheet, spell.id)}>
+                          Attack Roll
+                        </button>
+                      )}
+                      {damageEffects.map((effectIndex) => {
+                        const slotLevels = slotLevelsByDamageEffect.get(effectIndex) ?? [undefined];
+                        const slotControlKey = `${spell.source}:${spell.id}:${effectIndex}`;
+                        const selectedSlotLevel = selectedSpellSlots[slotControlKey] ?? slotLevels[0];
+                        return (
+                          <span className="spell-roll-control" key={effectIndex}>
+                            {slotLevels.length > 1 && (
+                              <select
+                                disabled={!canRoll}
+                                value={selectedSlotLevel}
+                                onChange={(event) => setSelectedSpellSlots((current) => ({ ...current, [slotControlKey]: Number(event.target.value) }))}
+                              >
+                                {slotLevels.map((slotLevel) => (
+                                  <option key={slotLevel} value={slotLevel}>
+                                    L{slotLevel}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            <button disabled={!canRoll} onClick={() => onRollSpellDamage(sheet, spell.id, effectIndex, selectedSlotLevel)}>
+                              Damage
+                            </button>
+                          </span>
+                        );
+                      })}
+                      {conditionEffects.map((effectIndex) => (
+                        <button key={`effect-${effectIndex}`} disabled={!canRoll} onClick={() => onRollSpellEffect(sheet, spell.id, effectIndex)}>
+                          Effect
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <InlineRolls
+                    pendingRolls={matchingRolls}
+                    resolvedRolls={matchingResolvedRolls}
+                    roller={sheet}
+                    rollDraggable={rollDraggable}
+                    onDragRollEnd={onDragRollEnd}
+                    onDragRollStart={onDragRollStart}
+                  />
+                </div>
+              )}
             </article>
           );
         })}
@@ -3188,6 +3499,35 @@ function rollMatchesSource(roll: RollPayload, section: SheetSectionType, sourceI
 
 function rollMatchesSourceAction(roll: RollPayload, section: SheetSectionType, sourceId: string, actionId: string) {
   return rollMatchesSource(roll, section, sourceId) && roll.source.actionId === actionId;
+}
+
+function spellHasAttackRoll(spell: CharacterSheet["spells"][number]) {
+  return (spell.effects ?? []).some((effect) => effect.attack !== "none");
+}
+
+function spellDamageEffects(spell: CharacterSheet["spells"][number]) {
+  return (spell.effects ?? [])
+    .filter((effect) => effect.kind === "damage" && effect.damage)
+    .map((_effect, index) => index);
+}
+
+function spellConditionEffects(spell: CharacterSheet["spells"][number]) {
+  return (spell.effects ?? [])
+    .filter((effect) => effect.kind === "condition" && (effect.conditions ?? []).length > 0)
+    .map((_effect, index) => index);
+}
+
+function spellDamageSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], damageEffectIndex: number) {
+  const damageEffect = (spell.effects ?? []).filter((effect) => effect.kind === "damage" && effect.damage)[damageEffectIndex];
+  if (!damageEffect?.scaling?.some((scaling) => scaling.scalingType === "spellSlotLevel")) {
+    return [undefined];
+  }
+  const availableSlotLevels = [...new Set(
+    sheet.resources
+      .map((resource) => resource.spellSlotLevel)
+      .filter((slotLevel): slotLevel is number => slotLevel !== undefined && slotLevel >= spell.level)
+  )].sort((left, right) => left - right);
+  return availableSlotLevels.length > 0 ? availableSlotLevels : [spell.level];
 }
 
 function cardResolvedRolls(sheet: CharacterSheet, rollHistory: RollLogEntry[], clearedCardRollIds: Set<string>) {

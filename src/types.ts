@@ -97,6 +97,7 @@ export type ConditionType =
   | "unconscious";
 export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
+export type ConditionRemovalTrigger = "afterTakingDamage";
 export type ConditionEffect = {
   condition?: ConditionType;
   conditionLabel?: string;
@@ -113,6 +114,12 @@ export type ConditionEffect = {
   contestChecksLabel?: string[];
   duration: ConditionDuration;
   durationLabel: string;
+  removalTrigger?: ConditionRemovalTrigger;
+  removalTriggerLabel?: string;
+  removalSavingThrow?: AbilityType;
+  removalSavingThrowLabel?: string;
+  removalSaveDc?: number;
+  removalAdvantage: boolean;
   description: string;
 };
 export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "skillProficiencies" | "expertise" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
@@ -182,6 +189,12 @@ export type SpellCylinderArea = {
   diameterFeet: number;
 };
 export type SpellArea = SpellNoArea | SpellRadiusArea | SpellConeArea | SpellCubeArea | SpellLineArea | SpellCylinderArea;
+export type SpellAttackType = "none" | "meleeSpellAttack" | "rangedSpellAttack";
+export type SpellEffectKind = "damage" | "healing" | "temporaryHitPoints" | "condition" | "defense" | "movement" | "summoning" | "transformation" | "utility" | "special";
+export type SpellEffectTrigger = "onCast" | "onHit" | "onFailedSave" | "onSuccessfulSave" | "startOfTurn" | "endOfTurn" | "entersArea" | "repeatSave" | "special";
+export type SpellEffectTarget = "self" | "target" | "area" | "creaturesChosen" | "object" | "special";
+export type SpellSaveOutcome = "none" | "negates" | "halfDamage" | "partial" | "special";
+export type SpellScalingType = "none" | "cantripLevel" | "spellSlotLevel" | "casterLevel" | "special";
 export type SpellTargeting = {
   rangeType: SpellRangeType;
   rangeTypeLabel: string;
@@ -195,6 +208,64 @@ export type SpellDuration = {
   amount: number;
   maximum: boolean;
   summary: string;
+};
+export type SpellEffectDice = {
+  diceCount: number;
+  diceType: DiceType;
+  dice: string;
+  staticBonus: number;
+  bonusAbility?: AbilityType;
+  bonusAbilityLabel?: string;
+};
+export type SpellDamageEffect = {
+  dice: SpellEffectDice;
+  damageType: DamageType;
+  damageTypeLabel: string;
+};
+export type SpellHealingEffect = {
+  dice: SpellEffectDice;
+};
+export type SpellConditionEffect = {
+  condition: ConditionType;
+  conditionLabel: string;
+  duration: ConditionDuration;
+  durationLabel: string;
+  saveEnds: boolean;
+  removalTrigger?: ConditionRemovalTrigger;
+  removalTriggerLabel?: string;
+  removalAdvantage: boolean;
+};
+export type SpellSavingThrow = {
+  ability: AbilityType;
+  abilityLabel: string;
+  outcome: SpellSaveOutcome;
+  outcomeLabel: string;
+  repeat?: SpellEffectTrigger;
+  repeatLabel?: string;
+};
+export type SpellScaling = {
+  scalingType: SpellScalingType;
+  scalingTypeLabel: string;
+  additionalDice?: SpellEffectDice;
+  interval: number;
+  description: string;
+};
+export type SpellEffect = {
+  kind: SpellEffectKind;
+  kindLabel: string;
+  trigger: SpellEffectTrigger;
+  triggerLabel: string;
+  target: SpellEffectTarget;
+  targetLabel: string;
+  attack: SpellAttackType;
+  attackLabel: string;
+  savingThrow?: SpellSavingThrow;
+  damage?: SpellDamageEffect;
+  healing?: SpellHealingEffect;
+  temporaryHitPoints?: SpellEffectDice;
+  conditions?: SpellConditionEffect[];
+  scaling?: SpellScaling[];
+  description: string;
 };
 
 export type AttackAction = {
@@ -285,11 +356,35 @@ export type CharacterBuilderOptions = {
   pointBuyCosts: Record<string, number>;
   pointBuyPoints: number;
   backgroundDetails: Record<string, CharacterBuilderBackgroundDetail>;
+  classDetails: Record<string, CharacterBuilderClassDetail>;
   toolDetails: Record<string, CharacterBuilderToolDetail>;
+};
+
+export type CharacterBuilderChoiceDetail = {
+  minimum: number;
+  maximum: number;
+  options?: CharacterBuilderOption[];
+};
+
+export type CharacterBuilderWizardSpellChoices = {
+  cantripsKnown: number;
+  spellbookSpellsKnown: number;
+  preparedSpellsKnown: number;
+  cantrips: CharacterBuilderSpellOption[];
+  spellbookSpells: CharacterBuilderSpellOption[];
+  preparedSpells: CharacterBuilderSpellOption[];
+};
+
+export type CharacterBuilderClassDetail = {
+  skillProficiencies: CharacterBuilderChoiceDetail;
+  expertise: CharacterBuilderChoiceDetail;
+  fightingStyles: CharacterBuilderChoiceDetail;
+  wizardSpells: CharacterBuilderWizardSpellChoices;
 };
 
 export type CharacterBuilderBackgroundDetail = {
   abilityScores: CharacterBuilderOption[];
+  skillProficiencies: CharacterBuilderOption[];
   toolOptions: CharacterBuilderOption[];
   equipmentChoices: CharacterBuilderOption[];
   magicInitiateSpellChoices?: CharacterBuilderMagicInitiateSpellChoices | null;
@@ -340,6 +435,12 @@ export type CharacterBuilderDraft = {
   toolProficiency?: string;
   equipmentChoice: string;
   magicInitiateSpells: string[];
+  classSkillProficiencies: string[];
+  classExpertise: string[];
+  fightingStyle: string;
+  wizardCantrips: string[];
+  wizardSpellbookSpells: string[];
+  wizardPreparedSpells: string[];
 };
 
 export type CharacterSheet = {
@@ -416,6 +517,7 @@ export type CharacterSheet = {
     description: string;
     rollActions?: RollAction[];
     source?: string;
+    spellSlotLevel?: number;
   }[];
   features: {
     id: string;
@@ -451,6 +553,7 @@ export type CharacterSheet = {
     resourceId?: string;
     reset: RestType;
     resetLabel: string;
+    effects?: SpellEffect[];
   }[];
   spellbook: {
     id: string;
@@ -476,6 +579,7 @@ export type CharacterSheet = {
     resourceId?: string;
     reset: RestType;
     resetLabel: string;
+    effects?: SpellEffect[];
   }[];
   proficiencies: string[];
   conditions: ConditionType[];
@@ -537,6 +641,11 @@ export type RollPayload = {
   createdAt: number;
   damageType?: DamageType;
   damageTypeLabel?: string;
+  damageSavingThrow?: AbilityType;
+  damageSavingThrowLabel?: string;
+  damageSaveDc?: number;
+  damageSaveOutcome?: SpellSaveOutcome;
+  damageSaveOutcomeLabel?: string;
   conditionEffects?: ConditionEffect[];
   resourceSpent?: {
     resourceId: string;
@@ -590,6 +699,6 @@ export type ServerMessage =
   | { type: "fog_updated"; fog: FogState }
   | { type: "board_updated"; board: Board }
   | { type: "roll_created"; roll: RollPayload; logEntry: RollLogEntry }
-  | { type: "roll_resolved"; rollId: string; tokenId: string; resolution: RollResolution; logEntry: RollLogEntry }
+  | { type: "roll_resolved"; rollId: string; tokenId: string; preserveRoll?: boolean; resolution: RollResolution; logEntry: RollLogEntry }
   | { type: "token_lock_denied"; tokenId: string; lockedBy?: string }
   | { type: "player_count"; count: number };

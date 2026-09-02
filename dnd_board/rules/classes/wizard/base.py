@@ -207,6 +207,7 @@ def wizard_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracker
             activation=TimeEconomy.SPECIAL,
             description=f"Level {slot_level} Wizard spell slots.",
             source=enum_label(ClassType.WIZARD),
+            spellSlotLevel=slot_level,
         ))
     return resources
 

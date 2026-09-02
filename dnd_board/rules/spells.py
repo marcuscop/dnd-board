@@ -6,12 +6,33 @@ from enum import Enum
 from dnd_board.character_sheet import (
     AbilityType,
     ClassType,
+    ConditionDuration,
+    ConditionRemovalTrigger,
+    ConditionType,
+    DamageType,
+    DiceType,
     SpellComponent,
+    SpellAttackType,
+    SpellConditionEffect,
+    SpellDamageEffect,
     SpellDuration,
     SpellDurationUnit,
+    SpellEffect,
+    SpellEffectDice,
+    SpellEffectKind,
+    SpellEffectTarget,
+    SpellEffectTrigger,
     SpellEntry,
+    SpellHealingEffect,
     SpellId,
+    SpellConeArea,
+    SpellCubeArea,
     SpellRangeType,
+    SpellRadiusArea,
+    SpellSaveOutcome,
+    SpellSavingThrow,
+    SpellScaling,
+    SpellScalingType,
     SpellSchool,
     SpellSource,
     SpellTargeting,
@@ -49,6 +70,161 @@ CLASS_SPELL_LISTS: dict[ClassType, SpellListType] = {
 
 def class_spell_list(class_type: ClassType) -> SpellListType | None:
     return CLASS_SPELL_LISTS.get(class_type)
+
+
+def spell_effect_dice(
+    dice_count: int,
+    dice_type: DiceType,
+    *,
+    static_bonus: int = 0,
+    bonus_ability: AbilityType | None = None,
+) -> SpellEffectDice:
+    return SpellEffectDice(
+        diceCount=dice_count,
+        diceType=dice_type,
+        staticBonus=static_bonus,
+        bonusAbility=bonus_ability,
+    )
+
+
+def spell_save(
+    ability: AbilityType,
+    outcome: SpellSaveOutcome = SpellSaveOutcome.NEGATES,
+    *,
+    repeat: SpellEffectTrigger | None = None,
+) -> SpellSavingThrow:
+    return SpellSavingThrow(ability=ability, outcome=outcome, repeat=repeat)
+
+
+def spell_scaling(
+    scaling_type: SpellScalingType,
+    *,
+    dice_count: int | None = None,
+    dice_type: DiceType | None = None,
+    interval: int = 1,
+    description: str = "",
+) -> SpellScaling:
+    additional_dice = None
+    if dice_count is not None and dice_type is not None:
+        additional_dice = spell_effect_dice(dice_count, dice_type)
+    return SpellScaling(
+        scalingType=scaling_type,
+        additionalDice=additional_dice,
+        interval=interval,
+        description=description,
+    )
+
+
+def spell_damage_effect(
+    dice_count: int,
+    dice_type: DiceType,
+    damage_type: DamageType,
+    *,
+    static_bonus: int = 0,
+    bonus_ability: AbilityType | None = None,
+    trigger: SpellEffectTrigger = SpellEffectTrigger.ON_CAST,
+    target: SpellEffectTarget = SpellEffectTarget.TARGET,
+    attack: SpellAttackType = SpellAttackType.NONE,
+    saving_throw: SpellSavingThrow | None = None,
+    scaling: list[SpellScaling] | None = None,
+    description: str = "",
+) -> SpellEffect:
+    return SpellEffect(
+        kind=SpellEffectKind.DAMAGE,
+        trigger=trigger,
+        target=target,
+        attack=attack,
+        savingThrow=saving_throw,
+        damage=SpellDamageEffect(spell_effect_dice(dice_count, dice_type, static_bonus=static_bonus, bonus_ability=bonus_ability), damage_type),
+        scaling=scaling,
+        description=description,
+    )
+
+
+def spell_healing_effect(
+    dice_count: int,
+    dice_type: DiceType,
+    *,
+    static_bonus: int = 0,
+    bonus_ability: AbilityType | None = None,
+    trigger: SpellEffectTrigger = SpellEffectTrigger.ON_CAST,
+    target: SpellEffectTarget = SpellEffectTarget.TARGET,
+    scaling: list[SpellScaling] | None = None,
+    description: str = "",
+) -> SpellEffect:
+    return SpellEffect(
+        kind=SpellEffectKind.HEALING,
+        trigger=trigger,
+        target=target,
+        healing=SpellHealingEffect(
+            spell_effect_dice(
+                dice_count,
+                dice_type,
+                static_bonus=static_bonus,
+                bonus_ability=bonus_ability,
+            )
+        ),
+        scaling=scaling,
+        description=description,
+    )
+
+
+def spell_temporary_hit_points_effect(
+    dice_count: int,
+    dice_type: DiceType,
+    *,
+    static_bonus: int = 0,
+    bonus_ability: AbilityType | None = None,
+    trigger: SpellEffectTrigger = SpellEffectTrigger.ON_CAST,
+    target: SpellEffectTarget = SpellEffectTarget.TARGET,
+    scaling: list[SpellScaling] | None = None,
+    description: str = "",
+) -> SpellEffect:
+    return SpellEffect(
+        kind=SpellEffectKind.TEMPORARY_HIT_POINTS,
+        trigger=trigger,
+        target=target,
+        temporaryHitPoints=spell_effect_dice(
+            dice_count,
+            dice_type,
+            static_bonus=static_bonus,
+            bonus_ability=bonus_ability,
+        ),
+        scaling=scaling,
+        description=description,
+    )
+
+
+def spell_condition_effect(
+    condition: ConditionType,
+    *,
+    duration: ConditionDuration = ConditionDuration.MANUAL,
+    save_ends: bool = False,
+    removal_trigger: ConditionRemovalTrigger | None = None,
+    removal_advantage: bool = False,
+    trigger: SpellEffectTrigger = SpellEffectTrigger.ON_FAILED_SAVE,
+    target: SpellEffectTarget = SpellEffectTarget.TARGET,
+    saving_throw: SpellSavingThrow | None = None,
+    scaling: list[SpellScaling] | None = None,
+    description: str = "",
+) -> SpellEffect:
+    return SpellEffect(
+        kind=SpellEffectKind.CONDITION,
+        trigger=trigger,
+        target=target,
+        savingThrow=saving_throw,
+        conditions=[
+            SpellConditionEffect(
+                condition=condition,
+                duration=duration,
+                saveEnds=save_ends,
+                removalTrigger=removal_trigger,
+                removalAdvantage=removal_advantage,
+            )
+        ],
+        scaling=scaling,
+        description=description,
+    )
 
 
 @dataclass(frozen=True)
@@ -199,11 +375,30 @@ def normalized_spell_entry(
     source: SpellSource,
     casting_ability: AbilityType,
 ) -> SpellEntry:
-    return replace(spell, source=source, castingAbility=casting_ability, components=list(spell.components))
+    return replace(
+        spell,
+        source=source,
+        castingAbility=casting_ability,
+        components=list(spell.components),
+        effects=clone_spell_effects(spell.effects),
+    )
 
 
 def clone_spell_entry(spell: SpellEntry) -> SpellEntry:
-    return replace(spell, components=list(spell.components))
+    return replace(spell, components=list(spell.components), effects=clone_spell_effects(spell.effects))
+
+
+def clone_spell_effects(effects: list[SpellEffect] | None) -> list[SpellEffect] | None:
+    if effects is None:
+        return None
+    return [
+        replace(
+            effect,
+            conditions=list(effect.conditions) if effect.conditions is not None else None,
+            scaling=list(effect.scaling) if effect.scaling is not None else None,
+        )
+        for effect in effects
+    ]
 
 
 def spell_description(metadata: SpellCatalogMetadata, spell: SpellEntry) -> str:
@@ -274,7 +469,7 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.DRUIDCRAFT, name=SpellId.DRUIDCRAFT, source=SpellSource.DRUID, level=0, school=SpellSchool.TRANSMUTATION, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.DRUID,), url='http://dnd2024.wikidot.com/spell:druidcraft'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.ELDRITCH_BLAST, name=SpellId.ELDRITCH_BLAST, source=SpellSource.WARLOCK, level=0, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.WARLOCK,), url='http://dnd2024.wikidot.com/spell:eldritch-blast'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.ELEMENTALISM, name=SpellId.ELEMENTALISM, source=SpellSource.ARTIFICER, level=0, school=SpellSchool.TRANSMUTATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.ARTIFICER, SpellListType.DRUID, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:elementalism'),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.FIRE_BOLT, name=SpellId.FIRE_BOLT, source=SpellSource.ARTIFICER, level=0, school=SpellSchool.EVOCATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.ARTIFICER, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:fire-bolt'),
+    SpellCatalogRecord(entry=SpellEntry(id=SpellId.FIRE_BOLT, name=SpellId.FIRE_BOLT, source=SpellSource.ARTIFICER, level=0, school=SpellSchool.EVOCATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", effects=[spell_damage_effect(1, DiceType.D10, DamageType.FIRE, trigger=SpellEffectTrigger.ON_HIT, attack=SpellAttackType.RANGED_SPELL_ATTACK, scaling=[spell_scaling(SpellScalingType.CANTRIP_LEVEL, dice_count=1, dice_type=DiceType.D10, description="Damage increases at character levels 5, 11, and 17.")])]), spellLists=(SpellListType.ARTIFICER, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:fire-bolt'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.FRIENDS, name=SpellId.FRIENDS, source=SpellSource.BARD, level=0, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=10), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.BARD, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:friends', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.GUIDANCE, name=SpellId.GUIDANCE, source=SpellSource.ARTIFICER, level=0, school=SpellSchool.DIVINATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", concentration=True), spellLists=(SpellListType.ARTIFICER, SpellListType.CLERIC, SpellListType.DRUID), url='http://dnd2024.wikidot.com/spell:guidance'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.LIGHT, name=SpellId.LIGHT, source=SpellSource.ARTIFICER, level=0, school=SpellSchool.EVOCATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1), components=[SpellComponent.VERBAL, SpellComponent.MATERIAL], description=""), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.CLERIC, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:light', material=True),
@@ -307,7 +502,7 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.ARMS_OF_HADAR, name=SpellId.ARMS_OF_HADAR, source=SpellSource.WARLOCK, level=1, school=SpellSchool.CONJURATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.WARLOCK,), url='http://dnd2024.wikidot.com/spell:arms-of-hadar'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.BANE, name=SpellId.BANE, source=SpellSource.BARD, level=1, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.BARD, SpellListType.CLERIC, SpellListType.WARLOCK), url='http://dnd2024.wikidot.com/spell:bane', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.BLESS, name=SpellId.BLESS, source=SpellSource.CLERIC, level=1, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.CLERIC, SpellListType.PALADIN), url='http://dnd2024.wikidot.com/spell:bless', material=True, materialCost=True),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.BURNING_HANDS, name=SpellId.BURNING_HANDS, source=SpellSource.SORCERER, level=1, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:burning-hands'),
+    SpellCatalogRecord(entry=SpellEntry(id=SpellId.BURNING_HANDS, name=SpellId.BURNING_HANDS, source=SpellSource.SORCERER, level=1, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF, area=SpellConeArea(15)), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", effects=[spell_damage_effect(3, DiceType.D6, DamageType.FIRE, target=SpellEffectTarget.AREA, saving_throw=spell_save(AbilityType.DEXTERITY, SpellSaveOutcome.HALF_DAMAGE), scaling=[spell_scaling(SpellScalingType.SPELL_SLOT_LEVEL, dice_count=1, dice_type=DiceType.D6, description="Damage increases by 1d6 for each spell slot level above 1.")])]), spellLists=(SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:burning-hands'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.BUZZING_BEE, name=SpellId.BUZZING_BEE, source=SpellSource.DRUID, level=1, school=SpellSchool.CONJURATION, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.DRUID, SpellListType.RANGER, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:buzzing-bee', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.CHARM_PERSON, name=SpellId.CHARM_PERSON, source=SpellSource.BARD, level=1, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.BARD, SpellListType.DRUID, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:charm-person'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.CHROMATIC_ORB, name=SpellId.CHROMATIC_ORB, source=SpellSource.SORCERER, level=1, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=90), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description=""), spellLists=(SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:chromatic-orb', material=True, materialCost=True),
@@ -316,7 +511,7 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.COMPELLED_DUEL, name=SpellId.COMPELLED_DUEL, source=SpellSource.PALADIN, level=1, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.BONUS_ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL], description="", concentration=True), spellLists=(SpellListType.PALADIN,), url='http://dnd2024.wikidot.com/spell:compelled-duel'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.COMPREHEND_LANGUAGES, name=SpellId.COMPREHEND_LANGUAGES, source=SpellSource.BARD, level=1, school=SpellSchool.DIVINATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", ritual=True), spellLists=(SpellListType.BARD, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:comprehend-languages', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.CREATE_OR_DESTROY_WATER, name=SpellId.CREATE_OR_DESTROY_WATER, source=SpellSource.CLERIC, level=1, school=SpellSchool.TRANSMUTATION, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description=""), spellLists=(SpellListType.CLERIC, SpellListType.DRUID), url='http://dnd2024.wikidot.com/spell:create-or-destroy-water', material=True),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.CURE_WOUNDS, name=SpellId.CURE_WOUNDS, source=SpellSource.ARTIFICER, level=1, school=SpellSchool.ABJURATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.CLERIC, SpellListType.DRUID, SpellListType.PALADIN, SpellListType.RANGER), url='http://dnd2024.wikidot.com/spell:cure-wounds'),
+    SpellCatalogRecord(entry=SpellEntry(id=SpellId.CURE_WOUNDS, name=SpellId.CURE_WOUNDS, source=SpellSource.ARTIFICER, level=1, school=SpellSchool.ABJURATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", effects=[spell_healing_effect(2, DiceType.D8, bonus_ability=AbilityType.INTELLIGENCE, scaling=[spell_scaling(SpellScalingType.SPELL_SLOT_LEVEL, dice_count=2, dice_type=DiceType.D8, description="Healing increases by 2d8 for each spell slot level above 1.")])]), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.CLERIC, SpellListType.DRUID, SpellListType.PALADIN, SpellListType.RANGER), url='http://dnd2024.wikidot.com/spell:cure-wounds'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.DETECT_EVIL_AND_GOOD, name=SpellId.DETECT_EVIL_AND_GOOD, source=SpellSource.CLERIC, level=1, school=SpellSchool.DIVINATION, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=10, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", concentration=True), spellLists=(SpellListType.CLERIC, SpellListType.PALADIN), url='http://dnd2024.wikidot.com/spell:detect-evil-and-good'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.DETECT_MAGIC, name=SpellId.DETECT_MAGIC, source=SpellSource.ARTIFICER, level=1, school=SpellSchool.DIVINATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=10, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", concentration=True, ritual=True), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.CLERIC, SpellListType.DRUID, SpellListType.PALADIN, SpellListType.RANGER, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:detect-magic'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.DETECT_POISON_AND_DISEASE, name=SpellId.DETECT_POISON_AND_DISEASE, source=SpellSource.CLERIC, level=1, school=SpellSchool.DIVINATION, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=10, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True, ritual=True), spellLists=(SpellListType.CLERIC, SpellListType.DRUID, SpellListType.PALADIN, SpellListType.RANGER), url='http://dnd2024.wikidot.com/spell:detect-poison-and-disease', material=True),
@@ -361,7 +556,53 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.SLEEP, name=SpellId.SLEEP, source=SpellSource.BARD, level=1, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.BARD, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:sleep', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.SPEAK_WITH_ANIMALS, name=SpellId.SPEAK_WITH_ANIMALS, source=SpellSource.BARD, level=1, school=SpellSchool.DIVINATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=10), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", ritual=True), spellLists=(SpellListType.BARD, SpellListType.DRUID, SpellListType.RANGER, SpellListType.WARLOCK), url='http://dnd2024.wikidot.com/spell:speak-with-animals'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.SPELLFIRE_FLARE, name=SpellId.SPELLFIRE_FLARE, source=SpellSource.SORCERER, level=1, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:spellfire-flare'),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.TASHA_S_HIDEOUS_LAUGHTER, name=SpellId.TASHA_S_HIDEOUS_LAUGHTER, source=SpellSource.BARD, level=1, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.BARD, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:tasha-s-hideous-laughter', material=True),
+    SpellCatalogRecord(
+        entry=SpellEntry(
+            id=SpellId.TASHA_S_HIDEOUS_LAUGHTER,
+            name=SpellId.TASHA_S_HIDEOUS_LAUGHTER,
+            source=SpellSource.BARD,
+            level=1,
+            school=SpellSchool.ENCHANTMENT,
+            castingAbility=AbilityType.CHARISMA,
+            castingTime=TimeEconomy.ACTION,
+            targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30),
+            duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True),
+            components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL],
+            description="",
+            concentration=True,
+            effects=[
+                SpellEffect(
+                    kind=SpellEffectKind.CONDITION,
+                    trigger=SpellEffectTrigger.ON_FAILED_SAVE,
+                    target=SpellEffectTarget.TARGET,
+                    savingThrow=spell_save(AbilityType.WISDOM, repeat=SpellEffectTrigger.END_OF_TURN),
+                    conditions=[
+                        SpellConditionEffect(
+                            ConditionType.PRONE,
+                            removalTrigger=ConditionRemovalTrigger.AFTER_TAKING_DAMAGE,
+                            removalAdvantage=True,
+                        ),
+                        SpellConditionEffect(
+                            ConditionType.INCAPACITATED,
+                            removalTrigger=ConditionRemovalTrigger.AFTER_TAKING_DAMAGE,
+                            removalAdvantage=True,
+                        ),
+                    ],
+                    scaling=[
+                        spell_scaling(
+                            SpellScalingType.SPELL_SLOT_LEVEL,
+                            interval=1,
+                            description="Target one additional creature for each spell slot level above 1.",
+                        )
+                    ],
+                    description="The target repeats the Wisdom save at the end of each turn and each time it takes damage; damage-triggered saves have Advantage.",
+                )
+            ],
+        ),
+        spellLists=(SpellListType.BARD, SpellListType.WARLOCK, SpellListType.WIZARD),
+        url='http://dnd2024.wikidot.com/spell:tasha-s-hideous-laughter',
+        material=True,
+    ),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.TENSER_S_FLOATING_DISK, name=SpellId.TENSER_S_FLOATING_DISK, source=SpellSource.WIZARD, level=1, school=SpellSchool.CONJURATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", ritual=True), spellLists=(SpellListType.WIZARD,), url='http://dnd2024.wikidot.com/spell:tenser-s-floating-disk', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.THUNDEROUS_SMITE, name=SpellId.THUNDEROUS_SMITE, source=SpellSource.PALADIN, level=1, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.BONUS_ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL], description=""), spellLists=(SpellListType.PALADIN,), url='http://dnd2024.wikidot.com/spell:thunderous-smite', triggered=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.THUNDERWAVE, name=SpellId.THUNDERWAVE, source=SpellSource.BARD, level=1, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.BARD, SpellListType.DRUID, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:thunderwave'),
@@ -401,7 +642,7 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.GENTLE_REPOSE, name=SpellId.GENTLE_REPOSE, source=SpellSource.CLERIC, level=2, school=SpellSchool.NECROMANCY, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.DAY, amount=10), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", ritual=True), spellLists=(SpellListType.CLERIC, SpellListType.PALADIN, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:gentle-repose', material=True, materialCost=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.GUST_OF_WIND, name=SpellId.GUST_OF_WIND, source=SpellSource.DRUID, level=2, school=SpellSchool.EVOCATION, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.DRUID, SpellListType.RANGER, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:gust-of-wind', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.HEAT_METAL, name=SpellId.HEAT_METAL, source=SpellSource.ARTIFICER, level=2, school=SpellSchool.TRANSMUTATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.DRUID), url='http://dnd2024.wikidot.com/spell:heat-metal', material=True),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.HOLD_PERSON, name=SpellId.HOLD_PERSON, source=SpellSource.BARD, level=2, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.BARD, SpellListType.CLERIC, SpellListType.DRUID, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:hold-person', material=True),
+    SpellCatalogRecord(entry=SpellEntry(id=SpellId.HOLD_PERSON, name=SpellId.HOLD_PERSON, source=SpellSource.BARD, level=2, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True, effects=[spell_condition_effect(ConditionType.PARALYZED, saving_throw=spell_save(AbilityType.WISDOM, repeat=SpellEffectTrigger.END_OF_TURN), save_ends=True, scaling=[spell_scaling(SpellScalingType.SPELL_SLOT_LEVEL, interval=1, description="Target one additional Humanoid for each spell slot level above 2.")])]), spellLists=(SpellListType.BARD, SpellListType.CLERIC, SpellListType.DRUID, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:hold-person', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.HOMUNCULUS_SERVANT, name=SpellId.HOMUNCULUS_SERVANT, source=SpellSource.ARTIFICER, level=2, school=SpellSchool.CONJURATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.SPECIAL, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=10), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", ritual=True, castingDuration=SpellDuration(SpellDurationUnit.HOUR, amount=1)), spellLists=(SpellListType.ARTIFICER,), url='http://dnd2024.wikidot.com/spell:homunculus-servant', material=True, materialCost=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.INVISIBILITY, name=SpellId.INVISIBILITY, source=SpellSource.ARTIFICER, level=2, school=SpellSchool.ILLUSION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:invisibility', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.KNOCK, name=SpellId.KNOCK, source=SpellSource.BARD, level=2, school=SpellSchool.TRANSMUTATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL], description=""), spellLists=(SpellListType.BARD, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:knock'),
@@ -436,7 +677,7 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.SUMMON_BEAST, name=SpellId.SUMMON_BEAST, source=SpellSource.DRUID, level=2, school=SpellSchool.CONJURATION, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=90), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.DRUID, SpellListType.RANGER), url='http://dnd2024.wikidot.com/spell:summon-beast', material=True, materialCost=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.TORTOISE_SHELL, name=SpellId.TORTOISE_SHELL, source=SpellSource.ARTIFICER, level=2, school=SpellSchool.ABJURATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", concentration=True), spellLists=(SpellListType.ARTIFICER, SpellListType.DRUID, SpellListType.RANGER), url='http://dnd2024.wikidot.com/spell:tortoise-shell'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.WARDING_BOND, name=SpellId.WARDING_BOND, source=SpellSource.CLERIC, level=2, school=SpellSchool.ABJURATION, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description=""), spellLists=(SpellListType.CLERIC, SpellListType.PALADIN), url='http://dnd2024.wikidot.com/spell:warding-bond', material=True),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.WEB, name=SpellId.WEB, source=SpellSource.ARTIFICER, level=2, school=SpellSchool.CONJURATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.ARTIFICER, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:web', material=True),
+    SpellCatalogRecord(entry=SpellEntry(id=SpellId.WEB, name=SpellId.WEB, source=SpellSource.ARTIFICER, level=2, school=SpellSchool.CONJURATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60, area=SpellCubeArea(20)), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True, effects=[spell_condition_effect(ConditionType.RESTRAINED, trigger=SpellEffectTrigger.ENTERS_AREA, target=SpellEffectTarget.AREA, saving_throw=spell_save(AbilityType.DEXTERITY), description="Also applies when a creature starts its turn in the webs."), spell_damage_effect(2, DiceType.D4, DamageType.FIRE, trigger=SpellEffectTrigger.START_OF_TURN, target=SpellEffectTarget.AREA, description="Only for burning web areas.")]), spellLists=(SpellListType.ARTIFICER, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:web', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.ZONE_OF_TRUTH, name=SpellId.ZONE_OF_TRUTH, source=SpellSource.BARD, level=2, school=SpellSchool.ENCHANTMENT, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=10), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.BARD, SpellListType.CLERIC, SpellListType.PALADIN), url='http://dnd2024.wikidot.com/spell:zone-of-truth'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.ANIMATE_DEAD, name=SpellId.ANIMATE_DEAD, source=SpellSource.CLERIC, level=3, school=SpellSchool.NECROMANCY, castingAbility=AbilityType.WISDOM, castingTime=TimeEconomy.SPECIAL, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=10), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", castingDuration=SpellDuration(SpellDurationUnit.MINUTE, amount=1)), spellLists=(SpellListType.CLERIC, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:animate-dead', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.ASTRAL_FLOOD, name=SpellId.ASTRAL_FLOOD, source=SpellSource.BARD, level=3, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description=""), spellLists=(SpellListType.BARD, SpellListType.CLERIC, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:astral-flood', material=True),
@@ -459,7 +700,7 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.ELEMENTAL_WEAPON, name=SpellId.ELEMENTAL_WEAPON, source=SpellSource.ARTIFICER, level=3, school=SpellSchool.TRANSMUTATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", concentration=True), spellLists=(SpellListType.ARTIFICER, SpellListType.DRUID, SpellListType.PALADIN, SpellListType.RANGER), url='http://dnd2024.wikidot.com/spell:elemental-weapon'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.FEAR, name=SpellId.FEAR, source=SpellSource.BARD, level=3, school=SpellSchool.ILLUSION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.BARD, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:fear', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.FEIGN_DEATH, name=SpellId.FEIGN_DEATH, source=SpellSource.BARD, level=3, school=SpellSchool.NECROMANCY, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", ritual=True), spellLists=(SpellListType.BARD, SpellListType.CLERIC, SpellListType.DRUID, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:feign-death', material=True),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.FIREBALL, name=SpellId.FIREBALL, source=SpellSource.SORCERER, level=3, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=150), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description=""), spellLists=(SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:fireball', material=True),
+    SpellCatalogRecord(entry=SpellEntry(id=SpellId.FIREBALL, name=SpellId.FIREBALL, source=SpellSource.SORCERER, level=3, school=SpellSchool.EVOCATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=150, area=SpellRadiusArea(20)), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", effects=[spell_damage_effect(8, DiceType.D6, DamageType.FIRE, target=SpellEffectTarget.AREA, saving_throw=spell_save(AbilityType.DEXTERITY, SpellSaveOutcome.HALF_DAMAGE), scaling=[spell_scaling(SpellScalingType.SPELL_SLOT_LEVEL, dice_count=1, dice_type=DiceType.D6, description="Damage increases by 1d6 for each spell slot level above 3.")])]), spellLists=(SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:fireball', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.FLY, name=SpellId.FLY, source=SpellSource.ARTIFICER, level=3, school=SpellSchool.TRANSMUTATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=10, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.ARTIFICER, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:fly', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.GASEOUS_FORM, name=SpellId.GASEOUS_FORM, source=SpellSource.SORCERER, level=3, school=SpellSchool.TRANSMUTATION, castingAbility=AbilityType.CHARISMA, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:gaseous-form', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.GLYPH_OF_WARDING, name=SpellId.GLYPH_OF_WARDING, source=SpellSource.ARTIFICER, level=3, school=SpellSchool.ABJURATION, castingAbility=AbilityType.INTELLIGENCE, castingTime=TimeEconomy.SPECIAL, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.SPECIAL), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", castingDuration=SpellDuration(SpellDurationUnit.HOUR, amount=1)), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.CLERIC, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:glyph-of-warding', material=True, materialCost=True, materialConsumed=True),

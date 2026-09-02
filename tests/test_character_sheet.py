@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from dnd_board.character_sheet import (
@@ -9,6 +11,7 @@ from dnd_board.character_sheet import (
     ClassType,
     ConditionApplicationMode,
     ConditionEffect,
+    ConditionRemovalTrigger,
     ConditionType,
     DamageType,
     DiceType,
@@ -36,8 +39,10 @@ from dnd_board.character_sheet import (
     SpellCylinderArea,
     SpellDuration,
     SpellDurationUnit,
+    SpellId,
     SpellLineArea,
     SpellRangeType,
+    SpellScalingType,
     SpellTargeting,
     TimeEconomy,
     TokenKind,
@@ -46,6 +51,9 @@ from dnd_board.character_sheet import (
     build_damage_roll_payload,
     build_roll_action_payload,
     build_saving_throw_roll_payload,
+    build_spell_attack_roll_payload,
+    build_spell_condition_roll_payload,
+    build_spell_damage_roll_payload,
     resolve_roll_against_target,
     RollSource,
     armor_item_class,
@@ -64,7 +72,9 @@ from dnd_board.character_sheet import (
     sanitize_identifier,
     saving_throw_total,
     spell_area_label,
+    spell_condition_effect_at,
     spell_target_range_label,
+    spell_damage_effect_at,
     text_list,
     to_float,
     typed_json_from_value,
@@ -73,6 +83,7 @@ from dnd_board.character_sheet import (
     build_ability_check_roll_payload,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
+from dnd_board.rules.spells import spell_damage_effect, spell_entry, spell_scaling, wizard_spell_entry
 
 
 def test_typed_party_manifest_round_trips_config_objects() -> None:
@@ -356,6 +367,123 @@ def test_resolution_branches_cover_miss_heal_temp_hp_and_defense_text(monkeypatc
     assert ability_check.label == "Strength Check"
 
 
+def test_fire_bolt_spell_rolls_use_spellcasting_and_cantrip_scaling(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 3 if maximum in (6, 10) else 10)
+    fire_bolt = spell_entry(SpellId.FIRE_BOLT)
+    assert fire_bolt is not None
+
+    damage_cases = {
+        1: ("1d10", 3),
+        5: ("2d10", 6),
+        11: ("3d10", 9),
+        17: ("4d10", 12),
+    }
+    for level, (expected_die, expected_total) in damage_cases.items():
+        sheet = spell_sheet(level, [fire_bolt])
+        damage_roll = build_spell_damage_roll_payload(sheet, "player-1", fire_bolt)
+
+        assert damage_roll.source.section == SheetSectionType.SPELLS
+        assert damage_roll.source.sourceId == "fireBolt"
+        assert damage_roll.source.actionId == "damage-0"
+        assert damage_roll.label == "Spell Damage"
+        assert damage_roll.die == expected_die
+        assert damage_roll.total == expected_total
+        assert damage_roll.damageType == DamageType.FIRE
+
+    attack_roll = build_spell_attack_roll_payload(spell_sheet(1, [fire_bolt]), "player-1", fire_bolt)
+
+    assert attack_roll.source.section == SheetSectionType.SPELLS
+    assert attack_roll.source.sourceId == "fireBolt"
+    assert attack_roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS
+    assert attack_roll.label == "Spell Attack"
+    assert attack_roll.modifier == 5
+    assert attack_roll.total == 15
+    assert [(part.source, part.value) for part in attack_roll.modifierBreakdown] == [("Intelligence", 3), ("Proficiency", 2)]
+    assert attack_roll.damageType == DamageType.FIRE
+
+    assert spell_damage_effect_at(fire_bolt, -1) is None
+    assert spell_damage_effect_at(replace(fire_bolt, effects=None), 0) is None
+    with pytest.raises(ValueError, match="Spell damage effect not found"):
+        build_spell_damage_roll_payload(spell_sheet(1, [fire_bolt]), "player-1", fire_bolt, effect_index=1)
+
+    unscaled_spell = replace(fire_bolt, effects=[spell_damage_effect(2, DiceType.D6, DamageType.FORCE)])
+    unscaled_roll = build_spell_damage_roll_payload(spell_sheet(20, [unscaled_spell]), "player-1", unscaled_spell)
+
+    assert unscaled_roll.die == "2d6"
+    assert unscaled_roll.total == 6
+
+    boosted_spell = replace(
+        fire_bolt,
+        effects=[
+            spell_damage_effect(
+                1,
+                DiceType.D6,
+                DamageType.FORCE,
+                static_bonus=2,
+                bonus_ability=AbilityType.INTELLIGENCE,
+                scaling=[spell_scaling(SpellScalingType.SPELL_SLOT_LEVEL, dice_count=1, dice_type=DiceType.D6)],
+            )
+        ],
+    )
+    boosted_roll = build_spell_damage_roll_payload(spell_sheet(20, [boosted_spell]), "player-1", boosted_spell)
+
+    assert boosted_roll.die == "1d6"
+    assert boosted_roll.modifier == 5
+    assert boosted_roll.total == 8
+    assert [(part.source, part.value) for part in boosted_roll.modifierBreakdown] == [("Spell", 2), ("Intelligence", 3)]
+
+
+def test_burning_hands_spell_damage_scales_by_spell_slot(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 2)
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    assert burning_hands is not None
+
+    sheet = spell_sheet(5, [burning_hands])
+    first_level = build_spell_damage_roll_payload(sheet, "player-1", burning_hands, spell_slot_level=1)
+    second_level = build_spell_damage_roll_payload(sheet, "player-1", burning_hands, spell_slot_level=2)
+    third_level = build_spell_damage_roll_payload(sheet, "player-1", burning_hands, spell_slot_level=3)
+    below_level = build_spell_damage_roll_payload(sheet, "player-1", burning_hands, spell_slot_level=0)
+
+    assert first_level.source.actionId == "damage-0-slot-1"
+    assert first_level.die == "3d6"
+    assert first_level.total == 6
+    assert second_level.die == "4d6"
+    assert second_level.total == 8
+    assert third_level.die == "5d6"
+    assert third_level.total == 10
+    assert below_level.die == "3d6"
+    assert below_level.total == 6
+    assert {resource.spellSlotLevel for resource in sheet.resources if resource.spellSlotLevel is not None} == {1, 2, 3}
+
+
+def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None:
+    tasha = wizard_spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
+    assert tasha is not None
+
+    sheet = spell_sheet(5, [tasha])
+    effect_roll = build_spell_condition_roll_payload(sheet, "player-1", tasha)
+
+    assert effect_roll.source.section == SheetSectionType.SPELLS
+    assert effect_roll.source.sourceId == "tashaSHideousLaughter"
+    assert effect_roll.source.actionId == "condition-0"
+    assert effect_roll.label == "Spell Effect"
+    assert effect_roll.dice == []
+    assert effect_roll.conditionEffects is not None
+    assert [effect.condition for effect in effect_roll.conditionEffects] == [ConditionType.PRONE, ConditionType.INCAPACITATED]
+    assert {effect.mode for effect in effect_roll.conditionEffects} == {ConditionApplicationMode.TARGET_SAVE}
+    assert {effect.savingThrow for effect in effect_roll.conditionEffects} == {AbilityType.WISDOM}
+    assert {effect.saveDc for effect in effect_roll.conditionEffects} == {14}
+    assert {effect.removalTrigger for effect in effect_roll.conditionEffects} == {ConditionRemovalTrigger.AFTER_TAKING_DAMAGE}
+    assert {effect.removalSavingThrow for effect in effect_roll.conditionEffects} == {AbilityType.WISDOM}
+    assert {effect.removalSaveDc for effect in effect_roll.conditionEffects} == {14}
+    assert {effect.removalAdvantage for effect in effect_roll.conditionEffects} == {True}
+
+    assert spell_condition_effect_at(tasha, -1) is None
+    assert spell_condition_effect_at(replace(tasha, effects=None), 0) is None
+    with pytest.raises(ValueError, match="Spell condition effect not found"):
+        build_spell_condition_roll_payload(sheet, "player-1", replace(tasha, effects=[]))
+
+
 def test_typed_json_and_formatter_edge_cases(monkeypatch) -> None:
     assert typed_json_to_value(typed_json_from_value([1, 2]), list[int]) == [1, 2]
     assert typed_json_to_value(typed_json_from_value([1, 2])) == [1, 2]
@@ -470,6 +598,27 @@ def basic_sheet():
             maxHp=20,
             abilityScores=AbilityScores(strength=16, dexterity=12, constitution=14, intelligence=10, wisdom=10, charisma=10),
             sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)]),
+        ),
+        current_hp=None,
+        resource_overrides={},
+    )
+
+
+def spell_sheet(level, spells):
+    return build_character_sheet(
+        token_id="wizard",
+        kind=TokenKind.CHARACTER,
+        name="Wizard",
+        owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(
+            id="wizard",
+            name="Wizard",
+            owner="player-1",
+            avatarUrl=None,
+            maxHp=20,
+            abilityScores=AbilityScores(strength=8, dexterity=12, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=level)], spells=spells),
         ),
         current_hp=None,
         resource_overrides={},
