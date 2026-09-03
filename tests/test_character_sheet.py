@@ -42,6 +42,7 @@ from dnd_board.character_sheet import (
     SpellId,
     SpellLineArea,
     SpellRangeType,
+    SpellSaveOutcome,
     SpellScalingType,
     SpellTargeting,
     TimeEconomy,
@@ -75,6 +76,7 @@ from dnd_board.character_sheet import (
     spell_condition_effect_at,
     spell_target_range_label,
     spell_damage_effect_at,
+    scaled_spell_effect_instance_count,
     text_list,
     to_float,
     typed_json_from_value,
@@ -83,7 +85,7 @@ from dnd_board.character_sheet import (
     build_ability_check_roll_payload,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
-from dnd_board.rules.spells import spell_damage_effect, spell_entry, spell_scaling, wizard_spell_entry
+from dnd_board.rules.spells import cleric_spell_entry, spell_damage_effect, spell_entry, spell_scaling, wizard_spell_entry
 
 
 def test_typed_party_manifest_round_trips_config_objects() -> None:
@@ -454,6 +456,112 @@ def test_burning_hands_spell_damage_scales_by_spell_slot(monkeypatch) -> None:
     assert below_level.die == "3d6"
     assert below_level.total == 6
     assert {resource.spellSlotLevel for resource in sheet.resources if resource.spellSlotLevel is not None} == {1, 2, 3}
+
+
+def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 3)
+    acid_splash = wizard_spell_entry(SpellId.ACID_SPLASH)
+    guiding_bolt = cleric_spell_entry(SpellId.GUIDING_BOLT)
+    eldritch_blast = spell_entry(SpellId.ELDRITCH_BLAST)
+    inflict_wounds = cleric_spell_entry(SpellId.INFLICT_WOUNDS)
+    divine_smite = spell_entry(SpellId.DIVINE_SMITE)
+    magic_missile = wizard_spell_entry(SpellId.MAGIC_MISSILE)
+    ray_of_sickness = wizard_spell_entry(SpellId.RAY_OF_SICKNESS)
+    thunderwave = wizard_spell_entry(SpellId.THUNDERWAVE)
+    assert acid_splash is not None
+    assert guiding_bolt is not None
+    assert eldritch_blast is not None
+    assert inflict_wounds is not None
+    assert divine_smite is not None
+    assert magic_missile is not None
+    assert ray_of_sickness is not None
+    assert thunderwave is not None
+    ice_knife = wizard_spell_entry(SpellId.ICE_KNIFE)
+    assert ice_knife is not None
+
+    acid_roll = build_spell_damage_roll_payload(spell_sheet(11, [acid_splash]), "player-1", acid_splash)
+    guiding_roll = build_spell_damage_roll_payload(spell_sheet(5, [guiding_bolt]), "player-1", guiding_bolt, spell_slot_level=3)
+    eldritch_roll = build_spell_damage_roll_payload(spell_sheet(11, [eldritch_blast]), "player-1", eldritch_blast, instance_index=2)
+    inflict_roll = build_spell_damage_roll_payload(spell_sheet(5, [inflict_wounds]), "player-1", inflict_wounds, spell_slot_level=2)
+    divine_smite_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=0, spell_slot_level=3)
+    divine_smite_bonus_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=1)
+    ice_target_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=0)
+    ice_blast_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=1, spell_slot_level=2)
+    missile_roll = build_spell_damage_roll_payload(spell_sheet(5, [magic_missile]), "player-1", magic_missile, spell_slot_level=3, instance_index=4)
+    ray_roll = build_spell_damage_roll_payload(spell_sheet(5, [ray_of_sickness]), "player-1", ray_of_sickness, spell_slot_level=3)
+    thunderwave_roll = build_spell_damage_roll_payload(spell_sheet(5, [thunderwave]), "player-1", thunderwave, spell_slot_level=2)
+
+    assert acid_roll.die == "3d6"
+    assert acid_roll.total == 9
+    assert acid_roll.damageType == DamageType.ACID
+    assert acid_roll.damageSavingThrow == AbilityType.DEXTERITY
+    assert acid_roll.damageSaveOutcome == SpellSaveOutcome.NEGATES
+
+    assert guiding_roll.die == "6d6"
+    assert guiding_roll.total == 18
+    assert guiding_roll.damageType == DamageType.RADIANT
+
+    assert eldritch_roll.source.actionId == "damage-0-instance-2"
+    assert eldritch_roll.label == "Beam 3 Damage"
+    assert eldritch_roll.die == "1d10"
+    assert eldritch_roll.total == 3
+    assert eldritch_roll.damageType == DamageType.FORCE
+    assert eldritch_blast.effects is not None
+    assert scaled_spell_effect_instance_count(eldritch_blast.effects[0], spell_sheet(1, [eldritch_blast]), eldritch_blast.level) == 1
+    assert scaled_spell_effect_instance_count(eldritch_blast.effects[0], spell_sheet(5, [eldritch_blast]), eldritch_blast.level) == 2
+    assert scaled_spell_effect_instance_count(eldritch_blast.effects[0], spell_sheet(11, [eldritch_blast]), eldritch_blast.level) == 3
+    assert scaled_spell_effect_instance_count(eldritch_blast.effects[0], spell_sheet(17, [eldritch_blast]), eldritch_blast.level) == 4
+    with pytest.raises(ValueError, match="Spell damage instance not found"):
+        build_spell_damage_roll_payload(spell_sheet(11, [eldritch_blast]), "player-1", eldritch_blast, instance_index=3)
+
+    assert inflict_roll.die == "3d10"
+    assert inflict_roll.total == 9
+    assert inflict_roll.damageType == DamageType.NECROTIC
+    assert inflict_roll.damageSavingThrow == AbilityType.CONSTITUTION
+    assert inflict_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert divine_smite_roll.label == "Smite Damage"
+    assert divine_smite_roll.die == "4d8"
+    assert divine_smite_roll.total == 12
+    assert divine_smite_roll.damageType == DamageType.RADIANT
+    assert divine_smite_bonus_roll.label == "Fiend/Undead Bonus Damage"
+    assert divine_smite_bonus_roll.die == "1d8"
+    assert divine_smite_bonus_roll.total == 3
+    assert divine_smite_bonus_roll.damageType == DamageType.RADIANT
+
+    assert ice_target_roll.label == "Target Damage"
+    assert ice_target_roll.die == "1d10"
+    assert ice_target_roll.damageType == DamageType.PIERCING
+    assert ice_blast_roll.label == "Blast Damage"
+    assert ice_blast_roll.die == "3d6"
+    assert ice_blast_roll.damageType == DamageType.COLD
+    assert ice_blast_roll.damageSavingThrow == AbilityType.DEXTERITY
+    assert ice_blast_roll.damageSaveOutcome == SpellSaveOutcome.NEGATES
+
+    assert missile_roll.source.actionId == "damage-0-slot-3-instance-4"
+    assert missile_roll.label == "Dart 5 Damage"
+    assert missile_roll.die == "1d4"
+    assert missile_roll.modifier == 1
+    assert missile_roll.total == 4
+    assert missile_roll.damageType == DamageType.FORCE
+    assert [(part.source, part.value) for part in missile_roll.modifierBreakdown] == [("Spell", 1)]
+    assert magic_missile.effects is not None
+    assert scaled_spell_effect_instance_count(magic_missile.effects[0], spell_sheet(5, [magic_missile]), magic_missile.level, 3) == 5
+    with pytest.raises(ValueError, match="Spell damage instance not found"):
+        build_spell_damage_roll_payload(spell_sheet(5, [magic_missile]), "player-1", magic_missile, spell_slot_level=3, instance_index=5)
+
+    assert ray_roll.die == "4d8"
+    assert ray_roll.total == 12
+    assert ray_roll.damageType == DamageType.POISON
+    assert ray_roll.conditionEffects is not None
+    assert ray_roll.conditionEffects[0].condition == ConditionType.POISONED
+    assert ray_roll.conditionEffects[0].mode == ConditionApplicationMode.DIRECT
+
+    assert thunderwave_roll.die == "3d8"
+    assert thunderwave_roll.total == 9
+    assert thunderwave_roll.damageType == DamageType.THUNDER
+    assert thunderwave_roll.damageSavingThrow == AbilityType.CONSTITUTION
+    assert thunderwave_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
 
 
 def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None:

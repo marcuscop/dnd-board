@@ -49,6 +49,7 @@ from dnd_board.character_sheet import (
     SkillType,
     SpellId,
     SpellSource,
+    SpellStatus,
     TimeEconomy,
     WeaponCategory,
     WeaponProperty,
@@ -1356,6 +1357,61 @@ def test_player_can_roll_tashas_hideous_laughter_effect_and_dm_can_preserve_roll
     assert damage_resolution_body["responseRolls"][0]["dice"] == [2, 20]
     assert damage_resolution_body["responseRolls"][0]["die"] == "2d20kh1"
     assert damage_resolution_body["responseRolls"][0]["total"] == 19
+
+
+def test_spell_damage_saves_can_negate_and_damage_can_apply_conditions(tmp_path, monkeypatch) -> None:
+    acid_splash = wizard_spell_entry(SpellId.ACID_SPLASH)
+    ray_of_sickness = wizard_spell_entry(SpellId.RAY_OF_SICKNESS)
+    assert acid_splash is not None
+    assert ray_of_sickness is not None
+    write_party_campaign(
+        tmp_path,
+        "spell-save-condition-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[acid_splash, ray_of_sickness]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=20, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)], savingThrowProficiencies=[AbilityType.DEXTERITY]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 20 if maximum == 20 else 5)
+    client = TestClient(server.app)
+
+    acid_damage = client.post("/api/rooms/spell-save-condition-test/sheet/player-1/spells/acidSplash/rolls/damage?playerKey=player-1")
+    acid_roll = acid_damage.json()["roll"]
+    acid_resolution = client.post(f"/api/rooms/spell-save-condition-test/rolls/{acid_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target_after_acid = client.get("/api/rooms/spell-save-condition-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    acid_resolution_body = acid_resolution.json()["resolution"]
+
+    assert acid_damage.status_code == 200
+    assert acid_roll["damageSavingThrow"] == "dexterity"
+    assert acid_roll["damageSaveOutcome"] == "negates"
+    assert acid_resolution.status_code == 200
+    assert target_after_acid["hp"] == {"current": 30, "max": 30, "temporary": 0}
+    assert "passes DC 15 Dexterity save and takes no damage" in acid_resolution_body["outcome"]
+    assert acid_resolution_body["responseRolls"][0]["label"] == "Dexterity Save"
+
+    ray_damage = client.post("/api/rooms/spell-save-condition-test/sheet/player-1/spells/rayOfSickness/rolls/damage?playerKey=player-1&spellSlotLevel=2")
+    ray_roll = ray_damage.json()["roll"]
+    ray_resolution = client.post(f"/api/rooms/spell-save-condition-test/rolls/{ray_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target_after_ray = client.get("/api/rooms/spell-save-condition-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert ray_damage.status_code == 200
+    assert ray_roll["die"] == "3d8"
+    assert ray_roll["damageType"] == "poison"
+    assert ray_roll["conditionEffects"][0]["condition"] == "poisoned"
+    assert ray_resolution.status_code == 200
+    assert target_after_ray["hp"] == {"current": 15, "max": 30, "temporary": 0}
+    assert "poisoned" in target_after_ray["conditions"]
 
 
 def test_player_can_roll_ability_check_and_saving_throw(tmp_path, monkeypatch) -> None:
@@ -3583,7 +3639,15 @@ def test_member_spell_pruning_paths() -> None:
     mage_hand = arcane_trickster_catalog_spell("mageHand")
     assert shield is not None
     assert mage_hand is not None
-    arcane_trickster_mage_hand = replace(mage_hand, source=SpellSource.ARCANE_TRICKSTER)
+    arcane_trickster_mage_hand = replace(
+        mage_hand,
+        status=SpellStatus(
+            source=SpellSource.ARCANE_TRICKSTER,
+            castingAbility=mage_hand.castingAbility,
+            resourceId=mage_hand.resourceId,
+            reset=mage_hand.reset,
+        ),
+    )
 
     fighter_member = PartyMemberConfig(
         id="player-1",

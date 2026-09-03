@@ -225,12 +225,52 @@ def test_catalog_spell_effects_round_trip_through_typed_json() -> None:
 
 
 def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
+    acid_splash = spell_entry(SpellId.ACID_SPLASH)
     fire_bolt = spell_entry(SpellId.FIRE_BOLT)
+    armor_of_agathys = spell_entry(SpellId.ARMOR_OF_AGATHYS)
+    arms_of_hadar = spell_entry(SpellId.ARMS_OF_HADAR)
     burning_hands = spell_entry(SpellId.BURNING_HANDS)
+    charm_person = spell_entry(SpellId.CHARM_PERSON)
+    chill_touch = spell_entry(SpellId.CHILL_TOUCH)
+    color_spray = spell_entry(SpellId.COLOR_SPRAY)
     cure_wounds = spell_entry(SpellId.CURE_WOUNDS)
+    dissonant_whispers = spell_entry(SpellId.DISSONANT_WHISPERS)
+    divine_smite = spell_entry(SpellId.DIVINE_SMITE)
+    eldritch_blast = spell_entry(SpellId.ELDRITCH_BLAST)
+    entangle = spell_entry(SpellId.ENTANGLE)
+    false_life = spell_entry(SpellId.FALSE_LIFE)
+    grease = spell_entry(SpellId.GREASE)
+    guiding_bolt = spell_entry(SpellId.GUIDING_BOLT)
+    healing_word = spell_entry(SpellId.HEALING_WORD)
+    hellish_rebuke = spell_entry(SpellId.HELLISH_REBUKE)
     hold_person = spell_entry(SpellId.HOLD_PERSON)
+    ice_knife = spell_entry(SpellId.ICE_KNIFE)
+    inflict_wounds = spell_entry(SpellId.INFLICT_WOUNDS)
+    magic_missile = spell_entry(SpellId.MAGIC_MISSILE)
+    mind_sliver = spell_entry(SpellId.MIND_SLIVER)
+    poison_spray = spell_entry(SpellId.POISON_SPRAY)
+    ray_of_frost = spell_entry(SpellId.RAY_OF_FROST)
+    ray_of_sickness = spell_entry(SpellId.RAY_OF_SICKNESS)
+    sacred_flame = spell_entry(SpellId.SACRED_FLAME)
+    shocking_grasp = spell_entry(SpellId.SHOCKING_GRASP)
+    starry_wisp = spell_entry(SpellId.STARRY_WISP)
     tasha = spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
+    thunderclap = spell_entry(SpellId.THUNDERCLAP)
+    thunderwave = spell_entry(SpellId.THUNDERWAVE)
+    vicious_mockery = spell_entry(SpellId.VICIOUS_MOCKERY)
     web = spell_entry(SpellId.WEB)
+    witch_bolt = spell_entry(SpellId.WITCH_BOLT)
+    word_of_radiance = spell_entry(SpellId.WORD_OF_RADIANCE)
+
+    assert acid_splash is not None and acid_splash.effects is not None
+    assert acid_splash.targeting.area.shape == SpellAreaShape.RADIUS
+    assert acid_splash.effects[0].damage is not None
+    assert acid_splash.effects[0].damage.damageType == DamageType.ACID
+    assert acid_splash.effects[0].savingThrow is not None
+    assert acid_splash.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert acid_splash.effects[0].savingThrow.outcome == SpellSaveOutcome.NEGATES
+    assert acid_splash.effects[0].scaling is not None
+    assert acid_splash.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
 
     assert fire_bolt is not None and fire_bolt.effects is not None
     assert fire_bolt.effects[0].damage is not None
@@ -238,6 +278,24 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
     assert fire_bolt.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
     assert fire_bolt.effects[0].scaling is not None
     assert fire_bolt.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
+
+    assert armor_of_agathys is not None and armor_of_agathys.effects is not None
+    assert armor_of_agathys.effects[0].temporaryHitPoints is not None
+    assert armor_of_agathys.effects[0].temporaryHitPoints.staticBonus == 5
+    assert armor_of_agathys.effects[0].scaling is not None
+    assert armor_of_agathys.effects[0].scaling[0].additionalStaticBonus == 5
+    assert armor_of_agathys.effects[1].damage is not None
+    assert armor_of_agathys.effects[1].damage.damageType == DamageType.COLD
+    assert armor_of_agathys.effects[1].trigger == SpellEffectTrigger.SPECIAL
+
+    assert arms_of_hadar is not None and arms_of_hadar.effects is not None
+    assert arms_of_hadar.targeting.area.shape == SpellAreaShape.RADIUS
+    assert arms_of_hadar.effects[0].damage is not None
+    assert arms_of_hadar.effects[0].damage.dice.dice == "2d6"
+    assert arms_of_hadar.effects[0].damage.damageType == DamageType.NECROTIC
+    assert arms_of_hadar.effects[0].savingThrow is not None
+    assert arms_of_hadar.effects[0].savingThrow.ability == AbilityType.STRENGTH
+    assert arms_of_hadar.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
 
     assert burning_hands is not None and burning_hands.effects is not None
     assert burning_hands.targeting.area.shape == SpellAreaShape.CONE
@@ -250,13 +308,115 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
     assert burning_hands.effects[0].scaling is not None
     assert burning_hands.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
 
+    assert charm_person is not None and charm_person.effects is not None
+    assert charm_person.effects[0].conditions is not None
+    assert charm_person.effects[0].conditions[0].condition == ConditionType.CHARMED
+    assert charm_person.effects[0].savingThrow is not None
+    assert charm_person.effects[0].savingThrow.ability == AbilityType.WISDOM
+    assert charm_person.effects[0].scaling is not None
+    assert charm_person.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
+
+    assert chill_touch is not None and chill_touch.effects is not None
+    assert chill_touch.effects[0].damage is not None
+    assert chill_touch.effects[0].damage.dice.dice == "1d10"
+    assert chill_touch.effects[0].damage.damageType == DamageType.NECROTIC
+    assert chill_touch.effects[0].attack == SpellAttackType.MELEE_SPELL_ATTACK
+    assert chill_touch.effects[0].scaling is not None
+    assert chill_touch.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
+
+    assert color_spray is not None and color_spray.effects is not None
+    assert color_spray.targeting.area.shape == SpellAreaShape.CONE
+    assert color_spray.effects[0].conditions is not None
+    assert color_spray.effects[0].conditions[0].condition == ConditionType.BLINDED
+    assert color_spray.effects[0].savingThrow is not None
+    assert color_spray.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert color_spray.effects[0].scaling is None
+
     assert cure_wounds is not None and cure_wounds.effects is not None
     assert cure_wounds.effects[0].healing is not None
     assert cure_wounds.effects[0].healing.dice.dice == "2d8"
-    assert cure_wounds.effects[0].healing.dice.bonusAbility == AbilityType.INTELLIGENCE
+    assert cure_wounds.effects[0].healing.dice.bonusSpellcastingAbility is True
     assert cure_wounds.effects[0].scaling is not None
     assert cure_wounds.effects[0].scaling[0].additionalDice is not None
     assert cure_wounds.effects[0].scaling[0].additionalDice.dice == "2d8"
+
+    assert dissonant_whispers is not None and dissonant_whispers.effects is not None
+    assert dissonant_whispers.effects[0].damage is not None
+    assert dissonant_whispers.effects[0].damage.damageType == DamageType.PSYCHIC
+    assert dissonant_whispers.effects[0].savingThrow is not None
+    assert dissonant_whispers.effects[0].savingThrow.ability == AbilityType.WISDOM
+    assert dissonant_whispers.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert dissonant_whispers.effects[0].scaling is not None
+    assert dissonant_whispers.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
+
+    assert divine_smite is not None and divine_smite.effects is not None
+    assert divine_smite.effects[0].damage is not None
+    assert divine_smite.effects[0].damage.dice.dice == "2d8"
+    assert divine_smite.effects[0].damage.damageType == DamageType.RADIANT
+    assert divine_smite.effects[0].trigger == SpellEffectTrigger.ON_HIT
+    assert divine_smite.effects[0].actionLabel == "Smite"
+    assert divine_smite.effects[0].scaling is not None
+    assert divine_smite.effects[0].scaling[0].additionalDice is not None
+    assert divine_smite.effects[0].scaling[0].additionalDice.dice == "1d8"
+    assert divine_smite.effects[1].damage is not None
+    assert divine_smite.effects[1].damage.dice.dice == "1d8"
+    assert divine_smite.effects[1].damage.damageType == DamageType.RADIANT
+    assert divine_smite.effects[1].trigger == SpellEffectTrigger.SPECIAL
+    assert divine_smite.effects[1].actionLabel == "Fiend/Undead Bonus"
+
+    assert eldritch_blast is not None and eldritch_blast.effects is not None
+    assert eldritch_blast.effects[0].damage is not None
+    assert eldritch_blast.effects[0].damage.dice.dice == "1d10"
+    assert eldritch_blast.effects[0].damage.damageType == DamageType.FORCE
+    assert eldritch_blast.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+    assert eldritch_blast.effects[0].instances == 1
+    assert eldritch_blast.effects[0].instanceLabel == "Beam"
+    assert eldritch_blast.effects[0].scaling is not None
+    assert eldritch_blast.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
+    assert eldritch_blast.effects[0].scaling[0].additionalInstances == 1
+
+    assert entangle is not None and entangle.effects is not None
+    assert entangle.targeting.area.shape == SpellAreaShape.CUBE
+    assert entangle.effects[0].conditions is not None
+    assert entangle.effects[0].conditions[0].condition == ConditionType.RESTRAINED
+    assert entangle.effects[0].savingThrow is not None
+    assert entangle.effects[0].savingThrow.ability == AbilityType.STRENGTH
+
+    assert false_life is not None and false_life.effects is not None
+    assert false_life.effects[0].temporaryHitPoints is not None
+    assert false_life.effects[0].temporaryHitPoints.dice == "2d4"
+    assert false_life.effects[0].temporaryHitPoints.staticBonus == 4
+    assert false_life.effects[0].scaling is not None
+    assert false_life.effects[0].scaling[0].additionalStaticBonus == 5
+
+    assert grease is not None and grease.effects is not None
+    assert grease.targeting.area.shape == SpellAreaShape.CUBE
+    assert grease.effects[0].conditions is not None
+    assert grease.effects[0].conditions[0].condition == ConditionType.PRONE
+    assert grease.effects[0].savingThrow is not None
+    assert grease.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+
+    assert guiding_bolt is not None and guiding_bolt.effects is not None
+    assert guiding_bolt.effects[0].damage is not None
+    assert guiding_bolt.effects[0].damage.dice.dice == "4d6"
+    assert guiding_bolt.effects[0].damage.damageType == DamageType.RADIANT
+    assert guiding_bolt.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+    assert guiding_bolt.effects[0].scaling is not None
+    assert guiding_bolt.effects[0].scaling[0].additionalDice is not None
+    assert guiding_bolt.effects[0].scaling[0].additionalDice.dice == "1d6"
+
+    assert healing_word is not None and healing_word.effects is not None
+    assert healing_word.effects[0].healing is not None
+    assert healing_word.effects[0].healing.dice.dice == "2d4"
+    assert healing_word.effects[0].healing.dice.bonusSpellcastingAbility is True
+
+    assert hellish_rebuke is not None and hellish_rebuke.effects is not None
+    assert hellish_rebuke.effects[0].damage is not None
+    assert hellish_rebuke.effects[0].damage.dice.dice == "2d10"
+    assert hellish_rebuke.effects[0].damage.damageType == DamageType.FIRE
+    assert hellish_rebuke.effects[0].savingThrow is not None
+    assert hellish_rebuke.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert hellish_rebuke.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
 
     assert hold_person is not None and hold_person.effects is not None
     assert hold_person.effects[0].conditions is not None
@@ -264,6 +424,92 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
     assert hold_person.effects[0].savingThrow is not None
     assert hold_person.effects[0].savingThrow.ability == AbilityType.WISDOM
     assert hold_person.effects[0].savingThrow.repeat == SpellEffectTrigger.END_OF_TURN
+
+    assert ice_knife is not None and ice_knife.effects is not None
+    assert ice_knife.targeting.area.shape == SpellAreaShape.RADIUS
+    assert ice_knife.effects[0].damage is not None
+    assert ice_knife.effects[0].damage.damageType == DamageType.PIERCING
+    assert ice_knife.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+    assert ice_knife.effects[0].actionLabel == "Target"
+    assert ice_knife.effects[1].damage is not None
+    assert ice_knife.effects[1].damage.damageType == DamageType.COLD
+    assert ice_knife.effects[1].actionLabel == "Blast"
+    assert ice_knife.effects[1].savingThrow is not None
+    assert ice_knife.effects[1].savingThrow.ability == AbilityType.DEXTERITY
+    assert ice_knife.effects[1].savingThrow.outcome == SpellSaveOutcome.NEGATES
+    assert ice_knife.effects[1].scaling is not None
+    assert ice_knife.effects[1].scaling[0].additionalDice is not None
+    assert ice_knife.effects[1].scaling[0].additionalDice.dice == "1d6"
+
+    assert inflict_wounds is not None and inflict_wounds.effects is not None
+    assert inflict_wounds.effects[0].damage is not None
+    assert inflict_wounds.effects[0].damage.dice.dice == "2d10"
+    assert inflict_wounds.effects[0].damage.damageType == DamageType.NECROTIC
+    assert inflict_wounds.effects[0].savingThrow is not None
+    assert inflict_wounds.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert inflict_wounds.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert magic_missile is not None and magic_missile.effects is not None
+    assert magic_missile.effects[0].damage is not None
+    assert magic_missile.effects[0].damage.dice.dice == "1d4"
+    assert magic_missile.effects[0].damage.dice.staticBonus == 1
+    assert magic_missile.effects[0].damage.damageType == DamageType.FORCE
+    assert magic_missile.effects[0].instances == 3
+    assert magic_missile.effects[0].instanceLabel == "Dart"
+    assert magic_missile.effects[0].scaling is not None
+    assert magic_missile.effects[0].scaling[0].additionalInstances == 1
+
+    assert mind_sliver is not None and mind_sliver.effects is not None
+    assert mind_sliver.effects[0].damage is not None
+    assert mind_sliver.effects[0].damage.damageType == DamageType.PSYCHIC
+    assert mind_sliver.effects[0].savingThrow is not None
+    assert mind_sliver.effects[0].savingThrow.ability == AbilityType.INTELLIGENCE
+    assert mind_sliver.effects[0].scaling is not None
+    assert mind_sliver.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
+
+    assert poison_spray is not None and poison_spray.effects is not None
+    assert poison_spray.effects[0].damage is not None
+    assert poison_spray.effects[0].damage.dice.dice == "1d12"
+    assert poison_spray.effects[0].damage.damageType == DamageType.POISON
+    assert poison_spray.effects[0].savingThrow is not None
+    assert poison_spray.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert poison_spray.effects[0].savingThrow.outcome == SpellSaveOutcome.NEGATES
+
+    assert ray_of_frost is not None and ray_of_frost.effects is not None
+    assert ray_of_frost.effects[0].damage is not None
+    assert ray_of_frost.effects[0].damage.damageType == DamageType.COLD
+    assert ray_of_frost.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+    assert ray_of_frost.effects[0].scaling is not None
+    assert ray_of_frost.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
+
+    assert ray_of_sickness is not None and ray_of_sickness.effects is not None
+    assert ray_of_sickness.effects[0].damage is not None
+    assert ray_of_sickness.effects[0].damage.damageType == DamageType.POISON
+    assert ray_of_sickness.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+    assert ray_of_sickness.effects[0].conditions is not None
+    assert ray_of_sickness.effects[0].conditions[0].condition == ConditionType.POISONED
+    assert ray_of_sickness.effects[0].scaling is not None
+    assert ray_of_sickness.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
+
+    assert sacred_flame is not None and sacred_flame.effects is not None
+    assert sacred_flame.effects[0].damage is not None
+    assert sacred_flame.effects[0].damage.damageType == DamageType.RADIANT
+    assert sacred_flame.effects[0].savingThrow is not None
+    assert sacred_flame.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert sacred_flame.effects[0].scaling is not None
+    assert sacred_flame.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
+
+    assert shocking_grasp is not None and shocking_grasp.effects is not None
+    assert shocking_grasp.effects[0].damage is not None
+    assert shocking_grasp.effects[0].damage.damageType == DamageType.LIGHTNING
+    assert shocking_grasp.effects[0].attack == SpellAttackType.MELEE_SPELL_ATTACK
+
+    assert starry_wisp is not None and starry_wisp.effects is not None
+    assert starry_wisp.effects[0].damage is not None
+    assert starry_wisp.effects[0].damage.damageType == DamageType.RADIANT
+    assert starry_wisp.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+    assert starry_wisp.effects[0].scaling is not None
+    assert starry_wisp.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
 
     assert tasha is not None and tasha.effects is not None
     assert tasha.effects[0].kind == SpellEffectKind.CONDITION
@@ -273,15 +519,59 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
     assert tasha.effects[0].conditions is not None
     assert [condition.condition for condition in tasha.effects[0].conditions] == [ConditionType.PRONE, ConditionType.INCAPACITATED]
     assert {condition.removalTrigger for condition in tasha.effects[0].conditions} == {ConditionRemovalTrigger.AFTER_TAKING_DAMAGE}
+
+    assert word_of_radiance is not None and word_of_radiance.effects is not None
+    assert word_of_radiance.targeting.area.shape == SpellAreaShape.RADIUS
+    assert word_of_radiance.effects[0].damage is not None
+    assert word_of_radiance.effects[0].damage.damageType == DamageType.RADIANT
+    assert word_of_radiance.effects[0].savingThrow is not None
+    assert word_of_radiance.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
     assert {condition.removalAdvantage for condition in tasha.effects[0].conditions} == {True}
     assert tasha.effects[0].scaling is not None
     assert tasha.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
+
+    assert thunderclap is not None and thunderclap.effects is not None
+    assert thunderclap.targeting.area.shape == SpellAreaShape.RADIUS
+    assert thunderclap.effects[0].damage is not None
+    assert thunderclap.effects[0].damage.damageType == DamageType.THUNDER
+    assert thunderclap.effects[0].savingThrow is not None
+    assert thunderclap.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert thunderclap.effects[0].scaling is not None
+    assert thunderclap.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
+
+    assert thunderwave is not None and thunderwave.effects is not None
+    assert thunderwave.targeting.area.shape == SpellAreaShape.CUBE
+    assert thunderwave.effects[0].damage is not None
+    assert thunderwave.effects[0].damage.damageType == DamageType.THUNDER
+    assert thunderwave.effects[0].target == SpellEffectTarget.AREA
+    assert thunderwave.effects[0].savingThrow is not None
+    assert thunderwave.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert thunderwave.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert thunderwave.effects[0].scaling is not None
+    assert thunderwave.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
+
+    assert vicious_mockery is not None and vicious_mockery.effects is not None
+    assert vicious_mockery.effects[0].damage is not None
+    assert vicious_mockery.effects[0].damage.damageType == DamageType.PSYCHIC
+    assert vicious_mockery.effects[0].savingThrow is not None
+    assert vicious_mockery.effects[0].savingThrow.ability == AbilityType.WISDOM
+    assert vicious_mockery.effects[0].scaling is not None
+    assert vicious_mockery.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
 
     assert web is not None and web.effects is not None
     assert web.targeting.area.shape == SpellAreaShape.CUBE
     assert web.effects[0].target == SpellEffectTarget.AREA
     assert web.effects[0].conditions is not None
     assert web.effects[0].conditions[0].condition == ConditionType.RESTRAINED
+
+    assert witch_bolt is not None and witch_bolt.effects is not None
+    assert witch_bolt.effects[0].damage is not None
+    assert witch_bolt.effects[0].damage.dice.dice == "2d12"
+    assert witch_bolt.effects[0].damage.damageType == DamageType.LIGHTNING
+    assert witch_bolt.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+    assert witch_bolt.effects[0].scaling is not None
+    assert witch_bolt.effects[0].scaling[0].additionalDice is not None
+    assert witch_bolt.effects[0].scaling[0].additionalDice.dice == "1d12"
     assert web.effects[1].damage is not None
     assert web.effects[1].damage.dice.dice == "2d4"
 

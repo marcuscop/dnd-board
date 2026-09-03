@@ -715,10 +715,11 @@ export function App() {
   );
 
   const rollSpellDamage = useCallback(
-    async (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => {
+    async (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => {
       const slotQuery = spellSlotLevel === undefined ? "" : `&spellSlotLevel=${encodeURIComponent(spellSlotLevel)}`;
+      const instanceQuery = instanceIndex === undefined ? "" : `&instanceIndex=${encodeURIComponent(instanceIndex)}`;
       const response = await fetch(
-        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/damage?playerKey=${encodeURIComponent(playerKey)}&effectIndex=${encodeURIComponent(effectIndex)}${slotQuery}`,
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/damage?playerKey=${encodeURIComponent(playerKey)}&effectIndex=${encodeURIComponent(effectIndex)}${slotQuery}${instanceQuery}`,
         { method: "POST" }
       );
       if (!response.ok) {
@@ -1098,7 +1099,7 @@ type SheetViewProps = {
   onRollResourceAction: (sheet: CharacterSheet, abilityId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
-  onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
+  onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onRestSheets: (rest: "short" | "long") => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
@@ -1120,6 +1121,7 @@ function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onCle
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
   const showCharacterBuilder = shouldShowCharacterBuilder(isDm, playerKey, partySheets);
   const [draggingRollId, setDraggingRollId] = useState<string | null>(null);
+  const preserveDraggingRollRef = useRef(false);
   const [dropTargetSheetId, setDropTargetSheetId] = useState<string | null>(null);
   const [clearedCardRollIds, setClearedCardRollIds] = useState<Set<string>>(() => new Set());
   const draggingRoll = useMemo(() => rolls.find((roll) => roll.id === draggingRollId), [draggingRollId, rolls]);
@@ -1129,6 +1131,7 @@ function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onCle
     async (rollId: string, target: CharacterSheet, preserveRoll = false) => {
       if (!isTargetableRoll(rolls.find((roll) => roll.id === rollId))) {
         setDraggingRollId(null);
+        preserveDraggingRollRef.current = false;
         setDropTargetSheetId(null);
         return;
       }
@@ -1144,11 +1147,23 @@ function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onCle
         console.error(error);
       } finally {
         setDraggingRollId(null);
+        preserveDraggingRollRef.current = false;
         setDropTargetSheetId(null);
       }
     },
     [playerKey, rolls]
   );
+  useEffect(() => {
+    const handleShiftRollDrop = (event: Event) => {
+      const detail = (event as CustomEvent<{ rollId?: string; targetSheetId?: string }>).detail;
+      if (!detail?.rollId || !detail.targetSheetId) return;
+      const target = sheets.find((sheet) => sheet.id === detail.targetSheetId);
+      if (!target) return;
+      void applyRollToSheet(detail.rollId, target, true);
+    };
+    window.addEventListener("roll-card-shift-drop", handleShiftRollDrop);
+    return () => window.removeEventListener("roll-card-shift-drop", handleShiftRollDrop);
+  }, [applyRollToSheet, sheets]);
   const clearRollsForSheet = useCallback(
     (sheet: CharacterSheet) => {
       const resolvedCardEntryIds = rollHistory.filter((entry) => entry.resolution && entry.roll.tokenId === sheet.tokenId).map((entry) => entry.id);
@@ -1185,9 +1200,13 @@ function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onCle
           onClearSheetRolls={clearRollsForSheet}
           onDragRollEnd={() => {
             setDraggingRollId(null);
+            preserveDraggingRollRef.current = false;
             setDropTargetSheetId(null);
           }}
-          onDragRollStart={setDraggingRollId}
+          onDragRollStart={(rollId, preserveRoll) => {
+            preserveDraggingRollRef.current = preserveRoll;
+            setDraggingRollId(rollId);
+          }}
           onRollAbilityCheck={onRollAbilityCheck}
           onRollAttack={onRollAttack}
           onRollDamage={onRollDamage}
@@ -1226,9 +1245,14 @@ function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onCle
             draggingRollId={draggingRollId}
             onDragRollEnd={() => {
               setDraggingRollId(null);
+              preserveDraggingRollRef.current = false;
               setDropTargetSheetId(null);
             }}
-            onDragRollStart={setDraggingRollId}
+            onDragRollStart={(rollId, preserveRoll) => {
+              preserveDraggingRollRef.current = preserveRoll;
+              setDraggingRollId(rollId);
+            }}
+            preserveDraggingRollRef={preserveDraggingRollRef}
           />
           {otherSheets.length > 0 && (
             <SheetSection
@@ -1250,9 +1274,14 @@ function SheetView({ connection, expandedSheetId, isDm, onCreateCharacter, onCle
               draggingRollId={draggingRollId}
               onDragRollEnd={() => {
                 setDraggingRollId(null);
+                preserveDraggingRollRef.current = false;
                 setDropTargetSheetId(null);
               }}
-              onDragRollStart={setDraggingRollId}
+              onDragRollStart={(rollId, preserveRoll) => {
+                preserveDraggingRollRef.current = preserveRoll;
+                setDraggingRollId(rollId);
+              }}
+              preserveDraggingRollRef={preserveDraggingRollRef}
             />
           )}
         </div>
@@ -1950,7 +1979,8 @@ function SheetSection({
   draggingRollId,
   rolls,
   rollHistory,
-  clearedCardRollIds
+  clearedCardRollIds,
+  preserveDraggingRollRef
 }: {
   title: string;
   sheets: CharacterSheet[];
@@ -1959,7 +1989,7 @@ function SheetSection({
   onApplyRoll: (rollId: string, target: CharacterSheet, preserveRoll?: boolean) => void;
   onClearSheetRolls: (sheet: CharacterSheet) => void;
   onDragRollEnd: () => void;
-  onDragRollStart: (rollId: string) => void;
+  onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
   onDropTarget: (sheetId: string | null) => void;
   onExpand: (sheetId: string | null) => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
@@ -1970,6 +2000,7 @@ function SheetSection({
   rolls: RollPayload[];
   rollHistory: RollLogEntry[];
   clearedCardRollIds: Set<string>;
+  preserveDraggingRollRef: MutableRefObject<boolean>;
 }) {
   if (sheets.length === 0) return null;
 
@@ -1994,6 +2025,7 @@ function SheetSection({
             onUpdateProgressionChoice={onUpdateProgressionChoice}
             onUpdateSheetLevel={onUpdateSheetLevel}
             pendingRolls={rolls.filter((roll) => roll.tokenId === sheet.tokenId)}
+            preserveDraggingRollRef={preserveDraggingRollRef}
             resolvedRolls={cardResolvedRolls(sheet, rollHistory, clearedCardRollIds)}
             rollDraggable={isDm}
           />
@@ -2018,6 +2050,7 @@ function SheetCard({
   onUpdateProgressionChoice,
   onUpdateSheetLevel,
   pendingRolls,
+  preserveDraggingRollRef,
   resolvedRolls,
   rollDraggable
 }: {
@@ -2029,12 +2062,13 @@ function SheetCard({
   onApplyRoll: (rollId: string, target: CharacterSheet, preserveRoll?: boolean) => void;
   onClearSheetRolls: (sheet: CharacterSheet) => void;
   onDragRollEnd: () => void;
-  onDragRollStart: (rollId: string) => void;
+  onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
   onDropTarget: (sheetId: string | null) => void;
   onExpand: () => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   pendingRolls: RollPayload[];
+  preserveDraggingRollRef: MutableRefObject<boolean>;
   resolvedRolls: RollLogEntry[];
   rollDraggable: boolean;
 }) {
@@ -2042,6 +2076,7 @@ function SheetCard({
 
   return (
     <article
+      data-roll-drop-sheet-id={sheet.id}
       className={["sheet-card", canDrop ? "drop-ready" : "", isDropTarget ? "drop-target" : ""].filter(Boolean).join(" ")}
       onDragEnter={() => {
         if (canDrop) onDropTarget(sheet.id);
@@ -2058,7 +2093,8 @@ function SheetCard({
       onDrop={(event) => {
         if (!canDrop || !draggingRollId) return;
         event.preventDefault();
-        onApplyRoll(draggingRollId, sheet, event.shiftKey);
+        const preserveRoll = preserveDraggingRollRef.current || event.shiftKey;
+        onApplyRoll(draggingRollId, sheet, preserveRoll);
       }}
     >
       <button className="sheet-portrait" onClick={onExpand} aria-label={`Open ${sheet.name}`}>
@@ -2095,7 +2131,7 @@ function SheetCard({
                 draggable={rollDraggable && isTargetableRoll(pendingRoll)}
                 compact
                 onDragEnd={onDragRollEnd}
-                onDragStart={() => onDragRollStart(pendingRoll.id)}
+                onDragStart={(preserveRoll) => onDragRollStart(pendingRoll.id, preserveRoll)}
               />
             ))}
             {resolvedRolls.map((entry) => (
@@ -2376,7 +2412,7 @@ function RollCard({
   roller: CharacterSheet | undefined;
   draggable: boolean;
   onDragEnd: () => void;
-  onDragStart: () => void;
+  onDragStart: (preserveRoll: boolean) => void;
 }) {
   const rollParentLabel = roll.sourceLabel && roll.sourceLabel !== roll.label ? roll.sourceLabel : roll.source.sectionLabel;
 
@@ -2384,11 +2420,57 @@ function RollCard({
     <li
       className={["roll-card", draggable ? "draggable" : "", compact ? "compact" : ""].filter(Boolean).join(" ")}
       draggable={draggable}
-      onDragEnd={onDragEnd}
+      onPointerDown={(event) => {
+        if (!draggable || !event.shiftKey || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const source = event.currentTarget;
+        const rect = source.getBoundingClientRect();
+        const pointerOffsetX = event.clientX - rect.left;
+        const pointerOffsetY = event.clientY - rect.top;
+        const ghost = source.cloneNode(true) as HTMLElement;
+        ghost.classList.add("roll-pointer-ghost");
+        ghost.style.width = `${rect.width}px`;
+        ghost.style.left = "0";
+        ghost.style.top = "0";
+        document.body.appendChild(ghost);
+        onDragStart(true);
+
+        const moveGhost = (clientX: number, clientY: number) => {
+          ghost.style.transform = `translate(${clientX - pointerOffsetX}px, ${clientY - pointerOffsetY}px)`;
+        };
+        const finishShiftDrag = (clientX: number, clientY: number) => {
+          window.removeEventListener("pointermove", handlePointerMove);
+          window.removeEventListener("pointerup", handlePointerUp);
+          ghost.remove();
+          onDragEnd();
+          const target = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>("[data-roll-drop-sheet-id]");
+          if (!target?.dataset.rollDropSheetId) return;
+          window.dispatchEvent(new CustomEvent("roll-card-shift-drop", { detail: { rollId: roll.id, targetSheetId: target.dataset.rollDropSheetId } }));
+        };
+        const handlePointerMove = (moveEvent: PointerEvent) => {
+          moveGhost(moveEvent.clientX, moveEvent.clientY);
+        };
+        const handlePointerUp = (upEvent: PointerEvent) => {
+          finishShiftDrag(upEvent.clientX, upEvent.clientY);
+        };
+        moveGhost(event.clientX, event.clientY);
+        window.addEventListener("pointermove", handlePointerMove);
+        window.addEventListener("pointerup", handlePointerUp, { once: true });
+      }}
+      onDragEnd={(event) => {
+        event.currentTarget.classList.remove("drag-source-hidden");
+        onDragEnd();
+      }}
       onDragStart={(event) => {
+        const element = event.currentTarget;
+        const preserveRoll = event.shiftKey;
         event.dataTransfer.effectAllowed = "copy";
         event.dataTransfer.setData("text/plain", roll.id);
-        onDragStart();
+        onDragStart(preserveRoll);
+        window.requestAnimationFrame(() => {
+          element.classList.add("drag-source-hidden");
+        });
       }}
     >
       <span className="die-badge">
@@ -2441,7 +2523,7 @@ function RollActionList({
   rollActions: RollAction[];
   rollDraggable: boolean;
   onDragRollEnd: () => void;
-  onDragRollStart: (rollId: string) => void;
+  onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
   onRollAction: (actionId: string) => void;
 }) {
   if (rollActions.length === 0 && pendingRolls.length === 0 && resolvedRolls.length === 0) return null;
@@ -2482,7 +2564,7 @@ function SheetAbilityList({
 }: {
   canRoll: boolean;
   onDragRollEnd: () => void;
-  onDragRollStart: (rollId: string) => void;
+  onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   pendingRolls: RollPayload[];
@@ -2589,7 +2671,7 @@ function InlineRolls({
   roller: CharacterSheet;
   rollDraggable: boolean;
   onDragRollEnd: () => void;
-  onDragRollStart: (rollId: string) => void;
+  onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
 }) {
   if (pendingRolls.length === 0 && resolvedRolls.length === 0) return null;
 
@@ -2603,7 +2685,7 @@ function InlineRolls({
           draggable={rollDraggable && isTargetableRoll(pendingRoll)}
           compact
           onDragEnd={onDragRollEnd}
-          onDragStart={() => onDragRollStart(pendingRoll.id)}
+          onDragStart={(preserveRoll) => onDragRollStart(pendingRoll.id, preserveRoll)}
         />
       ))}
       {resolvedRolls.map((entry) => (
@@ -2654,7 +2736,7 @@ function FullSheet({
   resolvedRolls: RollLogEntry[];
   rollDraggable: boolean;
   onDragRollEnd: () => void;
-  onDragRollStart: (rollId: string) => void;
+  onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
   onClose: () => void;
   onRollAbilityCheck: (sheet: CharacterSheet, ability: string) => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string) => void;
@@ -2662,7 +2744,7 @@ function FullSheet({
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
-  onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
+  onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateCondition: (sheet: CharacterSheet, condition: ConditionType, active: boolean) => void;
@@ -2931,9 +3013,9 @@ function SheetSpellList({
 }: {
   canRoll: boolean;
   onDragRollEnd: () => void;
-  onDragRollStart: (rollId: string) => void;
+  onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
-  onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
+  onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   pendingRolls: RollPayload[];
@@ -2996,6 +3078,8 @@ function SheetSpellList({
                         const slotLevels = slotLevelsByDamageEffect.get(effectIndex) ?? [undefined];
                         const slotControlKey = `${spell.source}:${spell.id}:${effectIndex}`;
                         const selectedSlotLevel = selectedSpellSlots[slotControlKey] ?? slotLevels[0];
+                        const damageEffect = spellDamageEffectAt(spell, effectIndex);
+                        const instanceCount = spellDamageInstanceCount(sheet, spell, effectIndex, selectedSlotLevel);
                         return (
                           <span className="spell-roll-control" key={effectIndex}>
                             {slotLevels.length > 1 && (
@@ -3011,9 +3095,21 @@ function SheetSpellList({
                                 ))}
                               </select>
                             )}
-                            <button disabled={!canRoll} onClick={() => onRollSpellDamage(sheet, spell.id, effectIndex, selectedSlotLevel)}>
-                              Damage
-                            </button>
+                            {instanceCount > 1
+                              ? Array.from({ length: instanceCount }, (_value, instanceIndex) => (
+                                  <button
+                                    disabled={!canRoll}
+                                    key={instanceIndex}
+                                    onClick={() => onRollSpellDamage(sheet, spell.id, effectIndex, selectedSlotLevel, instanceIndex)}
+                                  >
+                                    {damageEffect?.instanceLabel || "Instance"} {instanceIndex + 1}
+                                  </button>
+                                ))
+                              : (
+                                  <button disabled={!canRoll} onClick={() => onRollSpellDamage(sheet, spell.id, effectIndex, selectedSlotLevel)}>
+                                    {spellDamageButtonLabel(damageEffect)}
+                                  </button>
+                                )}
                           </span>
                         );
                       })}
@@ -3511,6 +3607,14 @@ function spellDamageEffects(spell: CharacterSheet["spells"][number]) {
     .map((_effect, index) => index);
 }
 
+function spellDamageEffectAt(spell: CharacterSheet["spells"][number], damageEffectIndex: number) {
+  return (spell.effects ?? []).filter((effect) => effect.kind === "damage" && effect.damage)[damageEffectIndex];
+}
+
+function spellDamageButtonLabel(effect: ReturnType<typeof spellDamageEffectAt>) {
+  return effect?.actionLabel ? `Damage ${effect.actionLabel}` : "Damage";
+}
+
 function spellConditionEffects(spell: CharacterSheet["spells"][number]) {
   return (spell.effects ?? [])
     .filter((effect) => effect.kind === "condition" && (effect.conditions ?? []).length > 0)
@@ -3518,7 +3622,7 @@ function spellConditionEffects(spell: CharacterSheet["spells"][number]) {
 }
 
 function spellDamageSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], damageEffectIndex: number) {
-  const damageEffect = (spell.effects ?? []).filter((effect) => effect.kind === "damage" && effect.damage)[damageEffectIndex];
+  const damageEffect = spellDamageEffectAt(spell, damageEffectIndex);
   if (!damageEffect?.scaling?.some((scaling) => scaling.scalingType === "spellSlotLevel")) {
     return [undefined];
   }
@@ -3528,6 +3632,21 @@ function spellDamageSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spe
       .filter((slotLevel): slotLevel is number => slotLevel !== undefined && slotLevel >= spell.level)
   )].sort((left, right) => left - right);
   return availableSlotLevels.length > 0 ? availableSlotLevels : [spell.level];
+}
+
+function spellDamageInstanceCount(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], damageEffectIndex: number, spellSlotLevel?: number) {
+  const damageEffect = spellDamageEffectAt(spell, damageEffectIndex);
+  if (!damageEffect) return 1;
+  const baseInstances = Math.max(1, damageEffect.instances ?? 1);
+  const totalLevel = Math.max(1, sheet.classes.reduce((sum, characterClass) => sum + characterClass.level, 0));
+  return (damageEffect.scaling ?? []).reduce((total, scaling) => {
+    if (scaling.scalingType === "cantripLevel") {
+      return total + [5, 11, 17].filter((level) => totalLevel >= level).length * (scaling.additionalInstances ?? 0);
+    }
+    if (scaling.scalingType !== "spellSlotLevel" || spellSlotLevel === undefined) return total;
+    const interval = Math.max(1, scaling.interval);
+    return total + Math.floor(Math.max(0, spellSlotLevel - spell.level) / interval) * (scaling.additionalInstances ?? 0);
+  }, baseInstances);
 }
 
 function cardResolvedRolls(sheet: CharacterSheet, rollHistory: RollLogEntry[], clearedCardRollIds: Set<string>) {

@@ -10,6 +10,7 @@ from dnd_board.character_sheet import (
     RestType,
     SpellId,
     SpellSource,
+    SpellStatus,
     TokenKind,
     build_character_sheet,
     enum_key,
@@ -266,7 +267,7 @@ def test_character_builder_rejects_unsupported_class_directly() -> None:
 def replace_spell_source(spell, source: SpellSource):
     from dataclasses import replace
 
-    return replace(spell, source=source)
+    return replace(spell, status=SpellStatus(source=source, castingAbility=spell.castingAbility, resourceId=spell.resourceId, reset=spell.reset))
 
 
 def wizard_sheet(level: int, subclass: WizardSubclassType | None = None):

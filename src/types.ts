@@ -216,6 +216,7 @@ export type SpellEffectDice = {
   staticBonus: number;
   bonusAbility?: AbilityType;
   bonusAbilityLabel?: string;
+  bonusSpellcastingAbility: boolean;
 };
 export type SpellDamageEffect = {
   dice: SpellEffectDice;
@@ -247,6 +248,8 @@ export type SpellScaling = {
   scalingType: SpellScalingType;
   scalingTypeLabel: string;
   additionalDice?: SpellEffectDice;
+  additionalStaticBonus: number;
+  additionalInstances: number;
   interval: number;
   description: string;
 };
@@ -265,6 +268,9 @@ export type SpellEffect = {
   temporaryHitPoints?: SpellEffectDice;
   conditions?: SpellConditionEffect[];
   scaling?: SpellScaling[];
+  instances: number;
+  instanceLabel: string;
+  actionLabel: string;
   description: string;
 };
 

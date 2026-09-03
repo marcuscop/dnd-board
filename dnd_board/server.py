@@ -357,8 +357,8 @@ async def roll_sheet_spell_attack(room_id: str, sheet_id: str, spell_id: str, pl
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/damage")
-async def roll_sheet_spell_damage(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None) -> dict[str, Any]:
-    return await create_spell_damage_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel)
+async def roll_sheet_spell_damage(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, instanceIndex: int | None = None) -> dict[str, Any]:
+    return await create_spell_damage_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, instanceIndex)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/effect")
@@ -1238,12 +1238,12 @@ async def create_spell_attack_roll(room_id: str, sheet_id: str, player_key: str,
     return await store_roll(room, payload)
 
 
-async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None) -> dict[str, Any]:
+async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, instance_index: int | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     spell = find_spell(sheet, spell_id)
     validate_spell_slot_level(sheet, spell, spell_slot_level)
     try:
-        payload = build_spell_damage_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level)
+        payload = build_spell_damage_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level, instance_index)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return await store_roll(room, payload)
@@ -1612,6 +1612,12 @@ def resolve_damage_save_for_roll(roll: RollPayload, target: CharacterSheet) -> t
             f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save for half damage",
             response_roll,
             replace(roll, total=reduced_total),
+        )
+    if roll.damageSaveOutcome == SpellSaveOutcome.NEGATES:
+        return (
+            f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save and takes no damage",
+            response_roll,
+            replace(roll, total=0, conditionEffects=None),
         )
     return f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save", response_roll, roll
 

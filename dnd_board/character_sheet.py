@@ -921,6 +921,7 @@ class SpellEffectDice:
     diceType: DiceType
     staticBonus: int = 0
     bonusAbility: AbilityType | None = None
+    bonusSpellcastingAbility: bool = False
 
     @api_field
     def dice(self) -> str:
@@ -958,6 +959,8 @@ class SpellSavingThrow:
 class SpellScaling:
     scalingType: SpellScalingType
     additionalDice: SpellEffectDice | None = None
+    additionalStaticBonus: int = 0
+    additionalInstances: int = 0
     interval: int = 1
     description: str = ""
 
@@ -974,6 +977,9 @@ class SpellEffect:
     temporaryHitPoints: SpellEffectDice | None = None
     conditions: list[SpellConditionEffect] | None = None
     scaling: list[SpellScaling] | None = None
+    instances: int = 1
+    instanceLabel: str = ""
+    actionLabel: str = ""
     description: str = ""
 
 
@@ -1235,14 +1241,20 @@ class SheetFeature:
     conditionEffects: list[ConditionEffect] | None = None
 
 
+@dataclass(frozen=True)
+class SpellStatus:
+    source: SpellSource | None = None
+    castingAbility: AbilityType | None = None
+    resourceId: str | None = None
+    reset: RestType = RestType.NONE
+
+
 @dataclass
 class SpellEntry:
     id: SpellId
     name: SpellId
-    source: SpellSource
     level: int
     school: SpellSchool
-    castingAbility: AbilityType
     castingTime: TimeEconomy
     targeting: SpellTargeting
     duration: SpellDuration
@@ -1251,15 +1263,42 @@ class SpellEntry:
     concentration: bool = False
     ritual: bool = False
     castingDuration: SpellDuration | None = None
-    resourceId: str | None = None
-    reset: RestType = RestType.NONE
     effects: list[SpellEffect] | None = None
+    status: SpellStatus = field(default_factory=SpellStatus)
 
     @api_field
     def castingTimeLabel(self) -> str:
         if self.castingDuration is not None:
             return self.castingDuration.summary
         return enum_label(self.castingTime)
+
+    @api_field
+    def source(self) -> SpellSource | None:
+        return self.status.source
+
+    @api_field
+    def sourceLabel(self) -> str:
+        return enum_label(self.status.source) if self.status.source is not None else ""
+
+    @api_field
+    def castingAbility(self) -> AbilityType | None:
+        return self.status.castingAbility
+
+    @api_field
+    def castingAbilityLabel(self) -> str:
+        return enum_label(self.status.castingAbility) if self.status.castingAbility is not None else ""
+
+    @api_field
+    def resourceId(self) -> str | None:
+        return self.status.resourceId
+
+    @api_field
+    def reset(self) -> RestType:
+        return self.status.reset
+
+    @api_field
+    def resetLabel(self) -> str:
+        return enum_label(self.status.reset)
 
 
 @dataclass
@@ -1641,9 +1680,10 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
 
 
 def build_spell_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry) -> RollPayload:
-    ability_score = getattr(sheet.abilityScores, enum_key(spell.castingAbility))
+    casting_ability = spell_casting_ability(sheet, spell)
+    ability_score = getattr(sheet.abilityScores, enum_key(casting_ability))
     modifier_breakdown = [
-        RollModifierBreakdown(source=enum_label(spell.castingAbility), value=ability_modifier(ability_score)),
+        RollModifierBreakdown(source=enum_label(casting_ability), value=ability_modifier(ability_score)),
         RollModifierBreakdown(source="Proficiency", value=sheet.proficiencyBonus),
     ]
     modifier = sum(part.value for part in modifier_breakdown)
@@ -1670,11 +1710,22 @@ def build_spell_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: S
     )
 
 
-def build_spell_damage_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, effect_index: int = 0, spell_slot_level: int | None = None) -> RollPayload:
+def build_spell_damage_roll_payload(
+    sheet: CharacterSheet,
+    roller: str,
+    spell: SpellEntry,
+    effect_index: int = 0,
+    spell_slot_level: int | None = None,
+    instance_index: int | None = None,
+) -> RollPayload:
     effect = spell_damage_effect_at(spell, effect_index)
     if effect is None or effect.damage is None:
         raise ValueError("Spell damage effect not found")
 
+    instance_count = scaled_spell_effect_instance_count(effect, sheet, spell.level, spell_slot_level)
+    if instance_index is not None and (instance_index < 0 or instance_index >= instance_count):
+        raise ValueError("Spell damage instance not found")
+    active_instance_index = instance_index if instance_index is not None else 0
     dice_count = scaled_spell_effect_dice_count(effect.damage.dice.diceCount, effect.scaling, sheet, spell.level, spell_slot_level)
     dice_type = effect.damage.dice.diceType
     dice = [random.randint(1, dice_type.value) for _ in range(dice_count)]
@@ -1685,6 +1736,13 @@ def build_spell_damage_roll_payload(sheet: CharacterSheet, roller: str, spell: S
     if effect.damage.dice.bonusAbility is not None:
         ability_score = getattr(sheet.abilityScores, enum_key(effect.damage.dice.bonusAbility))
         modifier_breakdown.append(RollModifierBreakdown(source=enum_label(effect.damage.dice.bonusAbility), value=ability_modifier(ability_score)))
+    if effect.damage.dice.bonusSpellcastingAbility:
+        casting_ability = spell_casting_ability(sheet, spell)
+        ability_score = getattr(sheet.abilityScores, enum_key(casting_ability))
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(casting_ability), value=ability_modifier(ability_score)))
+    scaled_static_bonus = scaled_spell_effect_static_bonus(effect.damage.dice.staticBonus, effect.scaling, spell.level, spell_slot_level)
+    if scaled_static_bonus != effect.damage.dice.staticBonus:
+        modifier_breakdown.append(RollModifierBreakdown(source="Spell Slot", value=scaled_static_bonus - effect.damage.dice.staticBonus))
     modifier = sum(part.value for part in modifier_breakdown)
     created_at = time_ns()
     return RollPayload(
@@ -1692,10 +1750,10 @@ def build_spell_damage_roll_payload(sheet: CharacterSheet, roller: str, spell: S
         sheetId=sheet.id,
         tokenId=sheet.tokenId,
         roller=roller,
-        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=spell_damage_action_id(effect_index, spell_slot_level)),
+        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=spell_damage_action_id(effect_index, spell_slot_level, active_instance_index if instance_count > 1 else None)),
         sourceLabel=enum_label(spell.name),
         resolution=RollResolutionMode.APPLY_DAMAGE,
-        label="Spell Damage",
+        label=spell_damage_roll_label(effect, active_instance_index, instance_count),
         iconUrl=None,
         dice=dice,
         diceType=dice_type,
@@ -1708,6 +1766,7 @@ def build_spell_damage_roll_payload(sheet: CharacterSheet, roller: str, spell: S
         damageSavingThrow=effect.savingThrow.ability if effect.savingThrow is not None else None,
         damageSaveDc=spell_save_dc(sheet, spell) if effect.savingThrow is not None else None,
         damageSaveOutcome=effect.savingThrow.outcome if effect.savingThrow is not None else None,
+        conditionEffects=spell_damage_condition_effects(effect),
     )
 
 
@@ -1715,13 +1774,14 @@ def build_spell_condition_roll_payload(sheet: CharacterSheet, roller: str, spell
     effect = spell_condition_effect_at(spell, effect_index)
     if effect is None or effect.savingThrow is None or not effect.conditions:
         raise ValueError("Spell condition effect not found")
+    casting_ability = spell_casting_ability(sheet, spell)
     save_dc = spell_save_dc(sheet, spell)
     condition_effects = [
         ConditionEffect(
             condition=condition.condition,
             mode=ConditionApplicationMode.TARGET_SAVE,
             savingThrow=effect.savingThrow.ability,
-            saveDcAbility=spell.castingAbility,
+            saveDcAbility=casting_ability,
             saveDc=save_dc,
             duration=condition.duration,
             removalTrigger=condition.removalTrigger,
@@ -1772,13 +1832,37 @@ def spell_condition_effect_at(spell: SpellEntry, effect_index: int) -> SpellEffe
     return condition_effects[effect_index]
 
 
-def spell_damage_action_id(effect_index: int, spell_slot_level: int | None = None) -> str:
+def spell_damage_action_id(effect_index: int, spell_slot_level: int | None = None, instance_index: int | None = None) -> str:
     slot_suffix = f"-slot-{spell_slot_level}" if spell_slot_level is not None else ""
-    return f"damage-{effect_index}{slot_suffix}"
+    instance_suffix = f"-instance-{instance_index}" if instance_index is not None else ""
+    return f"damage-{effect_index}{slot_suffix}{instance_suffix}"
+
+
+def spell_damage_roll_label(effect: SpellEffect, instance_index: int, instance_count: int) -> str:
+    prefix = effect.actionLabel or "Spell"
+    if instance_count <= 1:
+        return f"{prefix} Damage"
+    return f"{effect.instanceLabel or 'Instance'} {instance_index + 1} Damage"
 
 
 def spell_condition_action_id(effect_index: int) -> str:
     return f"condition-{effect_index}"
+
+
+def spell_damage_condition_effects(effect: SpellEffect) -> list[ConditionEffect] | None:
+    if not effect.conditions:
+        return None
+    return [
+        ConditionEffect(
+            condition=condition.condition,
+            mode=ConditionApplicationMode.DIRECT,
+            duration=condition.duration,
+            removalTrigger=condition.removalTrigger,
+            removalAdvantage=condition.removalAdvantage,
+            description=effect.description,
+        )
+        for condition in effect.conditions
+    ]
 
 
 def first_spell_damage_type(spell: SpellEntry) -> DamageType | None:
@@ -1787,8 +1871,37 @@ def first_spell_damage_type(spell: SpellEntry) -> DamageType | None:
 
 
 def spell_save_dc(sheet: CharacterSheet, spell: SpellEntry) -> int:
-    ability_score = getattr(sheet.abilityScores, enum_key(spell.castingAbility))
+    ability_score = getattr(sheet.abilityScores, enum_key(spell_casting_ability(sheet, spell)))
     return 8 + sheet.proficiencyBonus + ability_modifier(ability_score)
+
+
+CLASS_SPELLCASTING_ABILITIES: dict[ClassType, AbilityType] = {
+    ClassType.ARTIFICER: AbilityType.INTELLIGENCE,
+    ClassType.BARD: AbilityType.CHARISMA,
+    ClassType.CLERIC: AbilityType.WISDOM,
+    ClassType.DRUID: AbilityType.WISDOM,
+    ClassType.PALADIN: AbilityType.CHARISMA,
+    ClassType.RANGER: AbilityType.WISDOM,
+    ClassType.SORCERER: AbilityType.CHARISMA,
+    ClassType.WARLOCK: AbilityType.CHARISMA,
+    ClassType.WIZARD: AbilityType.INTELLIGENCE,
+}
+
+
+def spell_casting_ability(sheet: CharacterSheet, spell: SpellEntry) -> AbilityType:
+    if spell.castingAbility is not None:
+        return spell.castingAbility
+    matching_spell = next((entry for entry in sheet.spells if entry.id == spell.id and entry.castingAbility is not None), None)
+    if matching_spell is not None and matching_spell.castingAbility is not None:
+        return matching_spell.castingAbility
+    matching_spellbook_spell = next((entry for entry in sheet.spellbook if entry.id == spell.id and entry.castingAbility is not None), None)
+    if matching_spellbook_spell is not None and matching_spellbook_spell.castingAbility is not None:
+        return matching_spellbook_spell.castingAbility
+    for character_class in sheet.classes:
+        ability = CLASS_SPELLCASTING_ABILITIES.get(character_class.name)
+        if ability is not None:
+            return ability
+    raise ValueError("Spell casting ability not found")
 
 
 def scaled_spell_effect_dice_count(
@@ -1807,6 +1920,38 @@ def scaled_spell_effect_dice_count(
             total += sum(1 for level in (5, 11, 17) if total_level >= level) * rule.additionalDice.diceCount
         if rule.scalingType == SpellScalingType.SPELL_SLOT_LEVEL and rule.additionalDice is not None and spell_slot_level is not None:
             total += max(0, spell_slot_level - spell_level) // rule.interval * rule.additionalDice.diceCount
+    return total
+
+
+def scaled_spell_effect_static_bonus(
+    base_bonus: int,
+    scaling: list[SpellScaling] | None,
+    spell_level: int = 0,
+    spell_slot_level: int | None = None,
+) -> int:
+    if not scaling:
+        return base_bonus
+    total = base_bonus
+    for rule in scaling:
+        if rule.scalingType == SpellScalingType.SPELL_SLOT_LEVEL and spell_slot_level is not None:
+            total += max(0, spell_slot_level - spell_level) // rule.interval * rule.additionalStaticBonus
+    return total
+
+
+def scaled_spell_effect_instance_count(
+    effect: SpellEffect,
+    sheet: CharacterSheet | None = None,
+    spell_level: int = 0,
+    spell_slot_level: int | None = None,
+) -> int:
+    total = max(1, effect.instances)
+    total_level = sum(character_class.level for character_class in sheet.classes) if sheet is not None else 1
+    total_level = total_level or 1
+    for rule in effect.scaling or []:
+        if rule.scalingType == SpellScalingType.CANTRIP_LEVEL:
+            total += sum(1 for level in (5, 11, 17) if total_level >= level) * rule.additionalInstances
+        if rule.scalingType == SpellScalingType.SPELL_SLOT_LEVEL and spell_slot_level is not None:
+            total += max(0, spell_slot_level - spell_level) // rule.interval * rule.additionalInstances
     return total
 
 
@@ -2320,10 +2465,12 @@ def hydrated_spell_entries(spells: list[SpellEntry]) -> list[SpellEntry]:
         hydrated.append(
             replace(
                 current,
-                source=spell.source,
-                castingAbility=spell.castingAbility,
-                resourceId=spell.resourceId,
-                reset=spell.reset,
+                status=SpellStatus(
+                    source=spell.source,
+                    castingAbility=spell.castingAbility,
+                    resourceId=spell.resourceId,
+                    reset=spell.reset,
+                ),
             )
         )
     return hydrated
@@ -2601,6 +2748,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             SpellScalingType,
             SpellSchool,
             SpellSource,
+            SpellStatus,
             SpellTargeting,
             SheetFeature,
             SheetAbility,

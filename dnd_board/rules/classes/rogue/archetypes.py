@@ -31,6 +31,7 @@ from dnd_board.character_sheet import (
     SpellRangeType,
     SpellSchool,
     SpellSource,
+    SpellStatus,
     SpellTargeting,
     TimeEconomy,
     WeaponCategory,
@@ -391,14 +392,42 @@ def rogue_subclass_spells(classes: list[CharacterClassLevel]) -> list[SpellEntry
         return []
     if character_class.subclass == RogueSubclassType.PHANTOM and character_class.level >= 9:
         return [
-            SpellEntry(SpellId.AUGURY, SpellId.AUGURY, SpellSource.PHANTOM, 2, SpellSchool.DIVINATION, AbilityType.CONSTITUTION, TimeEconomy.ACTION, SpellTargeting(SpellRangeType.SELF), SpellDuration(SpellDurationUnit.INSTANTANEOUS), [], "Destroy a soul trinket to receive an omen or ask the associated spirit one question.", ritual=True, resourceId=enum_key(RogueSubclassResourceType.SOUL_TRINKETS)),
-            SpellEntry(SpellId.SPEAK_WITH_DEAD, SpellId.SPEAK_WITH_DEAD, SpellSource.PHANTOM, 3, SpellSchool.NECROMANCY, AbilityType.DEXTERITY, TimeEconomy.ACTION, SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=10), SpellDuration(SpellDurationUnit.MINUTE, amount=10), [], "Ask questions of a corpse or soul trinket.", resourceId=enum_key(RogueSubclassResourceType.VOICE_OF_DEATH), reset=RestType.SHORT_REST),
+            SpellEntry(
+                id=SpellId.AUGURY,
+                name=SpellId.AUGURY,
+                status=SpellStatus(source=SpellSource.PHANTOM, castingAbility=AbilityType.CONSTITUTION, resourceId=enum_key(RogueSubclassResourceType.SOUL_TRINKETS)),
+                level=2,
+                school=SpellSchool.DIVINATION,
+                castingTime=TimeEconomy.ACTION,
+                targeting=SpellTargeting(SpellRangeType.SELF),
+                duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS),
+                components=[],
+                description="Destroy a soul trinket to receive an omen or ask the associated spirit one question.",
+                ritual=True,
+            ),
+            SpellEntry(
+                id=SpellId.SPEAK_WITH_DEAD,
+                name=SpellId.SPEAK_WITH_DEAD,
+                status=SpellStatus(
+                    source=SpellSource.PHANTOM,
+                    castingAbility=AbilityType.DEXTERITY,
+                    resourceId=enum_key(RogueSubclassResourceType.VOICE_OF_DEATH),
+                    reset=RestType.SHORT_REST,
+                ),
+                level=3,
+                school=SpellSchool.NECROMANCY,
+                castingTime=TimeEconomy.ACTION,
+                targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=10),
+                duration=SpellDuration(SpellDurationUnit.MINUTE, amount=10),
+                components=[],
+                description="Ask questions of a corpse or soul trinket.",
+            ),
         ]
     if character_class.subclass == RogueSubclassType.SCION_OF_THE_THREE and character_class.level >= 3:
         return [
-            SpellEntry(SpellId.MINOR_ILLUSION, SpellId.MINOR_ILLUSION, SpellSource.SCION_OF_THE_THREE, 0, SpellSchool.ILLUSION, AbilityType.INTELLIGENCE, TimeEconomy.ACTION, SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), SpellDuration(SpellDurationUnit.MINUTE, amount=1), [SpellComponent.SOMATIC, SpellComponent.MATERIAL], "Bane Dread Allegiance cantrip option."),
-            SpellEntry(SpellId.BLADE_WARD, SpellId.BLADE_WARD, SpellSource.SCION_OF_THE_THREE, 0, SpellSchool.ABJURATION, AbilityType.INTELLIGENCE, TimeEconomy.ACTION, SpellTargeting(SpellRangeType.SELF), SpellDuration(SpellDurationUnit.ROUND, amount=1), [SpellComponent.VERBAL, SpellComponent.SOMATIC], "Bhaal Dread Allegiance cantrip option."),
-            SpellEntry(SpellId.CHILL_TOUCH, SpellId.CHILL_TOUCH, SpellSource.SCION_OF_THE_THREE, 0, SpellSchool.NECROMANCY, AbilityType.INTELLIGENCE, TimeEconomy.ACTION, SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120), SpellDuration(SpellDurationUnit.ROUND, amount=1), [SpellComponent.VERBAL, SpellComponent.SOMATIC], "Myrkul Dread Allegiance cantrip option."),
+            SpellEntry(id=SpellId.MINOR_ILLUSION, name=SpellId.MINOR_ILLUSION, status=SpellStatus(source=SpellSource.SCION_OF_THE_THREE, castingAbility=AbilityType.INTELLIGENCE), level=0, school=SpellSchool.ILLUSION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1), components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="Bane Dread Allegiance cantrip option."),
+            SpellEntry(id=SpellId.BLADE_WARD, name=SpellId.BLADE_WARD, status=SpellStatus(source=SpellSource.SCION_OF_THE_THREE, castingAbility=AbilityType.INTELLIGENCE), level=0, school=SpellSchool.ABJURATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.ROUND, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="Bhaal Dread Allegiance cantrip option."),
+            SpellEntry(id=SpellId.CHILL_TOUCH, name=SpellId.CHILL_TOUCH, status=SpellStatus(source=SpellSource.SCION_OF_THE_THREE, castingAbility=AbilityType.INTELLIGENCE), level=0, school=SpellSchool.NECROMANCY, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120), duration=SpellDuration(SpellDurationUnit.ROUND, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="Myrkul Dread Allegiance cantrip option."),
         ]
     return []
 
@@ -460,10 +489,14 @@ def normalized_arcane_trickster_spell(spell: SpellEntry) -> SpellEntry:
     return SpellEntry(
         id=spell.id,
         name=spell.name,
-        source=SpellSource.ARCANE_TRICKSTER,
+        status=SpellStatus(
+            source=SpellSource.ARCANE_TRICKSTER,
+            castingAbility=AbilityType.INTELLIGENCE,
+            resourceId=spell.resourceId,
+            reset=spell.reset,
+        ),
         level=spell.level,
         school=spell.school,
-        castingAbility=AbilityType.INTELLIGENCE,
         castingTime=spell.castingTime,
         targeting=spell.targeting,
         duration=spell.duration,
@@ -471,8 +504,6 @@ def normalized_arcane_trickster_spell(spell: SpellEntry) -> SpellEntry:
         description=spell.description,
         concentration=spell.concentration,
         ritual=spell.ritual,
-        resourceId=spell.resourceId,
-        reset=spell.reset,
     )
 
 
@@ -521,8 +552,8 @@ def psionic_energy_dice_count(rogue_level_value: int) -> int:
 
 
 ARCANE_TRICKSTER_SPELL_CATALOG: dict[SpellId, SpellEntry] = {
-    SpellId.MIND_SLIVER: SpellEntry(SpellId.MIND_SLIVER, SpellId.MIND_SLIVER, SpellSource.WIZARD, 0, SpellSchool.ENCHANTMENT, AbilityType.INTELLIGENCE, TimeEconomy.ACTION, SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), SpellDuration(SpellDurationUnit.ROUND, amount=1), [SpellComponent.VERBAL], "Assault a creature's mind with psychic damage and impair its next saving throw."),
-    SpellId.CHARM_PERSON: SpellEntry(SpellId.CHARM_PERSON, SpellId.CHARM_PERSON, SpellSource.WIZARD, 1, SpellSchool.ENCHANTMENT, AbilityType.INTELLIGENCE, TimeEconomy.ACTION, SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), SpellDuration(SpellDurationUnit.HOUR, amount=1), [SpellComponent.VERBAL, SpellComponent.SOMATIC], "Charm a humanoid that fails a Wisdom save."),
-    SpellId.DISGUISE_SELF: SpellEntry(SpellId.DISGUISE_SELF, SpellId.DISGUISE_SELF, SpellSource.WIZARD, 1, SpellSchool.ILLUSION, AbilityType.INTELLIGENCE, TimeEconomy.ACTION, SpellTargeting(SpellRangeType.SELF), SpellDuration(SpellDurationUnit.HOUR, amount=1), [SpellComponent.VERBAL, SpellComponent.SOMATIC], "Make yourself and your equipment look different."),
-    SpellId.FOG_CLOUD: SpellEntry(SpellId.FOG_CLOUD, SpellId.FOG_CLOUD, SpellSource.WIZARD, 1, SpellSchool.CONJURATION, AbilityType.INTELLIGENCE, TimeEconomy.ACTION, SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120, area=SpellRadiusArea(radiusFeet=20)), SpellDuration(SpellDurationUnit.HOUR, amount=1, maximum=True), [SpellComponent.VERBAL, SpellComponent.SOMATIC], "Create a heavily obscured sphere of fog.", concentration=True),
+    SpellId.MIND_SLIVER: SpellEntry(id=SpellId.MIND_SLIVER, name=SpellId.MIND_SLIVER, status=SpellStatus(source=SpellSource.WIZARD, castingAbility=AbilityType.INTELLIGENCE), level=0, school=SpellSchool.ENCHANTMENT, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.ROUND, amount=1), components=[SpellComponent.VERBAL], description="Assault a creature's mind with psychic damage and impair its next saving throw."),
+    SpellId.CHARM_PERSON: SpellEntry(id=SpellId.CHARM_PERSON, name=SpellId.CHARM_PERSON, status=SpellStatus(source=SpellSource.WIZARD, castingAbility=AbilityType.INTELLIGENCE), level=1, school=SpellSchool.ENCHANTMENT, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="Charm a humanoid that fails a Wisdom save."),
+    SpellId.DISGUISE_SELF: SpellEntry(id=SpellId.DISGUISE_SELF, name=SpellId.DISGUISE_SELF, status=SpellStatus(source=SpellSource.WIZARD, castingAbility=AbilityType.INTELLIGENCE), level=1, school=SpellSchool.ILLUSION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="Make yourself and your equipment look different."),
+    SpellId.FOG_CLOUD: SpellEntry(id=SpellId.FOG_CLOUD, name=SpellId.FOG_CLOUD, status=SpellStatus(source=SpellSource.WIZARD, castingAbility=AbilityType.INTELLIGENCE), level=1, school=SpellSchool.CONJURATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120, area=SpellRadiusArea(radiusFeet=20)), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="Create a heavily obscured sphere of fog.", concentration=True),
 }

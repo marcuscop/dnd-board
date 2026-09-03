@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, TypeVar
 
@@ -20,6 +20,7 @@ from dnd_board.character_sheet import (
     SpellEntry,
     SpellId,
     SpellSource,
+    SpellStatus,
     TimeEconomy,
     enum_key,
     enum_label,
@@ -605,8 +606,15 @@ def background_spell_entries(background: BackgroundType, selected_spells: tuple[
     for spell_id in selected_spells:
         spell = spell_entry_for_list(spell_id, spell_list, source=SpellSource.MAGIC_INITIATE, casting_ability=casting_ability)
         if spell is not None and spell.level == 1:
-            spell.resourceId = magic_initiate_resource_id(spell.id)
-            spell.reset = RestType.LONG_REST
+            spell = replace(
+                spell,
+                status=SpellStatus(
+                    source=spell.source,
+                    castingAbility=spell.castingAbility,
+                    resourceId=magic_initiate_resource_id(spell.id),
+                    reset=RestType.LONG_REST,
+                ),
+            )
         spells.append(spell)
     return [spell for spell in spells if spell is not None]
 
