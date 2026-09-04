@@ -80,24 +80,48 @@ export type Asset = {
 
 export type AbilityType = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
 export type ConditionType =
+  | "bane"
   | "blinded"
+  | "blessed"
   | "charmed"
+  | "commandApproach"
+  | "commandDrop"
+  | "commandFlee"
+  | "commandGrovel"
+  | "commandHalt"
   | "deafened"
   | "exhaustion"
+  | "faerieFire"
   | "frightened"
   | "grappled"
+  | "guidance"
   | "incapacitated"
   | "invisible"
   | "paralyzed"
   | "petrified"
   | "poisoned"
   | "prone"
+  | "resistanceAcid"
+  | "resistanceBludgeoning"
+  | "resistanceCold"
+  | "resistanceFire"
+  | "resistanceForce"
+  | "resistanceLightning"
+  | "resistanceNecrotic"
+  | "resistancePiercing"
+  | "resistancePoison"
+  | "resistancePsychic"
+  | "resistanceRadiant"
+  | "resistanceSlashing"
+  | "resistanceThunder"
   | "restrained"
   | "stunned"
   | "unconscious";
 export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
 export type ConditionRemovalTrigger = "afterTakingDamage";
+export type RollModifierEffectOperation = "add" | "subtract";
+export type RollModifierEffectTarget = "abilityCheck" | "attackRoll" | "savingThrow" | "armorClass";
 export type ConditionEffect = {
   condition?: ConditionType;
   conditionLabel?: string;
@@ -236,6 +260,16 @@ export type SpellConditionEffect = {
   removalTriggerLabel?: string;
   removalAdvantage: boolean;
 };
+export type SpellRollModifierEffect = {
+  condition: ConditionType;
+  conditionLabel: string;
+  operation: RollModifierEffectOperation;
+  operationLabel: string;
+  targets: RollModifierEffectTarget[];
+  dice?: SpellEffectDice;
+  staticBonus: number;
+  description: string;
+};
 export type SpellSavingThrow = {
   ability: AbilityType;
   abilityLabel: string;
@@ -267,6 +301,7 @@ export type SpellEffect = {
   healing?: SpellHealingEffect;
   temporaryHitPoints?: SpellEffectDice;
   conditions?: SpellConditionEffect[];
+  rollModifier?: SpellRollModifierEffect;
   scaling?: SpellScaling[];
   instances: number;
   instanceLabel: string;

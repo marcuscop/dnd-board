@@ -36,6 +36,7 @@ from dnd_board.character_sheet import (
     RollLogEntry,
     RollLogEntryType,
     RollModifierBreakdown,
+    RollModifierEffectTarget,
     RollResolutionMode,
     RollResourceSpend,
     RollResolution,
@@ -58,6 +59,7 @@ from dnd_board.character_sheet import (
     build_saving_throw_roll_payload,
     build_roll_action_payload,
     ability_modifier,
+    active_roll_modifier_breakdown,
     enum_value,
     enum_key,
     enum_label,
@@ -1805,6 +1807,9 @@ def response_ability_roll(
         dice.append(random.randint(1, 20))
     die_roll = max(dice)
     created_at = time_ns()
+    modifier_breakdown = [RollModifierBreakdown(source=label, value=modifier)] if modifier else []
+    modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.SAVING_THROW))
+    total_modifier = sum(part.value for part in modifier_breakdown)
     return RollPayload(
         id=f"roll-{created_at}",
         sheetId=sheet.id,
@@ -1818,9 +1823,9 @@ def response_ability_roll(
         dice=dice,
         diceType=DiceType.D20,
         die="2d20kh1" if advantage else enum_key(DiceType.D20),
-        modifier=modifier,
-        modifierBreakdown=[RollModifierBreakdown(source=label, value=modifier)] if modifier else [],
-        total=die_roll + modifier,
+        modifier=total_modifier,
+        modifierBreakdown=modifier_breakdown,
+        total=die_roll + total_modifier,
         createdAt=created_at,
     )
 

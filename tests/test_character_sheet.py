@@ -166,6 +166,25 @@ def test_typed_json_rejects_malformed_nodes_and_converts_scalar_enum_values() ->
     assert typed_json_to_value({"$type": "dict", "value": "bad"}, dict[str, int]) is None
     assert typed_json_to_value({"$type": "MissingModel", "value": None}) is None
     assert typed_json_to_value({"$type": "str", "value": "dexterity"}, AbilityType) == AbilityType.DEXTERITY
+    assert typed_json_to_value(
+        {
+            "$type": "list",
+            "items": [
+                {"$type": "ConditionType", "value": "PRONE"},
+                {"$type": "None", "value": None},
+            ],
+        },
+        list[ConditionType],
+    ) == [ConditionType.PRONE]
+    assert typed_json_to_value(
+        {
+            "$type": "list",
+            "items": [
+                {"$type": "str", "value": "kept"},
+                {"$type": "None", "value": None},
+            ],
+        },
+    ) == ["kept", None]
 
 
 def test_spell_targeting_summaries_cover_structured_area_shapes() -> None:
@@ -211,6 +230,39 @@ def test_roll_action_payloads_cover_modifier_and_condition_effect_branches(monke
     assert condition_roll.conditionEffects[2].saveDc == 14
     assert ConditionType.PRONE in resolution.targetConditions
     assert "Frightened requires manual resolution" in resolution.outcome
+
+
+def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 2 if maximum == 4 else 10)
+    sheet = replace(basic_sheet(), conditions=[ConditionType.BLESSED, ConditionType.GUIDANCE])
+    baned_sheet = replace(basic_sheet(), conditions=[ConditionType.BANE])
+
+    attack_roll = build_attack_roll_payload(sheet, "player-1", sheet.attacks[0])
+    check_roll = build_ability_check_roll_payload(sheet, "player-1", AbilityType.STRENGTH)
+    save_roll = build_saving_throw_roll_payload(sheet, "player-1", AbilityType.STRENGTH)
+    baned_attack_roll = build_attack_roll_payload(baned_sheet, "player-1", baned_sheet.attacks[0])
+    baned_save_roll = build_saving_throw_roll_payload(baned_sheet, "player-1", AbilityType.STRENGTH)
+
+    assert ("Blessed", 2) in [(part.source, part.value) for part in attack_roll.modifierBreakdown]
+    assert ("Guidance", 2) not in [(part.source, part.value) for part in attack_roll.modifierBreakdown]
+    assert ("Guidance", 2) in [(part.source, part.value) for part in check_roll.modifierBreakdown]
+    assert ("Blessed", 2) in [(part.source, part.value) for part in save_roll.modifierBreakdown]
+    assert ("Bane", -2) in [(part.source, part.value) for part in baned_attack_roll.modifierBreakdown]
+    assert ("Bane", -2) in [(part.source, part.value) for part in baned_save_roll.modifierBreakdown]
+
+
+def test_active_damage_resistance_conditions_reduce_matching_damage_by_d4(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 3 if maximum == 4 else 8)
+    attacker = basic_sheet()
+    target = replace(basic_sheet(), conditions=[ConditionType.RESISTANCE_FIRE])
+    action = replace(attacker.attacks[0], damageDiceCount=1, damageDiceType=DiceType.D8, damageType=DamageType.FIRE, damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED)
+
+    roll = build_damage_roll_payload(attacker, "player-1", action)
+    resolution = resolve_roll_against_target(roll, target)
+
+    assert roll.total == 8
+    assert resolution.targetHp.current == 15
+    assert resolution.outcome == "deals 5 damage after Resistance Fire reduces damage by 3"
 
 
 def test_shared_parsing_and_armor_helpers_cover_edge_cases() -> None:
@@ -566,10 +618,16 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
 
 def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None:
     tasha = wizard_spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
+    command = spell_entry(SpellId.COMMAND)
+    bless = spell_entry(SpellId.BLESS)
     assert tasha is not None
+    assert command is not None
+    assert bless is not None
 
     sheet = spell_sheet(5, [tasha])
     effect_roll = build_spell_condition_roll_payload(sheet, "player-1", tasha)
+    command_roll = build_spell_condition_roll_payload(spell_sheet(5, [command]), "player-1", command, effect_index=3)
+    bless_roll = build_spell_condition_roll_payload(spell_sheet(5, [bless]), "player-1", bless)
 
     assert effect_roll.source.section == SheetSectionType.SPELLS
     assert effect_roll.source.sourceId == "tashaSHideousLaughter"
@@ -585,6 +643,15 @@ def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None
     assert {effect.removalSavingThrow for effect in effect_roll.conditionEffects} == {AbilityType.WISDOM}
     assert {effect.removalSaveDc for effect in effect_roll.conditionEffects} == {14}
     assert {effect.removalAdvantage for effect in effect_roll.conditionEffects} == {True}
+    assert command_roll.label == "Grovel Effect"
+    assert command_roll.conditionEffects is not None
+    assert [effect.condition for effect in command_roll.conditionEffects] == [ConditionType.COMMAND_GROVEL, ConditionType.PRONE]
+    assert {effect.savingThrow for effect in command_roll.conditionEffects} == {AbilityType.WISDOM}
+    assert bless_roll.label == "Bless Effect"
+    assert bless_roll.conditionEffects is not None
+    assert [effect.condition for effect in bless_roll.conditionEffects] == [ConditionType.BLESSED]
+    assert {effect.mode for effect in bless_roll.conditionEffects} == {ConditionApplicationMode.DIRECT}
+    assert {effect.savingThrow for effect in bless_roll.conditionEffects} == {None}
 
     assert spell_condition_effect_at(tasha, -1) is None
     assert spell_condition_effect_at(replace(tasha, effects=None), 0) is None

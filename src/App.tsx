@@ -30,18 +30,40 @@ const ABILITY_SCORE_OPTIONS: { value: AbilityType; label: string }[] = [
   { value: "charisma", label: "Charisma" }
 ];
 const CONDITION_OPTIONS: ConditionType[] = [
+  "bane",
   "blinded",
+  "blessed",
   "charmed",
+  "commandApproach",
+  "commandDrop",
+  "commandFlee",
+  "commandGrovel",
+  "commandHalt",
   "deafened",
   "exhaustion",
+  "faerieFire",
   "frightened",
   "grappled",
+  "guidance",
   "incapacitated",
   "invisible",
   "paralyzed",
   "petrified",
   "poisoned",
   "prone",
+  "resistanceAcid",
+  "resistanceBludgeoning",
+  "resistanceCold",
+  "resistanceFire",
+  "resistanceForce",
+  "resistanceLightning",
+  "resistanceNecrotic",
+  "resistancePiercing",
+  "resistancePoison",
+  "resistancePsychic",
+  "resistanceRadiant",
+  "resistanceSlashing",
+  "resistanceThunder",
   "restrained",
   "stunned",
   "unconscious"
@@ -3113,11 +3135,14 @@ function SheetSpellList({
                           </span>
                         );
                       })}
-                      {conditionEffects.map((effectIndex) => (
-                        <button key={`effect-${effectIndex}`} disabled={!canRoll} onClick={() => onRollSpellEffect(sheet, spell.id, effectIndex)}>
-                          Effect
-                        </button>
-                      ))}
+                      {conditionEffects.map((effectIndex) => {
+                        const conditionEffect = spellConditionEffectAt(spell, effectIndex);
+                        return (
+                          <button key={`effect-${effectIndex}`} disabled={!canRoll} onClick={() => onRollSpellEffect(sheet, spell.id, effectIndex)}>
+                            {spellConditionButtonLabel(conditionEffect)}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                   <InlineRolls
@@ -3619,6 +3644,14 @@ function spellConditionEffects(spell: CharacterSheet["spells"][number]) {
   return (spell.effects ?? [])
     .filter((effect) => effect.kind === "condition" && (effect.conditions ?? []).length > 0)
     .map((_effect, index) => index);
+}
+
+function spellConditionEffectAt(spell: CharacterSheet["spells"][number], conditionEffectIndex: number) {
+  return (spell.effects ?? []).filter((effect) => effect.kind === "condition" && (effect.conditions ?? []).length > 0)[conditionEffectIndex];
+}
+
+function spellConditionButtonLabel(effect: ReturnType<typeof spellConditionEffectAt>) {
+  return effect?.actionLabel ? `Effect ${effect.actionLabel}` : "Effect";
 }
 
 function spellDamageSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], damageEffectIndex: number) {

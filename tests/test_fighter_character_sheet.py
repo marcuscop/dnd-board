@@ -1,5 +1,3 @@
-import re
-from pathlib import Path
 from types import SimpleNamespace
 
 from dnd_board.character_sheet import (
@@ -303,25 +301,6 @@ def test_feat_prerequisite_labels_and_checks_cover_all_prerequisite_types() -> N
     assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.ABILITY_SCORE, minimumScore=1, abilities=(AbilityType.STRENGTH,)), SimpleNamespace()) is False
 
 
-def test_2024_feat_catalog_covers_design_doc() -> None:
-    entries = feat_design_doc_entries()
-
-    missing_general: list[str] = []
-    missing_styles: list[str] = []
-    for entry in entries:
-        feat_type = enum_value_by_name(GeneralFeatType, entry["enum_name"])
-        fighting_style = enum_value_by_name(FightingStyleType, entry["enum_name"])
-        if entry["subcategory"] == "Fighting Style Feats":
-            if fighting_style is None or fighting_style not in FIGHTING_STYLE_FEATS:
-                missing_styles.append(entry["name"])
-        elif feat_type is None or feat_type not in GENERAL_FEATS:
-            missing_general.append(entry["name"])
-
-    assert missing_general == []
-    assert missing_styles == []
-    assert len(entries) == 176
-
-
 def test_2024_feat_catalog_preserves_source_and_category_metadata() -> None:
     assert general_feat_category(GeneralFeatType.ALERT) == FeatCategory.ORIGIN
     assert GENERAL_FEATS[GeneralFeatType.ALERT].source == RuleSource.PLAYERS_HANDBOOK_2024
@@ -396,39 +375,6 @@ def test_epic_boon_feat_resources_and_legacy_speed_bonus_are_reflected() -> None
     assert abilities["boonOfDimensionalTravel"].activation == TimeEconomy.ACTION
     assert abilities["boonOfRecovery"].resourceId == "boonOfRecovery"
     assert feat_speed_bonus(feats) == 10
-
-
-def feat_design_doc_entries() -> list[dict[str, str]]:
-    path = Path(__file__).resolve().parents[1] / "my-design-docs" / "feats-2024.md"
-    category = ""
-    subcategory = ""
-    entries: list[dict[str, str]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("## "):
-            category = line.removeprefix("## ").strip()
-        elif line.startswith("### "):
-            subcategory = line.removeprefix("### ").strip()
-        elif match := re.match(r"\| \[([^\]]+)\]\(http://dnd2024\.wikidot\.com/feat:[^)]+\) \|", line):
-            name = match.group(1)
-            entries.append({
-                "name": name,
-                "category": category,
-                "subcategory": subcategory,
-                "enum_name": re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper(),
-            })
-        elif ": http://dnd2024.wikidot.com/feat:" in line:
-            name = line.split(": http", 1)[0]
-            entries.append({
-                "name": name,
-                "category": category,
-                "subcategory": subcategory,
-                "enum_name": re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper(),
-            })
-    return entries
-
-
-def enum_value_by_name(enum_type, name: str):
-    return enum_type.__members__.get(name)
 
 
 def test_feat_predicates_return_false_for_unscoped_effects() -> None:

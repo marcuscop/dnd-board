@@ -5,6 +5,8 @@ from dnd_board.character_sheet import (
     ConditionRemovalTrigger,
     DamageType,
     DiceType,
+    RollModifierEffectOperation,
+    RollModifierEffectTarget,
     SpellAttackType,
     SpellAreaShape,
     SpellComponent,
@@ -574,6 +576,233 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
     assert witch_bolt.effects[0].scaling[0].additionalDice.dice == "1d12"
     assert web.effects[1].damage is not None
     assert web.effects[1].damage.dice.dice == "2d4"
+
+
+def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics() -> None:
+    produce_flame = spell_entry(SpellId.PRODUCE_FLAME)
+    sorcerous_burst = spell_entry(SpellId.SORCEROUS_BURST)
+    thorn_whip = spell_entry(SpellId.THORN_WHIP)
+    toll_the_dead = spell_entry(SpellId.TOLL_THE_DEAD)
+    animal_friendship = spell_entry(SpellId.ANIMAL_FRIENDSHIP)
+    bane = spell_entry(SpellId.BANE)
+    bless = spell_entry(SpellId.BLESS)
+    chromatic_orb = spell_entry(SpellId.CHROMATIC_ORB)
+    command = spell_entry(SpellId.COMMAND)
+    divine_favor = spell_entry(SpellId.DIVINE_FAVOR)
+    ensnaring_strike = spell_entry(SpellId.ENSNARING_STRIKE)
+    faerie_fire = spell_entry(SpellId.FAERIE_FIRE)
+    goodberry = spell_entry(SpellId.GOODBERRY)
+    guidance = spell_entry(SpellId.GUIDANCE)
+    hail_of_thorns = spell_entry(SpellId.HAIL_OF_THORNS)
+    hex_spell = spell_entry(SpellId.HEX)
+    hunters_mark = spell_entry(SpellId.HUNTER_S_MARK)
+    searing_smite = spell_entry(SpellId.SEARING_SMITE)
+    resistance = spell_entry(SpellId.RESISTANCE)
+    sleep = spell_entry(SpellId.SLEEP)
+    spellfire_flare = spell_entry(SpellId.SPELLFIRE_FLARE)
+    thunderous_smite = spell_entry(SpellId.THUNDEROUS_SMITE)
+    wrathful_smite = spell_entry(SpellId.WRATHFUL_SMITE)
+
+    assert produce_flame is not None and produce_flame.effects is not None
+    assert produce_flame.effects[0].actionLabel == "Hurl"
+    assert produce_flame.effects[0].damage is not None
+    assert produce_flame.effects[0].damage.dice.dice == "1d8"
+    assert produce_flame.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+
+    assert sorcerous_burst is not None and sorcerous_burst.effects is not None
+    assert {effect.damage.damageType for effect in sorcerous_burst.effects if effect.damage is not None} == {
+        DamageType.ACID,
+        DamageType.COLD,
+        DamageType.FIRE,
+        DamageType.LIGHTNING,
+        DamageType.POISON,
+        DamageType.PSYCHIC,
+        DamageType.THUNDER,
+    }
+    assert {effect.actionLabel for effect in sorcerous_burst.effects} == {
+        "Acid",
+        "Bonus Acid",
+        "Bonus Cold",
+        "Bonus Fire",
+        "Bonus Lightning",
+        "Bonus Poison",
+        "Bonus Psychic",
+        "Bonus Thunder",
+        "Cold",
+        "Fire",
+        "Lightning",
+        "Poison",
+        "Psychic",
+        "Thunder",
+    }
+    assert {effect.trigger for effect in sorcerous_burst.effects if effect.actionLabel.startswith("Bonus")} == {SpellEffectTrigger.SPECIAL}
+
+    assert thorn_whip is not None and thorn_whip.effects is not None
+    assert thorn_whip.effects[0].damage is not None
+    assert thorn_whip.effects[0].damage.damageType == DamageType.PIERCING
+    assert thorn_whip.effects[0].attack == SpellAttackType.MELEE_SPELL_ATTACK
+
+    assert toll_the_dead is not None and toll_the_dead.effects is not None
+    assert [effect.actionLabel for effect in toll_the_dead.effects] == ["Healthy", "Wounded"]
+    assert [effect.damage.dice.dice for effect in toll_the_dead.effects if effect.damage is not None] == ["1d8", "1d12"]
+    assert {effect.savingThrow.ability for effect in toll_the_dead.effects if effect.savingThrow is not None} == {AbilityType.WISDOM}
+
+    assert animal_friendship is not None and animal_friendship.effects is not None
+    assert animal_friendship.effects[0].conditions is not None
+    assert animal_friendship.effects[0].conditions[0].condition == ConditionType.CHARMED
+    assert animal_friendship.effects[0].savingThrow is not None
+    assert animal_friendship.effects[0].savingThrow.ability == AbilityType.WISDOM
+
+    assert bane is not None and bane.effects is not None
+    assert bane.effects[0].conditions is not None
+    assert bane.effects[0].conditions[0].condition == ConditionType.BANE
+    assert bane.effects[0].savingThrow is not None
+    assert bane.effects[0].savingThrow.ability == AbilityType.CHARISMA
+    assert bane.effects[0].rollModifier is not None
+    assert bane.effects[0].rollModifier.operation == RollModifierEffectOperation.SUBTRACT
+    assert set(bane.effects[0].rollModifier.targets) == {RollModifierEffectTarget.ATTACK_ROLL, RollModifierEffectTarget.SAVING_THROW}
+
+    assert bless is not None and bless.effects is not None
+    assert bless.effects[0].conditions is not None
+    assert bless.effects[0].conditions[0].condition == ConditionType.BLESSED
+    assert bless.effects[0].savingThrow is None
+    assert bless.effects[0].rollModifier is not None
+    assert bless.effects[0].rollModifier.operation == RollModifierEffectOperation.ADD
+    assert set(bless.effects[0].rollModifier.targets) == {RollModifierEffectTarget.ATTACK_ROLL, RollModifierEffectTarget.SAVING_THROW}
+
+    assert chromatic_orb is not None and chromatic_orb.effects is not None
+    assert len(chromatic_orb.effects) == 6
+    assert {effect.damage.damageType for effect in chromatic_orb.effects if effect.damage is not None} == {
+        DamageType.ACID,
+        DamageType.COLD,
+        DamageType.FIRE,
+        DamageType.LIGHTNING,
+        DamageType.POISON,
+        DamageType.THUNDER,
+    }
+    assert {effect.attack for effect in chromatic_orb.effects} == {SpellAttackType.RANGED_SPELL_ATTACK}
+
+    assert command is not None and command.effects is not None
+    assert [effect.actionLabel for effect in command.effects] == ["Approach", "Drop", "Flee", "Grovel", "Halt"]
+    assert [effect.conditions[0].condition for effect in command.effects if effect.conditions is not None] == [
+        ConditionType.COMMAND_APPROACH,
+        ConditionType.COMMAND_DROP,
+        ConditionType.COMMAND_FLEE,
+        ConditionType.COMMAND_GROVEL,
+        ConditionType.COMMAND_HALT,
+    ]
+    assert command.effects[3].conditions is not None
+    assert [condition.condition for condition in command.effects[3].conditions] == [ConditionType.COMMAND_GROVEL, ConditionType.PRONE]
+    assert {effect.savingThrow.ability for effect in command.effects if effect.savingThrow is not None} == {AbilityType.WISDOM}
+
+    assert divine_favor is not None and divine_favor.effects is not None
+    assert divine_favor.effects[0].actionLabel == "Weapon Bonus"
+    assert divine_favor.effects[0].damage is not None
+    assert divine_favor.effects[0].damage.damageType == DamageType.RADIANT
+
+    assert ensnaring_strike is not None and ensnaring_strike.effects is not None
+    assert ensnaring_strike.effects[0].conditions is not None
+    assert ensnaring_strike.effects[0].conditions[0].condition == ConditionType.RESTRAINED
+    assert ensnaring_strike.effects[1].damage is not None
+    assert ensnaring_strike.effects[1].trigger == SpellEffectTrigger.START_OF_TURN
+
+    assert faerie_fire is not None and faerie_fire.effects is not None
+    assert faerie_fire.targeting.area.shape == SpellAreaShape.CUBE
+    assert faerie_fire.effects[0].kind == SpellEffectKind.CONDITION
+    assert faerie_fire.effects[0].conditions is not None
+    assert faerie_fire.effects[0].conditions[0].condition == ConditionType.FAERIE_FIRE
+    assert faerie_fire.effects[0].savingThrow is not None
+    assert faerie_fire.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+
+    assert goodberry is not None and goodberry.effects is not None
+    assert goodberry.effects[0].healing is not None
+    assert goodberry.effects[0].healing.dice.staticBonus == 1
+
+    assert guidance is not None and guidance.effects is not None
+    assert guidance.effects[0].conditions is not None
+    assert guidance.effects[0].conditions[0].condition == ConditionType.GUIDANCE
+    assert guidance.effects[0].rollModifier is not None
+    assert guidance.effects[0].rollModifier.targets == [RollModifierEffectTarget.ABILITY_CHECK]
+
+    assert hail_of_thorns is not None and hail_of_thorns.effects is not None
+    assert hail_of_thorns.targeting.area.shape == SpellAreaShape.RADIUS
+    assert hail_of_thorns.effects[0].damage is not None
+    assert hail_of_thorns.effects[0].savingThrow is not None
+    assert hail_of_thorns.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert hex_spell is not None and hex_spell.effects is not None
+    assert hex_spell.effects[0].actionLabel == "Hex Bonus"
+    assert hex_spell.effects[0].damage is not None
+    assert hex_spell.effects[0].damage.damageType == DamageType.NECROTIC
+
+    assert hunters_mark is not None and hunters_mark.effects is not None
+    assert hunters_mark.effects[0].actionLabel == "Mark Bonus"
+    assert hunters_mark.effects[0].damage is not None
+    assert hunters_mark.effects[0].damage.damageType == DamageType.FORCE
+
+    assert searing_smite is not None and searing_smite.effects is not None
+    assert [effect.actionLabel for effect in searing_smite.effects] == ["Hit", "Burn"]
+    assert [effect.damage.dice.dice for effect in searing_smite.effects if effect.damage is not None] == ["1d6", "1d6"]
+    assert {effect.scaling[0].additionalDice.dice for effect in searing_smite.effects if effect.scaling and effect.scaling[0].additionalDice is not None} == {"1d6"}
+
+    assert resistance is not None and resistance.effects is not None
+    assert len(resistance.effects) == len(DamageType)
+    assert [effect.actionLabel for effect in resistance.effects] == [
+        "Acid",
+        "Bludgeoning",
+        "Cold",
+        "Fire",
+        "Force",
+        "Lightning",
+        "Necrotic",
+        "Piercing",
+        "Poison",
+        "Psychic",
+        "Radiant",
+        "Slashing",
+        "Thunder",
+    ]
+    assert [effect.conditions[0].condition for effect in resistance.effects if effect.conditions is not None] == [
+        ConditionType.RESISTANCE_ACID,
+        ConditionType.RESISTANCE_BLUDGEONING,
+        ConditionType.RESISTANCE_COLD,
+        ConditionType.RESISTANCE_FIRE,
+        ConditionType.RESISTANCE_FORCE,
+        ConditionType.RESISTANCE_LIGHTNING,
+        ConditionType.RESISTANCE_NECROTIC,
+        ConditionType.RESISTANCE_PIERCING,
+        ConditionType.RESISTANCE_POISON,
+        ConditionType.RESISTANCE_PSYCHIC,
+        ConditionType.RESISTANCE_RADIANT,
+        ConditionType.RESISTANCE_SLASHING,
+        ConditionType.RESISTANCE_THUNDER,
+    ]
+    assert all(effect.rollModifier is None for effect in resistance.effects)
+
+    assert sleep is not None and sleep.effects is not None
+    assert sleep.targeting.area.shape == SpellAreaShape.RADIUS
+    assert [effect.actionLabel for effect in sleep.effects] == ["Drowsy", "Asleep"]
+    assert [effect.conditions[0].condition for effect in sleep.effects if effect.conditions is not None] == [ConditionType.INCAPACITATED, ConditionType.UNCONSCIOUS]
+
+    assert spellfire_flare is not None and spellfire_flare.effects is not None
+    assert spellfire_flare.effects[0].damage is not None
+    assert spellfire_flare.effects[0].instances == 1
+    assert spellfire_flare.effects[0].instanceLabel == "Blast"
+    assert spellfire_flare.effects[0].scaling is not None
+    assert spellfire_flare.effects[0].scaling[0].additionalInstances == 1
+
+    assert thunderous_smite is not None and thunderous_smite.effects is not None
+    assert thunderous_smite.effects[0].damage is not None
+    assert thunderous_smite.effects[0].damage.damageType == DamageType.THUNDER
+    assert thunderous_smite.effects[1].conditions is not None
+    assert thunderous_smite.effects[1].conditions[0].condition == ConditionType.PRONE
+
+    assert wrathful_smite is not None and wrathful_smite.effects is not None
+    assert wrathful_smite.effects[0].damage is not None
+    assert wrathful_smite.effects[0].damage.damageType == DamageType.NECROTIC
+    assert wrathful_smite.effects[1].conditions is not None
+    assert wrathful_smite.effects[1].conditions[0].condition == ConditionType.FRIGHTENED
+    assert wrathful_smite.effects[1].conditions[0].saveEnds is True
 
 
 def test_catalog_spell_effect_lists_are_cloned() -> None:
