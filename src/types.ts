@@ -126,12 +126,13 @@ export type ConditionType =
   | "shieldOfFaith"
   | "slowed"
   | "stunned"
+  | "synapticStatic"
   | "unconscious";
 export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
 export type ConditionRemovalTrigger = "afterTakingDamage";
 export type RollModifierEffectOperation = "add" | "subtract";
-export type RollModifierEffectTarget = "abilityCheck" | "attackRoll" | "savingThrow" | "armorClass";
+export type RollModifierEffectTarget = "abilityCheck" | "attackRoll" | "savingThrow" | "concentrationSave" | "armorClass";
 export type ConditionEffect = {
   condition?: ConditionType;
   conditionLabel?: string;
@@ -663,6 +664,11 @@ export type CharacterSheet = {
   }[];
   proficiencies: string[];
   conditions: ConditionType[];
+  activeConcentration?: {
+    spellId: string;
+    spellIdLabel: string;
+    spellName: string;
+  };
   creatureTypes: CreatureType[];
   creatureTypesLabel: string[];
   damageResistances: DamageType[];
@@ -693,6 +699,12 @@ export type CharacterSheet = {
     silver: number;
     gold: number;
   };
+};
+
+export type ActiveConcentrationStatus = {
+  spellId: string;
+  spellIdLabel: string;
+  spellName: string;
 };
 
 export type RollPayload = {
@@ -781,6 +793,10 @@ export type RollResolution = {
   outcome: string;
   createdAt: number;
   responseRolls?: RollPayload[];
+  concentrationUpdates?: {
+    sheetId: string;
+    activeConcentration?: ActiveConcentrationStatus;
+  }[];
 };
 
 export type RollLogEntry = {

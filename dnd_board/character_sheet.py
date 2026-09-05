@@ -838,6 +838,7 @@ class ConditionType(Enum):
     SHIELD_OF_FAITH = auto()
     SLOWED = auto()
     STUNNED = auto()
+    SYNAPTIC_STATIC = auto()
     UNCONSCIOUS = auto()
 
 
@@ -867,6 +868,7 @@ class RollModifierEffectTarget(Enum):
     ABILITY_CHECK = auto()
     ATTACK_ROLL = auto()
     SAVING_THROW = auto()
+    CONCENTRATION_SAVE = auto()
     ARMOR_CLASS = auto()
 
 
@@ -1466,6 +1468,18 @@ class CharacterClass:
 
 
 @dataclass
+class ActiveConcentrationStatus:
+    spellId: SpellId
+    spellName: str
+
+
+@dataclass
+class ActiveConcentrationUpdate:
+    sheetId: str
+    activeConcentration: ActiveConcentrationStatus | None = None
+
+
+@dataclass
 class CharacterSheet:
     id: str
     tokenId: str
@@ -1503,6 +1517,7 @@ class CharacterSheet:
     attacks: list[AttackAction]
     equipment: list[EquipmentItem]
     purse: Purse = field(default_factory=Purse)
+    activeConcentration: ActiveConcentrationStatus | None = None
 
 
 @dataclass
@@ -1560,6 +1575,7 @@ class RollResolution:
     outcome: str
     createdAt: int
     responseRolls: list[RollPayload] | None = None
+    concentrationUpdates: list[ActiveConcentrationUpdate] | None = None
 
 
 @dataclass
@@ -2229,6 +2245,13 @@ ACTIVE_CONDITION_ROLL_MODIFIERS: dict[ConditionType, SpellRollModifierEffect] = 
         dice=SpellEffectDice(1, DiceType.D4),
         description="Add 1d4 to an ability check.",
     ),
+    ConditionType.SYNAPTIC_STATIC: SpellRollModifierEffect(
+        condition=ConditionType.SYNAPTIC_STATIC,
+        operation=RollModifierEffectOperation.SUBTRACT,
+        targets=[RollModifierEffectTarget.ATTACK_ROLL, RollModifierEffectTarget.ABILITY_CHECK, RollModifierEffectTarget.CONCENTRATION_SAVE],
+        dice=SpellEffectDice(1, DiceType.D6),
+        description="Subtract 1d6 from attack rolls, ability checks, and concentration saving throws.",
+    ),
 }
 
 
@@ -2549,6 +2572,8 @@ def creature_type_list_label(creature_types: list[CreatureType]) -> str:
 
 
 def resolve_condition_effects(roll: RollPayload, target: CharacterSheet) -> list[str]:
+    if roll.damageSaveSucceeded:
+        return []
     outcomes: list[str] = []
     for effect in roll.conditionEffects or []:
         if effect.mode == ConditionApplicationMode.DIRECT and effect.condition is not None:

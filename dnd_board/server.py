@@ -16,6 +16,8 @@ from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
 from dnd_board.character_sheet import (
+    ActiveConcentrationStatus,
+    ActiveConcentrationUpdate,
     AbilityScores,
     AbilityType,
     CharacterSheet,
@@ -49,6 +51,7 @@ from dnd_board.character_sheet import (
     SpellAttackType,
     SpellComponent,
     SpellEntry,
+    SpellId,
     SpellLinkedHealingAmount,
     SpellSaveOutcome,
     SpellSource,
@@ -207,6 +210,23 @@ class ConditionRemovalSave:
     advantage: bool = False
 
 
+@dataclass
+class ActiveConditionSource:
+    targetSheetId: str
+    condition: ConditionType
+    spellId: SpellId
+    casterSheetId: str
+    wasAlreadyActive: bool = False
+
+
+@dataclass
+class ActiveConcentration:
+    casterSheetId: str
+    spellId: SpellId
+    spellName: str
+    conditionSources: list[ActiveConditionSource]
+
+
 class DamageDefenseType(Enum):
     RESISTANCE = "resistance"
     VULNERABILITY = "vulnerability"
@@ -228,6 +248,7 @@ class Room:
     condition_overrides: dict[str, list[ConditionType]]
     condition_durations: dict[str, dict[ConditionType, ConditionDuration]]
     condition_removals: dict[str, dict[ConditionType, ConditionRemovalSave]]
+    active_concentrations: dict[str, ActiveConcentration]
     damage_resistances: dict[str, list[DamageType]]
     damage_vulnerabilities: dict[str, list[DamageType]]
     damage_immunities: dict[str, list[DamageType]]
@@ -487,6 +508,7 @@ async def update_sheet_level(room_id: str, sheet_id: str, playerKey: str, delta:
     room.condition_overrides.pop(updated_member.id, None)
     room.condition_durations.pop(updated_member.id, None)
     room.condition_removals.pop(updated_member.id, None)
+    clear_active_concentration(room, updated_member.id)
     room.damage_resistances.pop(updated_member.id, None)
     room.damage_vulnerabilities.pop(updated_member.id, None)
     room.damage_immunities.pop(updated_member.id, None)
@@ -665,6 +687,7 @@ async def update_sheet_condition(room_id: str, sheet_id: str, condition: str, pl
     if condition_type is None:
         raise HTTPException(status_code=400, detail="Invalid condition")
 
+    previous_active_concentrations = active_concentrations_to_dict(room.active_concentrations)
     next_conditions = updated_conditions(sheet.conditions, condition_type, active)
     updated_member = update_party_member_config(
         room.id,
@@ -679,6 +702,9 @@ async def update_sheet_condition(room_id: str, sheet_id: str, condition: str, pl
     else:
         room.condition_durations.setdefault(updated_sheet_id, {}).pop(condition_type, None)
         room.condition_removals.setdefault(updated_sheet_id, {}).pop(condition_type, None)
+        remove_active_condition_sources(room, updated_sheet_id, condition_type)
+    if previous_active_concentrations != active_concentrations_to_dict(room.active_concentrations):
+        save_room_to_disk(room)
     updated = get_visible_sheet(room, player, updated_sheet_id)
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else None}
 
@@ -734,6 +760,7 @@ async def resolve_roll(room_id: str, roll_id: str, playerKey: str, targetSheetId
         raise HTTPException(status_code=404, detail="Target sheet not found")
 
     resolution = resolve_roll_against_target(room, roll, target)
+    save_room_if_concentration_changed(room, resolution)
     if not preserveRoll:
         room.pending_rolls.pop(roll_queue_key(roll), None)
     resolution_data = roll_resolution_to_dict(resolution)
@@ -1092,6 +1119,8 @@ async def delete_token(room: Room, player: Player, token_id: str) -> None:
     room.temporary_hit_points.pop(token_id, None)
     room.condition_overrides.pop(token_id, None)
     room.condition_durations.pop(token_id, None)
+    room.condition_removals.pop(token_id, None)
+    clear_active_concentration(room, token_id)
     room.damage_resistances.pop(token_id, None)
     room.damage_vulnerabilities.pop(token_id, None)
     room.damage_immunities.pop(token_id, None)
@@ -1131,6 +1160,7 @@ def get_or_create_room(room_id: str) -> Room:
         condition_overrides={},
         condition_durations={},
         condition_removals={},
+        active_concentrations=load_saved_active_concentrations(room_id),
         damage_resistances={},
         damage_vulnerabilities={},
         damage_immunities={},
@@ -1286,6 +1316,9 @@ def token_to_sheet(
         sheet.damageVulnerabilities = merged_damage_defenses(sheet.damageVulnerabilities, room.damage_vulnerabilities.get(token.id, []))
         sheet.damageImmunities = merged_damage_defenses(sheet.damageImmunities, room.damage_immunities.get(token.id, []))
         sheet.damageResistances = effective_damage_resistance_list(sheet)
+        active_concentration = room.active_concentrations.get(token.id)
+        if active_concentration is not None:
+            sheet.activeConcentration = active_concentration_status(active_concentration)
     sheet.armorClass = condition_adjusted_armor_class(sheet)
     sheet.speed = condition_adjusted_speed(sheet.speed, sheet.conditions)
     return sheet
@@ -1522,6 +1555,7 @@ async def store_roll(room: Room, payload: RollPayload) -> dict[str, Any]:
         if target is None:
             raise HTTPException(status_code=404, detail="Sheet not found")
         resolution = resolve_roll_against_target(room, payload, target)
+        save_room_if_concentration_changed(room, resolution)
         resolution_data = roll_resolution_to_dict(resolution)
         log_entry = append_roll_log_entry(
             room,
@@ -1739,6 +1773,7 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
     damage_save_outcome, damage_save_roll, resolved_roll = resolve_damage_save_for_roll(roll, target)
     resolution = resolve_dnd_roll_against_target(resolved_roll, target)
     source = source_sheet_for_roll(room, roll)
+    concentration_update_sheet_ids: set[str] = set()
     target_save_outcomes = resolve_target_save_effects(roll, target)
     source_check_outcomes = resolve_source_check_condition_effects(roll, source, target)
     damage_triggered_condition_outcomes = resolve_damage_triggered_condition_saves(room, roll, target, resolution)
@@ -1775,6 +1810,14 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
     if roll.resolution in {RollResolutionMode.APPLY_DAMAGE, RollResolutionMode.HEAL_SELF, RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS}:
         room.hit_points[target.tokenId] = resolution.targetHp.current
         room.temporary_hit_points[target.tokenId] = resolution.targetHp.temporary
+    concentration_outcome, concentration_roll = resolve_concentration_save_after_damage(room, target, resolution)
+    if concentration_outcome:
+        resolution.outcome = f"{resolution.outcome}; {concentration_outcome}"
+        concentration_update_sheet_ids.add(target.id)
+    if concentration_roll is not None:
+        response_rolls = dedupe_response_rolls([*response_rolls, concentration_roll])
+        room.pending_rolls[roll_queue_key(concentration_roll)] = concentration_roll
+        resolution.responseRolls = response_rolls
     source_healing_outcome = apply_source_healing_effect(room, roll, source, target, resolution)
     if source_healing_outcome:
         resolution.outcome = f"{resolution.outcome}; {source_healing_outcome}"
@@ -1784,7 +1827,17 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
         reset_sheet_temporary_hit_points(room, target, roll.restType)
         resolution.targetConditions = room.condition_overrides.get(target.tokenId, resolution.targetConditions)
         resolution.outcome = f"{resolution.outcome}; {target.name} gains the benefits of a {enum_label(roll.restType)}"
-    apply_resolved_conditions(room, target.id, resolution.targetConditions, roll)
+    apply_resolved_conditions(room, target.id, target.conditions, resolution.targetConditions, roll, source)
+    if concentration_spell_for_roll(source, roll) is not None and source is not None:
+        concentration_update_sheet_ids.add(source.id)
+    if concentration_update_sheet_ids:
+        resolution.concentrationUpdates = [
+            ActiveConcentrationUpdate(
+                sheetId=sheet_id,
+                activeConcentration=active_concentration_status(room.active_concentrations.get(sheet_id)),
+            )
+            for sheet_id in sorted(concentration_update_sheet_ids)
+        ]
     return resolution
 
 
@@ -2077,6 +2130,7 @@ def response_ability_roll(
     advantage_conditions: list[ConditionType] | None = None,
     disadvantage_conditions: list[ConditionType] | None = None,
     saving_throw_conditions: bool = True,
+    modifier_target: RollModifierEffectTarget = RollModifierEffectTarget.SAVING_THROW,
 ) -> RollPayload:
     if saving_throw_conditions:
         advantage_conditions = (advantage_conditions or []) + condition_saving_throw_advantage_conditions(sheet, ability)
@@ -2089,7 +2143,7 @@ def response_ability_roll(
     die_roll = min(dice) if has_disadvantage else max(dice)
     created_at = time_ns()
     modifier_breakdown = [RollModifierBreakdown(source=label, value=modifier)] if modifier else []
-    modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.SAVING_THROW))
+    modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, modifier_target))
     total_modifier = sum(part.value for part in modifier_breakdown)
     return RollPayload(
         id=f"roll-{created_at}",
@@ -2149,7 +2203,131 @@ def apply_response_roll_conditions(
     return normalized_conditions(next_conditions)
 
 
-def apply_resolved_conditions(room: Room, sheet_id: str, conditions: list[ConditionType], roll: RollPayload) -> None:
+def active_concentration_status(active: ActiveConcentration | None) -> ActiveConcentrationStatus | None:
+    if active is None:
+        return None
+    return ActiveConcentrationStatus(spellId=active.spellId, spellName=active.spellName)
+
+
+def resolve_concentration_save_after_damage(room: Room, target: CharacterSheet, resolution: RollResolution) -> tuple[str | None, RollPayload | None]:
+    active = room.active_concentrations.get(target.id)
+    damage_taken = hit_point_damage_taken(target.hp, resolution.targetHp)
+    if active is None or damage_taken <= 0:
+        return None, None
+    save_dc = max(10, damage_taken // 2)
+    response_roll = response_ability_roll(
+        sheet=target,
+        ability=AbilityType.CONSTITUTION,
+        action_id="concentration-save",
+        label="Concentration Save",
+        source_label=active.spellName,
+        modifier=save_modifier(target, AbilityType.CONSTITUTION),
+        modifier_target=RollModifierEffectTarget.CONCENTRATION_SAVE,
+    )
+    advantage_label = roll_advantage_log_label(response_roll)
+    if response_roll.total >= save_dc:
+        return f"{target.name} passes DC {save_dc} Concentration save{advantage_label} for {active.spellName}", response_roll
+    removed_conditions = clear_active_concentration(room, target.id)
+    removed_label = f" and removes {text_list_label(removed_conditions)}" if removed_conditions else ""
+    return f"{target.name} fails DC {save_dc} Concentration save{advantage_label}; {active.spellName} ends{removed_label}", response_roll
+
+
+def concentration_spell_for_roll(source: CharacterSheet | None, roll: RollPayload) -> SpellEntry | None:
+    if source is None or roll.source.section != SheetSectionType.SPELLS:
+        return None
+    spell_id = enum_value(SpellId, roll.source.sourceId)
+    if spell_id is None:
+        return None
+    spell = next((candidate for candidate in source.spells if candidate.id == spell_id), None)
+    return spell if spell is not None and spell.concentration else None
+
+
+def clear_active_concentration(room: Room, caster_sheet_id: str) -> list[str]:
+    active = room.active_concentrations.pop(caster_sheet_id, None)
+    if active is None:
+        return []
+    removed: list[str] = []
+    for source in active.conditionSources:
+        remaining_sources = [
+            other_source
+            for concentration in room.active_concentrations.values()
+            for other_source in concentration.conditionSources
+            if other_source.targetSheetId == source.targetSheetId and other_source.condition == source.condition
+        ]
+        if source.wasAlreadyActive or remaining_sources:
+            continue
+        current_conditions = room.condition_overrides.get(source.targetSheetId) or sheet_conditions(source.targetSheetId, room.id)
+        next_conditions = [condition for condition in current_conditions if condition != source.condition]
+        if next_conditions != current_conditions:
+            room.condition_overrides[source.targetSheetId] = next_conditions
+            room.condition_durations.setdefault(source.targetSheetId, {}).pop(source.condition, None)
+            room.condition_removals.setdefault(source.targetSheetId, {}).pop(source.condition, None)
+            update_party_member_config(room.id, source.targetSheetId, lambda updated, conditions=next_conditions: set_member_conditions(updated, conditions))
+            removed.append(enum_label(source.condition))
+    return removed
+
+
+def sheet_conditions(sheet_id: str, campaign_id: str) -> list[ConditionType]:
+    manifest = load_party_manifest_config(campaign_asset_dir("party", campaign_id) / "party.json")
+    if manifest is None:
+        return []
+    member = next((candidate for candidate in manifest.members if candidate.id == sheet_id), None)
+    if member is None or member.sheet is None or member.sheet.conditions is None:
+        return []
+    return list(member.sheet.conditions)
+
+
+def remove_active_condition_sources(room: Room, target_sheet_id: str, condition: ConditionType) -> None:
+    for caster_sheet_id, concentration in list(room.active_concentrations.items()):
+        concentration.conditionSources = [
+            source
+            for source in concentration.conditionSources
+            if source.targetSheetId != target_sheet_id or source.condition != condition
+        ]
+        if not concentration.conditionSources:
+            room.active_concentrations.pop(caster_sheet_id, None)
+
+
+def record_active_concentration_conditions(
+    room: Room,
+    source: CharacterSheet | None,
+    target_sheet_id: str,
+    previous_conditions: list[ConditionType],
+    conditions: list[ConditionType],
+    roll: RollPayload,
+) -> None:
+    spell = concentration_spell_for_roll(source, roll)
+    if spell is None:
+        return
+    caster_sheet_id = source.id
+    active = room.active_concentrations.get(caster_sheet_id)
+    if active is not None and active.spellId != spell.id:
+        clear_active_concentration(room, caster_sheet_id)
+        active = None
+    if active is None:
+        active = ActiveConcentration(casterSheetId=caster_sheet_id, spellId=spell.id, spellName=enum_label(spell.name), conditionSources=[])
+        room.active_concentrations[caster_sheet_id] = active
+    active_conditions = set(conditions)
+    previous_condition_set = set(previous_conditions)
+    existing_source_keys = {(source_record.targetSheetId, source_record.condition) for source_record in active.conditionSources}
+    for effect in roll.conditionEffects or []:
+        if effect.condition is None or effect.condition not in active_conditions:
+            continue
+        source_key = (target_sheet_id, effect.condition)
+        if source_key in existing_source_keys:
+            continue
+        active.conditionSources.append(
+            ActiveConditionSource(
+                targetSheetId=target_sheet_id,
+                condition=effect.condition,
+                spellId=spell.id,
+                casterSheetId=caster_sheet_id,
+                wasAlreadyActive=effect.condition in previous_condition_set,
+            )
+        )
+
+
+def apply_resolved_conditions(room: Room, sheet_id: str, previous_conditions: list[ConditionType], conditions: list[ConditionType], roll: RollPayload, source: CharacterSheet | None) -> None:
     room.condition_overrides[sheet_id] = list(conditions)
     active_conditions = set(conditions)
     durations = room.condition_durations.setdefault(sheet_id, {})
@@ -2169,6 +2347,7 @@ def apply_resolved_conditions(room: Room, sheet_id: str, conditions: list[Condit
                     saveDc=effect.removalSaveDc,
                     advantage=effect.removalAdvantage,
                 )
+    record_active_concentration_conditions(room, source, sheet_id, previous_conditions, conditions, roll)
     update_party_member_config(room.id, sheet_id, lambda updated: set_member_conditions(updated, conditions))
 
 
@@ -2244,8 +2423,14 @@ def save_room_to_disk(room: Room) -> None:
         "fog": fog_to_dict(room.fog),
         "boardId": room.board_id,
         "resources": room.resource_uses,
+        "activeConcentrations": active_concentrations_to_dict(room.active_concentrations),
     }
     path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def save_room_if_concentration_changed(room: Room, resolution: RollResolution) -> None:
+    if resolution.concentrationUpdates:
+        save_room_to_disk(room)
 
 
 async def load_room_from_disk(room: Room, player: Player) -> bool:
@@ -2270,6 +2455,7 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.condition_overrides = {}
     room.condition_durations = {}
     room.condition_removals = {}
+    room.active_concentrations = load_saved_active_concentrations(room.id)
     room.damage_resistances = {}
     room.damage_vulnerabilities = {}
     room.damage_immunities = {}
@@ -2345,6 +2531,78 @@ def load_saved_resource_uses(room_id: str) -> dict[str, dict[str, int]]:
         if token_id and token_resources:
             resources[token_id] = token_resources
     return resources
+
+
+def active_concentrations_to_dict(active_concentrations: dict[str, ActiveConcentration]) -> dict[str, Any]:
+    return {
+        sheet_id: {
+            "casterSheetId": concentration.casterSheetId,
+            "spellId": enum_key(concentration.spellId),
+            "spellName": concentration.spellName,
+            "conditionSources": [
+                {
+                    "targetSheetId": source.targetSheetId,
+                    "condition": enum_key(source.condition),
+                    "spellId": enum_key(source.spellId),
+                    "casterSheetId": source.casterSheetId,
+                    "wasAlreadyActive": source.wasAlreadyActive,
+                }
+                for source in concentration.conditionSources
+            ],
+        }
+        for sheet_id, concentration in active_concentrations.items()
+    }
+
+
+def load_saved_active_concentrations(room_id: str) -> dict[str, ActiveConcentration]:
+    path = existing_save_path(room_id)
+    if not path.exists():
+        return {}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    raw_active_concentrations = data.get("activeConcentrations")
+    if not isinstance(raw_active_concentrations, dict):
+        return {}
+
+    active_concentrations: dict[str, ActiveConcentration] = {}
+    for raw_sheet_id, raw_concentration in raw_active_concentrations.items():
+        if not isinstance(raw_concentration, dict):
+            continue
+        sheet_id = sanitize_asset_id(str(raw_sheet_id))
+        spell_id = enum_value(SpellId, raw_concentration.get("spellId"))
+        if not sheet_id or spell_id is None:
+            continue
+        caster_sheet_id = sanitize_asset_id(str(raw_concentration.get("casterSheetId", sheet_id)))
+        condition_sources: list[ActiveConditionSource] = []
+        for raw_source in raw_concentration.get("conditionSources", []):
+            if not isinstance(raw_source, dict):
+                continue
+            condition = enum_value(ConditionType, raw_source.get("condition"))
+            source_spell_id = enum_value(SpellId, raw_source.get("spellId"))
+            target_sheet_id = sanitize_asset_id(str(raw_source.get("targetSheetId", "")))
+            source_caster_sheet_id = sanitize_asset_id(str(raw_source.get("casterSheetId", caster_sheet_id)))
+            if condition is None or source_spell_id is None or not target_sheet_id or not source_caster_sheet_id:
+                continue
+            condition_sources.append(
+                ActiveConditionSource(
+                    targetSheetId=target_sheet_id,
+                    condition=condition,
+                    spellId=source_spell_id,
+                    casterSheetId=source_caster_sheet_id,
+                    wasAlreadyActive=bool(raw_source.get("wasAlreadyActive", False)),
+                )
+            )
+        active_concentrations[sheet_id] = ActiveConcentration(
+            casterSheetId=caster_sheet_id,
+            spellId=spell_id,
+            spellName=str(raw_concentration.get("spellName") or enum_label(spell_id)),
+            conditionSources=condition_sources,
+        )
+    return active_concentrations
 
 
 def token_from_dict(data: dict[str, Any], board: Board | None = None, campaign_id: str | None = None) -> Token:

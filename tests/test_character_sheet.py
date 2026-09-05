@@ -511,6 +511,16 @@ def test_resolution_branches_cover_miss_heal_temp_hp_and_defense_text(monkeypatc
     assert mixed_resolution.targetHp.current == 18
     assert mixed_resolution.outcome == "deals 12 damage (Bludgeoning 2 after successful save, resistance; Cold 10 after successful save, vulnerability)"
 
+    passed_rider_roll = replace(
+        typed_damage_roll,
+        damageSaveOutcome=SpellSaveOutcome.HALF_DAMAGE,
+        damageSaveSucceeded=True,
+        conditionEffects=[ConditionEffect(condition=ConditionType.PRONE, mode=ConditionApplicationMode.DIRECT)],
+    )
+    failed_rider_roll = replace(passed_rider_roll, damageSaveSucceeded=False)
+    assert ConditionType.PRONE not in resolve_roll_against_target(passed_rider_roll, target).targetConditions
+    assert ConditionType.PRONE in resolve_roll_against_target(failed_rider_roll, target).targetConditions
+
     static_modifier_roll = build_roll_action_payload(
         sheet,
         "player-1",
@@ -623,8 +633,10 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     inflict_wounds = cleric_spell_entry(SpellId.INFLICT_WOUNDS)
     ice_storm = spell_entry(SpellId.ICE_STORM)
     lightning_bolt = wizard_spell_entry(SpellId.LIGHTNING_BOLT)
+    flame_strike = spell_entry(SpellId.FLAME_STRIKE)
     divine_smite = spell_entry(SpellId.DIVINE_SMITE)
     magic_missile = wizard_spell_entry(SpellId.MAGIC_MISSILE)
+    mass_cure_wounds = spell_entry(SpellId.MASS_CURE_WOUNDS)
     mass_healing_word = spell_entry(SpellId.MASS_HEALING_WORD)
     prayer_of_healing = spell_entry(SpellId.PRAYER_OF_HEALING)
     ray_of_sickness = wizard_spell_entry(SpellId.RAY_OF_SICKNESS)
@@ -633,6 +645,8 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     thunderwave = wizard_spell_entry(SpellId.THUNDERWAVE)
     vampiric_touch = wizard_spell_entry(SpellId.VAMPIRIC_TOUCH)
     wind_wall = spell_entry(SpellId.WIND_WALL)
+    steel_wind_strike = spell_entry(SpellId.STEEL_WIND_STRIKE)
+    destructive_wave = spell_entry(SpellId.DESTRUCTIVE_WAVE)
     assert acid_splash is not None
     assert call_lightning is not None
     assert cone_of_cold is not None
@@ -642,8 +656,10 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert inflict_wounds is not None
     assert ice_storm is not None
     assert lightning_bolt is not None
+    assert flame_strike is not None
     assert divine_smite is not None
     assert magic_missile is not None
+    assert mass_cure_wounds is not None
     assert mass_healing_word is not None
     assert prayer_of_healing is not None
     assert ray_of_sickness is not None
@@ -652,6 +668,8 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert thunderwave is not None
     assert vampiric_touch is not None
     assert wind_wall is not None
+    assert steel_wind_strike is not None
+    assert destructive_wave is not None
     ice_knife = wizard_spell_entry(SpellId.ICE_KNIFE)
     assert ice_knife is not None
 
@@ -664,11 +682,13 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     inflict_roll = build_spell_damage_roll_payload(spell_sheet(5, [inflict_wounds]), "player-1", inflict_wounds, spell_slot_level=2)
     ice_storm_roll = build_spell_damage_roll_payload(spell_sheet(7, [ice_storm]), "player-1", ice_storm, spell_slot_level=5)
     lightning_roll = build_spell_damage_roll_payload(spell_sheet(5, [lightning_bolt]), "player-1", lightning_bolt, spell_slot_level=4)
+    flame_strike_roll = build_spell_damage_roll_payload(spell_sheet(9, [flame_strike]), "player-1", flame_strike, spell_slot_level=6)
     divine_smite_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=0, spell_slot_level=3)
     divine_smite_bonus_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=1)
     ice_target_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=0)
     ice_blast_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=1, spell_slot_level=2)
     missile_roll = build_spell_damage_roll_payload(spell_sheet(5, [magic_missile]), "player-1", magic_missile, spell_slot_level=3, instance_index=4)
+    mass_cure_roll = build_spell_healing_roll_payload(spell_sheet(9, [mass_cure_wounds]), "player-1", mass_cure_wounds, spell_slot_level=6)
     mass_healing_roll = build_spell_healing_roll_payload(spell_sheet(5, [mass_healing_word]), "player-1", mass_healing_word, spell_slot_level=4)
     prayer_roll = build_spell_healing_roll_payload(spell_sheet(5, [prayer_of_healing]), "player-1", prayer_of_healing, spell_slot_level=4)
     ray_roll = build_spell_damage_roll_payload(spell_sheet(5, [ray_of_sickness]), "player-1", ray_of_sickness, spell_slot_level=3)
@@ -677,6 +697,8 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     thunderwave_roll = build_spell_damage_roll_payload(spell_sheet(5, [thunderwave]), "player-1", thunderwave, spell_slot_level=2)
     vampiric_roll = build_spell_damage_roll_payload(spell_sheet(5, [vampiric_touch]), "player-1", vampiric_touch, spell_slot_level=4)
     wind_wall_roll = build_spell_damage_roll_payload(spell_sheet(5, [wind_wall]), "player-1", wind_wall)
+    steel_wind_roll = build_spell_damage_roll_payload(spell_sheet(9, [steel_wind_strike]), "player-1", steel_wind_strike, instance_index=4)
+    destructive_wave_roll = build_spell_damage_roll_payload(spell_sheet(9, [destructive_wave]), "player-1", destructive_wave, effect_index=1)
 
     assert acid_roll.die == "3d6"
     assert acid_roll.total == 9
@@ -743,6 +765,12 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert lightning_roll.damageSavingThrow == AbilityType.DEXTERITY
     assert lightning_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
 
+    assert flame_strike_roll.die == "6d6+6d6"
+    assert flame_strike_roll.total == 36
+    assert flame_strike_roll.damageComponents is not None
+    assert [component.damageType for component in flame_strike_roll.damageComponents] == [DamageType.FIRE, DamageType.RADIANT]
+    assert [component.total for component in flame_strike_roll.damageComponents] == [18, 18]
+
     assert divine_smite_roll.label == "Smite Damage"
     assert divine_smite_roll.die == "4d8"
     assert divine_smite_roll.total == 12
@@ -771,6 +799,10 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert [(part.source, part.value) for part in missile_roll.modifierBreakdown] == [("Spell", 1)]
     assert magic_missile.effects is not None
     assert scaled_spell_effect_instance_count(magic_missile.effects[0], spell_sheet(5, [magic_missile]), magic_missile.level, 3) == 5
+
+    assert mass_cure_roll.die == "6d8"
+    assert mass_cure_roll.total == 21
+    assert mass_cure_roll.modifier == 3
 
     assert mass_healing_roll.die == "3d4"
     assert mass_healing_roll.total == 12
@@ -815,6 +847,20 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert wind_wall_roll.damageType == DamageType.BLUDGEONING
     assert wind_wall_roll.damageSavingThrow == AbilityType.STRENGTH
     assert wind_wall_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert steel_wind_roll.source.actionId == "damage-0-instance-4"
+    assert steel_wind_roll.label == "Target 5 Damage"
+    assert steel_wind_roll.die == "6d10"
+    assert steel_wind_roll.total == 18
+    assert steel_wind_roll.damageType == DamageType.FORCE
+
+    assert destructive_wave_roll.label == "Necrotic Wave Damage"
+    assert destructive_wave_roll.die == "5d6+5d6"
+    assert destructive_wave_roll.damageComponents is not None
+    assert [component.damageType for component in destructive_wave_roll.damageComponents] == [DamageType.THUNDER, DamageType.NECROTIC]
+    assert destructive_wave_roll.damageSavingThrow == AbilityType.CONSTITUTION
+    assert destructive_wave_roll.conditionEffects is not None
+    assert destructive_wave_roll.conditionEffects[0].condition == ConditionType.PRONE
 
 
 def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None:

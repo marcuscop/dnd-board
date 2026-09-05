@@ -518,6 +518,11 @@ canvas.is-dragging,
   font-size: 0.75rem;
 }
 
+.condition-list .concentration-pill {
+  border-color: rgba(104, 202, 168, 0.72);
+  color: #a8f0d5;
+}
+
 .condition-toggle-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));

@@ -75,6 +75,7 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "shieldOfFaith",
   "slowed",
   "stunned",
+  "synapticStatic",
   "unconscious"
 ];
 type DamageDefenseType = "resistance" | "vulnerability" | "immunity";
@@ -2217,7 +2218,12 @@ function SheetCard({
             {pendingChoiceSummary(sheet)}
           </button>
         )}
-        {sheet.conditions.length > 0 && <div className="condition-list">{sheet.conditions.map((condition) => <span key={condition}>{cleanName(condition)}</span>)}</div>}
+        {(sheet.activeConcentration || sheet.conditions.length > 0) && (
+          <div className="condition-list">
+            {sheet.activeConcentration && <span className="concentration-pill">Concentration: {sheet.activeConcentration.spellName}</span>}
+            {sheet.conditions.map((condition) => <span key={condition}>{cleanName(condition)}</span>)}
+          </div>
+        )}
       </div>
       <div className="card-roll-slot">
         {hasCardRolls ? (
@@ -3806,8 +3812,16 @@ function appendRollLogEntry(entries: RollLogEntry[], entry: RollLogEntry) {
 }
 
 function applyResolvedRollToSheetState(sheets: CharacterSheet[], resolution: NonNullable<RollLogEntry["resolution"]>) {
+  const concentrationUpdates = new Map((resolution.concentrationUpdates ?? []).map((update) => [update.sheetId, update.activeConcentration]));
   return sheets.map((sheet) =>
-    sheet.id === resolution.targetSheetId ? { ...sheet, hp: resolution.targetHp, conditions: resolution.targetConditions } : sheet
+    concentrationUpdates.has(sheet.id)
+      ? {
+          ...(sheet.id === resolution.targetSheetId ? { ...sheet, hp: resolution.targetHp, conditions: resolution.targetConditions } : sheet),
+          activeConcentration: concentrationUpdates.get(sheet.id)
+        }
+      : sheet.id === resolution.targetSheetId
+        ? { ...sheet, hp: resolution.targetHp, conditions: resolution.targetConditions }
+        : sheet
   );
 }
 

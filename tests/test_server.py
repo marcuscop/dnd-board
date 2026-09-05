@@ -1333,6 +1333,86 @@ def test_hasted_target_rolls_dexterity_spell_saves_with_advantage(tmp_path, monk
     assert "passes DC 14 Dexterity save with Advantage for half damage" in resolution.json()["resolution"]["outcome"]
 
 
+def test_damage_triggers_concentration_save_and_clears_sourced_conditions(tmp_path, monkeypatch) -> None:
+    bless = spell_entry(SpellId.BLESS)
+    assert bless is not None
+    write_party_campaign(
+        tmp_path,
+        "concentration-save-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=16, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=5)], spells=[bless], conditions=[ConditionType.SYNAPTIC_STATIC]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Ally",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)]),
+        ),
+        PartyMemberConfig(
+            id="player-3",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                attacks=[AttackAction("main-hand", "Maul", AbilityType.STRENGTH, 4, DiceType.D6, damageType=DamageType.BLUDGEONING)],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 3)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
+    client = TestClient(server.app)
+
+    bless_effect = client.post("/api/rooms/concentration-save-test/sheet/player-1/spells/bless/rolls/effect?playerKey=player-1")
+    bless_roll = bless_effect.json()["roll"]
+    bless_resolution = client.post(f"/api/rooms/concentration-save-test/rolls/{bless_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    cleric_after_bless = client.get("/api/rooms/concentration-save-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    ally_after_bless = client.get("/api/rooms/concentration-save-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    saved_data = json.loads((tmp_path / "concentration-save-test" / "saves" / "concentration-save-test.json").read_text(encoding="utf-8"))
+    server.rooms.clear()
+    cleric_after_reload = client.get("/api/rooms/concentration-save-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    damage = client.post("/api/rooms/concentration-save-test/sheet/player-3/rolls/damage?playerKey=dm&attackId=main-hand")
+    damage_roll = damage.json()["roll"]
+    damage_resolution = client.post(f"/api/rooms/concentration-save-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-1")
+    cleric_after_damage = client.get("/api/rooms/concentration-save-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    ally_after_damage = client.get("/api/rooms/concentration-save-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    concentration_roll = next(roll for roll in damage_resolution.json()["resolution"]["responseRolls"] if roll["label"] == "Concentration Save")
+
+    assert bless_effect.status_code == 200
+    assert bless_resolution.status_code == 200
+    assert bless_resolution.json()["resolution"]["concentrationUpdates"] == [
+        {"sheetId": "player-1", "activeConcentration": {"spellId": "bless", "spellIdLabel": "Bless", "spellName": "Bless"}}
+    ]
+    assert cleric_after_bless["activeConcentration"] == {"spellId": "bless", "spellIdLabel": "Bless", "spellName": "Bless"}
+    assert saved_data["activeConcentrations"]["player-1"]["spellId"] == "bless"
+    assert saved_data["activeConcentrations"]["player-1"]["conditionSources"] == [
+        {
+            "targetSheetId": "player-2",
+            "condition": "blessed",
+            "spellId": "bless",
+            "casterSheetId": "player-1",
+            "wasAlreadyActive": False,
+        }
+    ]
+    assert cleric_after_reload["activeConcentration"] == {"spellId": "bless", "spellIdLabel": "Bless", "spellName": "Bless"}
+    assert "blessed" in ally_after_bless["conditions"]
+    assert damage.status_code == 200
+    assert damage_resolution.status_code == 200
+    assert concentration_roll["sourceLabel"] == "Bless"
+    assert concentration_roll["total"] == 2
+    assert concentration_roll["modifierBreakdown"][-1]["source"] == "Synaptic Static"
+    assert "fails DC 10 Concentration save; Bless ends and removes Blessed" in damage_resolution.json()["resolution"]["outcome"]
+    assert damage_resolution.json()["resolution"]["concentrationUpdates"] == [{"sheetId": "player-1"}]
+    assert "activeConcentration" not in cleric_after_damage
+    assert "blessed" not in ally_after_damage["conditions"]
+
+
 def test_outgoing_attack_damage_or_spell_cast_clears_invisibility(tmp_path, monkeypatch) -> None:
     mage_armor = wizard_spell_entry(SpellId.MAGE_ARMOR)
     assert mage_armor is not None

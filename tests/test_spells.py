@@ -864,12 +864,18 @@ def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
 
 def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None:
     cone_of_cold = spell_entry(SpellId.CONE_OF_COLD)
+    destructive_wave = spell_entry(SpellId.DESTRUCTIVE_WAVE)
     fire_shield = spell_entry(SpellId.FIRE_SHIELD)
+    flame_strike = spell_entry(SpellId.FLAME_STRIKE)
     greater_invisibility = spell_entry(SpellId.GREATER_INVISIBILITY)
+    hold_monster = spell_entry(SpellId.HOLD_MONSTER)
     ice_storm = spell_entry(SpellId.ICE_STORM)
+    mass_cure_wounds = spell_entry(SpellId.MASS_CURE_WOUNDS)
     phantasmal_killer = spell_entry(SpellId.PHANTASMAL_KILLER)
     staggering_smite = spell_entry(SpellId.STAGGERING_SMITE)
+    steel_wind_strike = spell_entry(SpellId.STEEL_WIND_STRIKE)
     stoneskin = spell_entry(SpellId.STONESKIN)
+    synaptic_static = spell_entry(SpellId.SYNAPTIC_STATIC)
     vitriolic_sphere = spell_entry(SpellId.VITRIOLIC_SPHERE)
     wall_of_fire = spell_entry(SpellId.WALL_OF_FIRE)
 
@@ -890,6 +896,39 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert greater_invisibility.effects[0].conditions is not None
     assert greater_invisibility.effects[0].conditions[0].condition == ConditionType.INVISIBLE
 
+    assert destructive_wave is not None and destructive_wave.effects is not None
+    assert destructive_wave.targeting.area.shape == SpellAreaShape.RADIUS
+    assert destructive_wave.targeting.area.radiusFeet == 30
+    assert [effect.actionLabel for effect in destructive_wave.effects] == ["Radiant Wave", "Necrotic Wave"]
+    assert [component.damageType for component in destructive_wave.effects[0].damageComponents or []] == [DamageType.THUNDER, DamageType.RADIANT]
+    assert [component.damageType for component in destructive_wave.effects[1].damageComponents or []] == [DamageType.THUNDER, DamageType.NECROTIC]
+    assert destructive_wave.effects[0].savingThrow is not None
+    assert destructive_wave.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert destructive_wave.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert destructive_wave.effects[0].conditions is not None
+    assert destructive_wave.effects[0].conditions[0].condition == ConditionType.PRONE
+
+    assert flame_strike is not None and flame_strike.effects is not None
+    assert flame_strike.targeting.area.shape == SpellAreaShape.CYLINDER
+    assert flame_strike.targeting.area.radiusFeet == 10
+    assert flame_strike.targeting.area.heightFeet == 40
+    assert flame_strike.effects[0].damageComponents is not None
+    assert [component.dice.dice for component in flame_strike.effects[0].damageComponents] == ["5d6", "5d6"]
+    assert [component.damageType for component in flame_strike.effects[0].damageComponents] == [DamageType.FIRE, DamageType.RADIANT]
+    assert flame_strike.effects[0].savingThrow is not None
+    assert flame_strike.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert flame_strike.effects[0].scaling is not None
+    assert flame_strike.effects[0].scaling[0].additionalDice is not None
+    assert flame_strike.effects[0].scaling[0].additionalDice.dice == "1d6"
+
+    assert hold_monster is not None and hold_monster.effects is not None
+    assert hold_monster.effects[0].conditions is not None
+    assert hold_monster.effects[0].conditions[0].condition == ConditionType.PARALYZED
+    assert hold_monster.effects[0].savingThrow is not None
+    assert hold_monster.effects[0].savingThrow.ability == AbilityType.WISDOM
+    assert hold_monster.effects[0].savingThrow.repeat == SpellEffectTrigger.END_OF_TURN
+    assert hold_monster.effects[0].scaling is not None
+
     assert ice_storm is not None and ice_storm.effects is not None
     assert ice_storm.targeting.area.shape == SpellAreaShape.CYLINDER
     assert ice_storm.targeting.area.radiusFeet == 20
@@ -904,6 +943,37 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert ice_storm.effects[0].damageComponents[0].scaling[0].additionalDice is not None
     assert ice_storm.effects[0].damageComponents[0].scaling[0].additionalDice.dice == "1d10"
     assert ice_storm.effects[0].damageComponents[1].scaling is None
+
+    assert mass_cure_wounds is not None and mass_cure_wounds.effects is not None
+    assert mass_cure_wounds.targeting.area.shape == SpellAreaShape.RADIUS
+    assert mass_cure_wounds.targeting.area.radiusFeet == 30
+    assert mass_cure_wounds.effects[0].healing is not None
+    assert mass_cure_wounds.effects[0].healing.dice.dice == "5d8"
+    assert mass_cure_wounds.effects[0].target == SpellEffectTarget.CREATURES_CHOSEN
+    assert mass_cure_wounds.effects[0].scaling is not None
+    assert mass_cure_wounds.effects[0].scaling[0].additionalDice is not None
+    assert mass_cure_wounds.effects[0].scaling[0].additionalDice.dice == "1d8"
+
+    assert steel_wind_strike is not None and steel_wind_strike.effects is not None
+    assert steel_wind_strike.effects[0].attack == SpellAttackType.MELEE_SPELL_ATTACK
+    assert steel_wind_strike.effects[0].damage is not None
+    assert steel_wind_strike.effects[0].damage.dice.dice == "6d10"
+    assert steel_wind_strike.effects[0].damage.damageType == DamageType.FORCE
+    assert steel_wind_strike.effects[0].instances == 5
+    assert steel_wind_strike.effects[0].instanceLabel == "Target"
+
+    assert synaptic_static is not None and synaptic_static.effects is not None
+    assert synaptic_static.targeting.area.shape == SpellAreaShape.RADIUS
+    assert synaptic_static.targeting.area.radiusFeet == 20
+    assert synaptic_static.effects[0].damage is not None
+    assert synaptic_static.effects[0].damage.dice.dice == "8d6"
+    assert synaptic_static.effects[0].damage.damageType == DamageType.PSYCHIC
+    assert synaptic_static.effects[0].savingThrow is not None
+    assert synaptic_static.effects[0].savingThrow.ability == AbilityType.INTELLIGENCE
+    assert synaptic_static.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert len(synaptic_static.effects) == 1
+    assert synaptic_static.effects[0].conditions is not None
+    assert synaptic_static.effects[0].conditions[0].condition == ConditionType.SYNAPTIC_STATIC
 
     assert fire_shield is not None and fire_shield.effects is not None
     assert [effect.actionLabel for effect in fire_shield.effects] == ["Warm Shield", "Warm Retaliation", "Chill Shield", "Chill Retaliation"]
