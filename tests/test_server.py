@@ -1146,9 +1146,29 @@ def test_dm_sheet_endpoint_includes_loaded_asset_sheets() -> None:
     assert all(sheet["kind"] == "character" for sheet in player_response.json()["sheets"])
 
 
-def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
-    client = TestClient(server.app)
+def test_sheet_roll_permissions_and_payload(tmp_path, monkeypatch) -> None:
+    longsword = AttackAction("longsword", "Longsword", AbilityType.STRENGTH, 1, DiceType.D8, damageType=DamageType.SLASHING)
+    write_party_campaign(
+        tmp_path,
+        "sheet-roll-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Player 1",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], attacks=[longsword]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Player 2",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], attacks=[longsword]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 12)
+    client = TestClient(server.app)
     room = server.get_or_create_room("sheet-roll-test")
     dm_socket = FakeSocket()
     player_socket = FakeSocket()
@@ -1184,9 +1204,36 @@ def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
     assert player_socket.messages[0] == dm_socket.messages[0]
 
 
-def test_sheet_roll_logs_and_pending_rolls_are_room_visible_to_everyone(monkeypatch) -> None:
-    client = TestClient(server.app)
+def test_sheet_roll_logs_and_pending_rolls_are_room_visible_to_everyone(tmp_path, monkeypatch) -> None:
+    longsword = AttackAction("longsword", "Longsword", AbilityType.STRENGTH, 1, DiceType.D8, damageType=DamageType.SLASHING)
+    write_party_campaign(
+        tmp_path,
+        "shared-log-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Player 1",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], attacks=[longsword]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Player 2",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], attacks=[longsword]),
+        ),
+        PartyMemberConfig(
+            id="player-3",
+            name="Player 3",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], attacks=[longsword]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 12)
+    client = TestClient(server.app)
 
     player_roll = client.post("/api/rooms/shared-log-test/sheet/player-1/rolls/saving-throw?playerKey=player-1&ability=strength")
     dm_roll = client.post("/api/rooms/shared-log-test/sheet/player-2/rolls/attack?playerKey=dm")
@@ -1200,6 +1247,28 @@ def test_sheet_roll_logs_and_pending_rolls_are_room_visible_to_everyone(monkeypa
     assert [roll["id"] for roll in player_state["pendingRolls"]] == [roll["id"] for roll in dm_state["pendingRolls"]]
     assert player_roll.json()["roll"]["id"] in [entry["roll"]["id"] for entry in dm_state["rollHistory"]]
     assert dm_roll.json()["roll"]["id"] in [entry["roll"]["id"] for entry in player_state["rollHistory"]]
+
+
+def test_ad_hoc_dice_roll_is_logged_for_everyone(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: maximum)
+
+    response = client.post("/api/rooms/ad-hoc-dice-test/dice?playerKey=player-1&dice=d8&count=3")
+    invalid = client.post("/api/rooms/ad-hoc-dice-test/dice?playerKey=player-1&dice=d100&count=1")
+    dm_state = client.get("/api/rooms/ad-hoc-dice-test/sheet?playerKey=dm").json()
+    player_state = client.get("/api/rooms/ad-hoc-dice-test/sheet?playerKey=player-2").json()
+
+    assert response.status_code == 200
+    assert response.json()["roll"]["source"]["section"] == "diceRoller"
+    assert response.json()["roll"]["label"] == "3d8"
+    assert response.json()["roll"]["dice"] == [8, 8, 8]
+    assert response.json()["roll"]["total"] == 24
+    assert response.json()["logEntry"]["roll"]["id"] == response.json()["roll"]["id"]
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "Invalid dice type"
+    assert dm_state["pendingRolls"] == []
+    assert player_state["rollHistory"] == dm_state["rollHistory"]
+    assert response.json()["roll"]["id"] in [entry["roll"]["id"] for entry in dm_state["rollHistory"]]
 
 
 def test_player_can_roll_fire_bolt_spell_attack_and_scaled_damage(tmp_path, monkeypatch) -> None:
@@ -1331,6 +1400,43 @@ def test_hasted_target_rolls_dexterity_spell_saves_with_advantage(tmp_path, monk
     assert response_roll["advantageConditions"] == ["hasted"]
     assert response_roll["total"] == 16
     assert "passes DC 14 Dexterity save with Advantage for half damage" in resolution.json()["resolution"]["outcome"]
+
+
+def test_paralyzed_target_forces_dexterity_spell_save_failure(tmp_path, monkeypatch) -> None:
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    assert burning_hands is not None
+    write_party_campaign(
+        tmp_path,
+        "paralyzed-save-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=3)], spells=[burning_hands]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=20, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)], conditions=[ConditionType.PARALYZED]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 20 if maximum == 20 else 2)
+    client = TestClient(server.app)
+
+    damage_response = client.post("/api/rooms/paralyzed-save-test/sheet/player-1/spells/burningHands/rolls/damage?playerKey=player-1")
+    damage_roll = damage_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/paralyzed-save-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    body = resolution.json()["resolution"]
+
+    assert damage_response.status_code == 200
+    assert resolution.status_code == 200
+    assert body["responseRolls"][0]["total"] == 25
+    assert "fails DC 13 Dexterity save due to Paralyzed" in body["outcome"]
+    assert body["targetHp"] == {"current": 24, "max": 30, "temporary": 0}
 
 
 def test_damage_triggers_concentration_save_and_clears_sourced_conditions(tmp_path, monkeypatch) -> None:
@@ -1700,6 +1806,71 @@ def test_slow_applies_condition_penalties_and_blocks_reactions(tmp_path, monkeyp
     assert blocked_entry.roll.label == "Parry blocked: Slowed prevents Reactions"
 
 
+def test_incapacitated_condition_blocks_action_rolls_and_logs(tmp_path, monkeypatch) -> None:
+    attack = AttackAction("club", "Club", AbilityType.STRENGTH, 1, DiceType.D4, damageType=DamageType.BLUDGEONING)
+    write_party_campaign(
+        tmp_path,
+        "incapacitated-block-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Target",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)], attacks=[attack], conditions=[ConditionType.INCAPACITATED]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/incapacitated-block-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=club")
+    blocked_entry = server.rooms["incapacitated-block-test"].roll_history[-1]
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Incapacitated creatures cannot take Actions, Bonus Actions, or Reactions"
+    assert blocked_entry.entryType == RollLogEntryType.ROLL_BLOCKED
+    assert blocked_entry.roll.sourceLabel == "Club"
+    assert blocked_entry.roll.label == "Attack Roll blocked: Incapacitated prevents Actions, Bonus Actions, and Reactions"
+
+
+def test_incapacitated_condition_breaks_concentration(tmp_path, monkeypatch) -> None:
+    bless = spell_entry(SpellId.BLESS)
+    assert bless is not None
+    write_party_campaign(
+        tmp_path,
+        "incapacitated-concentration-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=24,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=16, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=3)], spells=[bless]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Ally",
+            maxHp=24,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    bless_effect = client.post("/api/rooms/incapacitated-concentration-test/sheet/player-1/spells/bless/rolls/effect?playerKey=player-1")
+    bless_roll = bless_effect.json()["roll"]
+    client.post(f"/api/rooms/incapacitated-concentration-test/rolls/{bless_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    applied = client.post("/api/rooms/incapacitated-concentration-test/sheet/player-1/conditions/incapacitated?playerKey=player-1&active=true")
+    caster = client.get("/api/rooms/incapacitated-concentration-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    ally = client.get("/api/rooms/incapacitated-concentration-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert bless_effect.status_code == 200
+    assert applied.status_code == 200
+    assert "activeConcentration" not in caster
+    assert caster["conditions"] == ["incapacitated"]
+    assert ally["conditions"] == []
+    assert server.rooms["incapacitated-concentration-test"].active_concentrations == {}
+
+
 def test_shield_applies_temporary_armor_class_condition(tmp_path, monkeypatch) -> None:
     shield = wizard_spell_entry(SpellId.SHIELD)
     assert shield is not None
@@ -1905,6 +2076,137 @@ def test_prayer_of_healing_grants_short_rest_to_resolved_target(tmp_path, monkey
     assert target["conditions"] == []
 
 
+def test_heal_removes_blinded_deafened_and_poisoned_from_resolved_target(tmp_path, monkeypatch) -> None:
+    heal = spell_entry(SpellId.HEAL)
+    assert heal is not None
+    write_party_campaign(
+        tmp_path,
+        "heal-condition-removal-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=18, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=11)], spells=[heal]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=11)],
+                conditions=[ConditionType.BLINDED, ConditionType.DEAFENED, ConditionType.POISONED, ConditionType.PRONE],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("heal-condition-removal-test")
+    room.hit_points["player-2"] = 1
+
+    healing_response = client.post("/api/rooms/heal-condition-removal-test/sheet/player-1/spells/heal/rolls/healing?playerKey=player-1")
+    healing_roll = healing_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/heal-condition-removal-test/rolls/{healing_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target = client.get("/api/rooms/heal-condition-removal-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert healing_response.status_code == 200
+    assert healing_roll["conditionRemovals"] == ["blinded", "deafened", "poisoned"]
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetHp"] == {"current": 60, "max": 60, "temporary": 0}
+    assert "removes Blinded, Deafened, and Poisoned" in resolution.json()["resolution"]["outcome"]
+    assert target["conditions"] == ["prone"]
+
+
+def test_harm_failed_save_reduces_max_hit_points_until_long_rest(tmp_path, monkeypatch) -> None:
+    harm = spell_entry(SpellId.HARM)
+    assert harm is not None
+    write_party_campaign(
+        tmp_path,
+        "harm-max-hp-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=18, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=11)], spells=[harm]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=11)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 1 if maximum == 20 else 2)
+    client = TestClient(server.app)
+
+    damage_response = client.post("/api/rooms/harm-max-hp-test/sheet/player-1/spells/harm/rolls/damage?playerKey=player-1")
+    damage_roll = damage_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/harm-max-hp-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target = client.get("/api/rooms/harm-max-hp-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    saved_data = json.loads((tmp_path / "harm-max-hp-test" / "saves" / "harm-max-hp-test.json").read_text(encoding="utf-8"))
+    rest_response = client.post("/api/rooms/harm-max-hp-test/sheet/rest?playerKey=dm&rest=long")
+    rested_target = next(sheet for sheet in rest_response.json()["sheets"] if sheet["id"] == "player-2")
+    saved_after_rest = json.loads((tmp_path / "harm-max-hp-test" / "saves" / "harm-max-hp-test.json").read_text(encoding="utf-8"))
+    server.rooms.clear()
+    reloaded_target = client.get("/api/rooms/harm-max-hp-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert damage_response.status_code == 200
+    assert damage_roll["maxHitPointReduction"]["mode"] == "damageTaken"
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetHp"] == {"current": 32, "max": 32, "temporary": 0}
+    assert "Target's Hit Point maximum is reduced by 28 until Long Rest" in resolution.json()["resolution"]["outcome"]
+    assert target["hp"] == {"current": 32, "max": 32, "temporary": 0}
+    assert saved_data["maxHitPointReductions"]["player-2"] == [
+        {"amount": 28, "sourceSpellId": "harm", "sourceName": "Harm", "reset": "longRest"}
+    ]
+    assert rest_response.status_code == 200
+    assert rested_target["hp"] == {"current": 32, "max": 60, "temporary": 0}
+    assert saved_after_rest["maxHitPointReductions"] == {}
+    assert reloaded_target["hp"] == {"current": 60, "max": 60, "temporary": 0}
+
+
+def test_harm_successful_save_does_not_reduce_max_hit_points(tmp_path, monkeypatch) -> None:
+    harm = spell_entry(SpellId.HARM)
+    assert harm is not None
+    write_party_campaign(
+        tmp_path,
+        "harm-save-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=18, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=11)], spells=[harm]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=11)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 20 if maximum == 20 else 2)
+    client = TestClient(server.app)
+
+    damage_response = client.post("/api/rooms/harm-save-test/sheet/player-1/spells/harm/rolls/damage?playerKey=player-1")
+    damage_roll = damage_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/harm-save-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target = client.get("/api/rooms/harm-save-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert damage_response.status_code == 200
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetHp"] == {"current": 46, "max": 60, "temporary": 0}
+    assert "Hit Point maximum is reduced" not in resolution.json()["resolution"]["outcome"]
+    assert target["hp"] == {"current": 46, "max": 60, "temporary": 0}
+    assert server.get_or_create_room("harm-save-test").max_hit_point_reductions == {}
+
+
 def test_shatter_rolls_disadvantage_for_construct_targets(tmp_path, monkeypatch) -> None:
     shatter = wizard_spell_entry(SpellId.SHATTER)
     assert shatter is not None
@@ -1942,6 +2244,44 @@ def test_shatter_rolls_disadvantage_for_construct_targets(tmp_path, monkeypatch)
     assert body["responseRolls"][0]["die"] == "2d20kl1"
     assert body["responseRolls"][0]["dice"] == [18, 2]
     assert "Constitution save with Disadvantage" in body["outcome"]
+
+
+def test_damage_save_can_force_failure_for_creature_type(tmp_path, monkeypatch) -> None:
+    blight = wizard_spell_entry(SpellId.BLIGHT)
+    assert blight is not None
+    write_party_campaign(
+        tmp_path,
+        "blight-plant-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=7)], spells=[blight]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Plant",
+            maxHp=80,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=20, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CREATURE, level=1)], creatureTypes=[CreatureType.PLANT]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 20 if maximum == 20 else 4)
+    client = TestClient(server.app)
+
+    damage_response = client.post("/api/rooms/blight-plant-test/sheet/player-1/spells/blight/rolls/damage?playerKey=player-1")
+    damage_roll = damage_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/blight-plant-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    body = resolution.json()["resolution"]
+
+    assert damage_response.status_code == 200
+    assert damage_roll["damageSaveForcedFailureCreatureTypes"] == ["plant"]
+    assert resolution.status_code == 200
+    assert body["responseRolls"][0]["dice"] == [20]
+    assert "fails DC 14 Constitution save due to Plant" in body["outcome"]
+    assert body["targetHp"]["current"] == 48
 
 
 def test_vampiric_touch_heals_source_for_half_final_damage(tmp_path, monkeypatch) -> None:
@@ -2126,6 +2466,54 @@ def test_player_can_update_owned_sheet_conditions(tmp_path, monkeypatch) -> None
     assert applied.json()["sheet"]["conditions"] == ["prone"]
     assert cleared.status_code == 200
     assert cleared.json()["sheet"]["conditions"] == []
+
+
+def test_player_can_update_exhaustion_level_and_long_rest_reduces_it(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "exhaustion-level-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Tired Fighter",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Other Fighter",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    denied = client.post("/api/rooms/exhaustion-level-test/sheet/player-1/exhaustion?playerKey=player-2&level=4")
+    applied = client.post("/api/rooms/exhaustion-level-test/sheet/player-1/exhaustion?playerKey=player-1&level=4")
+    dead = client.post("/api/rooms/exhaustion-level-test/sheet/player-1/exhaustion?playerKey=player-1&level=6")
+    revived = client.post("/api/rooms/exhaustion-level-test/sheet/player-1/conditions/dead?playerKey=player-1&active=false")
+    saved_data = json.loads((tmp_path / "exhaustion-level-test" / "saves" / "exhaustion-level-test.json").read_text(encoding="utf-8"))
+    rest_response = client.post("/api/rooms/exhaustion-level-test/sheet/rest?playerKey=dm&rest=long")
+    rested = next(sheet for sheet in rest_response.json()["sheets"] if sheet["id"] == "player-1")
+
+    assert denied.status_code == 403
+    assert applied.status_code == 200
+    assert applied.json()["sheet"]["conditions"] == ["exhaustion"]
+    assert applied.json()["sheet"]["exhaustionLevel"] == 4
+    assert applied.json()["sheet"]["hp"] == {"current": 40, "max": 40, "temporary": 0}
+    assert applied.json()["sheet"]["speed"] == 10
+    assert dead.status_code == 200
+    assert dead.json()["sheet"]["conditions"] == ["dead", "exhaustion"]
+    assert revived.status_code == 200
+    assert revived.json()["sheet"]["conditions"] == ["exhaustion"]
+    assert saved_data["exhaustionLevels"] == {"player-1": 6}
+    assert rest_response.status_code == 200
+    assert rested["conditions"] == ["exhaustion"]
+    assert rested["exhaustionLevel"] == 5
+    assert rested["hp"] == {"current": 40, "max": 40, "temporary": 0}
+    assert rested["speed"] == 5
 
 
 def test_player_can_update_generated_sheet_conditions_without_manifest(tmp_path, monkeypatch) -> None:
@@ -3288,6 +3676,46 @@ def test_damage_roll_resolution_reduces_target_hp(monkeypatch) -> None:
     assert resolution.status_code == 200
     assert resolution.json()["resolution"]["targetHp"]["current"] == max(0, target_starting_hp - damage["total"])
     assert target_sheet["hp"]["current"] == max(0, target_starting_hp - damage["total"])
+
+
+def test_lethal_damage_marks_target_dead(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "sheet-death-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                attacks=[AttackAction("club", "Club", AbilityType.STRENGTH, 1, DiceType.D4, damageType=DamageType.BLUDGEONING)],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 8)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("sheet-death-test")
+    room.hit_points["player-2"] = 5
+
+    damage = client.post("/api/rooms/sheet-death-test/sheet/player-1/rolls/damage?playerKey=player-1&attackId=club").json()["roll"]
+    resolution = client.post(f"/api/rooms/sheet-death-test/rolls/{damage['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target_sheet = client.get("/api/rooms/sheet-death-test/sheet/player-2?playerKey=player-1").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetHp"]["current"] == 0
+    assert "dead" in resolution.json()["resolution"]["targetConditions"]
+    assert "gains Dead" in resolution.json()["resolution"]["outcome"]
+    assert "dead" in target_sheet["conditions"]
+    assert target_sheet["speed"] == 0
 
 
 def test_damage_roll_resolution_consumes_temporary_hp_first(monkeypatch) -> None:

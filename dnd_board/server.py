@@ -53,6 +53,7 @@ from dnd_board.character_sheet import (
     SpellEntry,
     SpellId,
     SpellLinkedHealingAmount,
+    SpellMaxHitPointReductionMode,
     SpellSaveOutcome,
     SpellSource,
     TimeEconomy,
@@ -72,8 +73,11 @@ from dnd_board.character_sheet import (
     active_roll_modifier_breakdown,
     condition_adjusted_armor_class,
     condition_adjusted_speed,
+    condition_adjusted_speed_for_exhaustion,
     condition_saving_throw_advantage_conditions,
     condition_saving_throw_disadvantage_conditions,
+    condition_saving_throw_forced_failure_conditions,
+    creature_type_list_label,
     enum_value,
     enum_key,
     enum_label,
@@ -227,6 +231,14 @@ class ActiveConcentration:
     conditionSources: list[ActiveConditionSource]
 
 
+@dataclass
+class ActiveMaxHitPointReduction:
+    amount: int
+    sourceSpellId: SpellId
+    sourceName: str
+    reset: RestType
+
+
 class DamageDefenseType(Enum):
     RESISTANCE = "resistance"
     VULNERABILITY = "vulnerability"
@@ -245,6 +257,8 @@ class Room:
     roll_history: list[RollLogEntry]
     hit_points: dict[str, int]
     temporary_hit_points: dict[str, int]
+    max_hit_point_reductions: dict[str, list[ActiveMaxHitPointReduction]]
+    exhaustion_levels: dict[str, int]
     condition_overrides: dict[str, list[ConditionType]]
     condition_durations: dict[str, dict[ConditionType, ConditionDuration]]
     condition_removals: dict[str, dict[ConditionType, ConditionRemovalSave]]
@@ -379,6 +393,8 @@ async def create_room_character(room_id: str, playerKey: str, payload: dict[str,
     room.resource_uses.pop(member.id, None)
     room.hit_points.pop(member.id, None)
     room.temporary_hit_points.pop(member.id, None)
+    room.max_hit_point_reductions.pop(member.id, None)
+    room.exhaustion_levels.pop(member.id, None)
     room.condition_overrides.pop(member.id, None)
     room.condition_removals.pop(member.id, None)
     room.condition_durations.pop(member.id, None)
@@ -437,6 +453,11 @@ async def roll_sheet_resource_action(room_id: str, sheet_id: str, resource_id: s
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/abilities/{ability_id}/rolls/{action_id}")
 async def roll_sheet_ability_action(room_id: str, sheet_id: str, ability_id: str, action_id: str, playerKey: str) -> dict[str, Any]:
     return await create_ability_roll(room_id, sheet_id, playerKey, ability_id, action_id)
+
+
+@app.post("/api/rooms/{room_id}/dice")
+async def roll_ad_hoc_dice(room_id: str, playerKey: str, dice: str = "d20", count: int = 1) -> dict[str, Any]:
+    return await create_ad_hoc_dice_roll(room_id, playerKey, dice, count)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/clear")
@@ -505,6 +526,8 @@ async def update_sheet_level(room_id: str, sheet_id: str, playerKey: str, delta:
     room.resource_uses.pop(updated_member.id, None)
     room.hit_points.pop(updated_member.id, None)
     room.temporary_hit_points.pop(updated_member.id, None)
+    room.max_hit_point_reductions.pop(updated_member.id, None)
+    room.exhaustion_levels.pop(updated_member.id, None)
     room.condition_overrides.pop(updated_member.id, None)
     room.condition_durations.pop(updated_member.id, None)
     room.condition_removals.pop(updated_member.id, None)
@@ -643,6 +666,9 @@ async def rest_room_sheets(room_id: str, playerKey: str, rest: str) -> dict[str,
             reset_sheet_resources(room, sheet, rest_type)
             reset_sheet_conditions(room, sheet, rest_type)
             reset_sheet_temporary_hit_points(room, sheet, rest_type)
+            reset_sheet_max_hit_point_reductions(room, sheet, rest_type)
+            reset_sheet_exhaustion(room, sheet, rest_type)
+    save_room_to_disk(room)
     return sheet_state_message(room, player)
 
 
@@ -686,6 +712,8 @@ async def update_sheet_condition(room_id: str, sheet_id: str, condition: str, pl
     condition_type = enum_value(ConditionType, condition)
     if condition_type is None:
         raise HTTPException(status_code=400, detail="Invalid condition")
+    if condition_type == ConditionType.EXHAUSTION:
+        return await update_sheet_exhaustion(room_id, sheet_id, playerKey, 1 if active else 0)
 
     previous_active_concentrations = active_concentrations_to_dict(room.active_concentrations)
     next_conditions = updated_conditions(sheet.conditions, condition_type, active)
@@ -699,6 +727,8 @@ async def update_sheet_condition(room_id: str, sheet_id: str, condition: str, pl
     room.condition_overrides[updated_sheet_id] = next_conditions
     if active:
         room.condition_durations.setdefault(updated_sheet_id, {})[condition_type] = ConditionDuration.MANUAL
+        if condition_type in INCAPACITATING_ROLL_CONDITIONS:
+            clear_active_concentration(room, updated_sheet_id)
     else:
         room.condition_durations.setdefault(updated_sheet_id, {}).pop(condition_type, None)
         room.condition_removals.setdefault(updated_sheet_id, {}).pop(condition_type, None)
@@ -706,6 +736,38 @@ async def update_sheet_condition(room_id: str, sheet_id: str, condition: str, pl
     if previous_active_concentrations != active_concentrations_to_dict(room.active_concentrations):
         save_room_to_disk(room)
     updated = get_visible_sheet(room, player, updated_sheet_id)
+    return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else None}
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/exhaustion")
+async def update_sheet_exhaustion(room_id: str, sheet_id: str, playerKey: str, level: int) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-exhaustion", name="Sheet Exhaustion", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    sheet = get_visible_sheet(room, player, sanitize_asset_id(sheet_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    if not can_control_sheet_roll(player, sheet):
+        raise HTTPException(status_code=403, detail="Cannot update this sheet")
+
+    next_level = clamp_int(level, 0, 6)
+    updated_sheet_id = sheet.tokenId
+    room.exhaustion_levels[updated_sheet_id] = next_level
+    if next_level == 0:
+        room.exhaustion_levels.pop(updated_sheet_id, None)
+    next_conditions = conditions_for_exhaustion_level(room.condition_overrides.get(updated_sheet_id, sheet.conditions), next_level)
+    if next_level >= 6 and ConditionType.DEAD not in next_conditions:
+        next_conditions = normalized_conditions([*next_conditions, ConditionType.DEAD])
+    room.condition_overrides[updated_sheet_id] = next_conditions
+    if next_level > 0:
+        room.condition_durations.setdefault(updated_sheet_id, {})[ConditionType.EXHAUSTION] = ConditionDuration.MANUAL
+    else:
+        room.condition_durations.setdefault(updated_sheet_id, {}).pop(ConditionType.EXHAUSTION, None)
+    update_party_member_config(room.id, sheet.id, lambda member: set_member_conditions(member, next_conditions))
+    save_room_to_disk(room)
+    updated = get_visible_sheet(room, player, updated_sheet_id)
+    if updated is not None:
+        room.hit_points[updated_sheet_id] = updated.hp.current
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else None}
 
 
@@ -1117,6 +1179,8 @@ async def delete_token(room: Room, player: Player, token_id: str) -> None:
     remove_pending_rolls_for_token(room, token_id)
     room.hit_points.pop(token_id, None)
     room.temporary_hit_points.pop(token_id, None)
+    room.max_hit_point_reductions.pop(token_id, None)
+    room.exhaustion_levels.pop(token_id, None)
     room.condition_overrides.pop(token_id, None)
     room.condition_durations.pop(token_id, None)
     room.condition_removals.pop(token_id, None)
@@ -1157,6 +1221,8 @@ def get_or_create_room(room_id: str) -> Room:
         roll_history=[],
         hit_points={},
         temporary_hit_points={},
+        max_hit_point_reductions=load_saved_max_hit_point_reductions(room_id),
+        exhaustion_levels=load_saved_exhaustion_levels(room_id),
         condition_overrides={},
         condition_durations={},
         condition_removals={},
@@ -1310,8 +1376,12 @@ def token_to_sheet(
         equipment_slot_overrides=equipment_slot_overrides,
     )
     if room is not None:
+        base_speed = sheet.speed
         sheet.hp.temporary = room.temporary_hit_points.get(token.id, sheet.hp.temporary)
+        sheet.hp = hit_points_after_max_reductions(sheet.hp, room.max_hit_point_reductions.get(token.id, []))
         sheet.conditions = room.condition_overrides.get(token.id, sheet.conditions)
+        sheet.exhaustionLevel = room.exhaustion_levels.get(token.id, sheet.exhaustionLevel)
+        sheet.conditions = conditions_for_exhaustion_level(sheet.conditions, sheet.exhaustionLevel)
         sheet.damageResistances = merged_damage_defenses(sheet.damageResistances, room.damage_resistances.get(token.id, []))
         sheet.damageVulnerabilities = merged_damage_defenses(sheet.damageVulnerabilities, room.damage_vulnerabilities.get(token.id, []))
         sheet.damageImmunities = merged_damage_defenses(sheet.damageImmunities, room.damage_immunities.get(token.id, []))
@@ -1319,8 +1389,9 @@ def token_to_sheet(
         active_concentration = room.active_concentrations.get(token.id)
         if active_concentration is not None:
             sheet.activeConcentration = active_concentration_status(active_concentration)
+        sheet.speed = base_speed
     sheet.armorClass = condition_adjusted_armor_class(sheet)
-    sheet.speed = condition_adjusted_speed(sheet.speed, sheet.conditions)
+    sheet.speed = condition_adjusted_speed_for_exhaustion(sheet.speed, sheet.conditions, sheet.exhaustionLevel)
     return sheet
 
 
@@ -1453,6 +1524,47 @@ async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, abil
     return await store_outgoing_roll(room, sheet, payload)
 
 
+async def create_ad_hoc_dice_roll(room_id: str, player_key: str, dice: str, count: int) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-dice-roller", name="Dice Roller", player_key=normalize_player_key(player_key, room.id), websocket=None, room_id=room.id)
+    dice_type = enum_value(DiceType, dice)
+    if dice_type is None:
+        raise HTTPException(status_code=400, detail="Invalid dice type")
+    dice_count = clamp_int(count, 1, 20)
+    rolls = [random.randint(1, dice_type.value) for _ in range(dice_count)]
+    created_at = time_ns()
+    payload = RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=player.player_key,
+        tokenId=player.player_key,
+        roller=player.player_key,
+        source=RollSource(section=SheetSectionType.DICE_ROLLER, sourceId=enum_key(dice_type), actionId="roll"),
+        sourceLabel="Dice Roller",
+        resolution=RollResolutionMode.NONE,
+        label=f"{dice_count}{enum_key(dice_type)}",
+        iconUrl=None,
+        dice=rolls,
+        diceType=dice_type,
+        die=f"{dice_count}{enum_key(dice_type)}",
+        modifier=0,
+        modifierBreakdown=[],
+        total=sum(rolls),
+        createdAt=created_at,
+    )
+    log_entry = append_roll_log_entry(
+        room,
+        RollLogEntry(
+            id=f"log-{payload.id}",
+            entryType=RollLogEntryType.ROLL_CREATED,
+            createdAt=payload.createdAt,
+            roll=payload,
+        ),
+    )
+    await broadcast(room, {"type": "roll_logged", "roll": roll_payload_to_dict(payload), "logEntry": roll_log_entry_to_dict(log_entry)})
+    return {"roomId": room.id, "roll": roll_payload_to_dict(payload), "logEntry": roll_log_entry_to_dict(log_entry)}
+
+
 async def store_outgoing_roll(room: Room, sheet: CharacterSheet, payload: RollPayload) -> dict[str, Any]:
     response = await store_roll(room, payload)
     clear_invisibility_after_outgoing_roll(room, sheet, payload)
@@ -1517,9 +1629,27 @@ async def assert_roll_activation_allowed(
     source_label: str,
     roll_label: str,
 ) -> None:
+    blocking_condition = incapacitating_roll_condition(sheet)
+    if blocking_condition is not None:
+        await log_blocked_roll(room, sheet, player, source_label, roll_label, f"{enum_label(blocking_condition)} prevents Actions, Bonus Actions, and Reactions")
+        raise HTTPException(status_code=400, detail=f"{enum_label(blocking_condition)} creatures cannot take Actions, Bonus Actions, or Reactions")
     if activation == TimeEconomy.REACTION and ConditionType.SLOWED in sheet.conditions:
         await log_blocked_roll(room, sheet, player, source_label, roll_label, f"{enum_label(ConditionType.SLOWED)} prevents Reactions")
         raise HTTPException(status_code=400, detail="Slowed creatures cannot take Reactions")
+
+
+INCAPACITATING_ROLL_CONDITIONS: tuple[ConditionType, ...] = (
+    ConditionType.DEAD,
+    ConditionType.INCAPACITATED,
+    ConditionType.PARALYZED,
+    ConditionType.PETRIFIED,
+    ConditionType.STUNNED,
+    ConditionType.UNCONSCIOUS,
+)
+
+
+def incapacitating_roll_condition(sheet: CharacterSheet) -> ConditionType | None:
+    return next((condition for condition in INCAPACITATING_ROLL_CONDITIONS if condition in sheet.conditions), None)
 
 
 async def assert_slowed_somatic_spell_cast_allowed(room: Room, sheet: CharacterSheet, player: Player, spell: SpellEntry) -> None:
@@ -1745,6 +1875,46 @@ def reset_sheet_temporary_hit_points(room: Room, sheet: CharacterSheet, rest_typ
         room.temporary_hit_points.pop(sheet.tokenId, None)
 
 
+def reset_sheet_max_hit_point_reductions(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
+    reductions = room.max_hit_point_reductions.get(sheet.tokenId, [])
+    remaining = [reduction for reduction in reductions if not resource_resets_on_rest(reduction.reset, rest_type)]
+    if remaining:
+        room.max_hit_point_reductions[sheet.tokenId] = remaining
+        return
+    room.max_hit_point_reductions.pop(sheet.tokenId, None)
+
+
+def reset_sheet_exhaustion(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
+    if rest_type != RestType.LONG_REST:
+        return
+    current_level = room.exhaustion_levels.get(sheet.tokenId, sheet.exhaustionLevel)
+    current_hp = sheet.hp.current
+    next_level = max(0, current_level - 1)
+    if next_level > 0:
+        room.exhaustion_levels[sheet.tokenId] = next_level
+    else:
+        room.exhaustion_levels.pop(sheet.tokenId, None)
+    next_conditions = conditions_for_exhaustion_level(room.condition_overrides.get(sheet.tokenId, sheet.conditions), next_level)
+    room.condition_overrides[sheet.tokenId] = next_conditions
+    room.hit_points[sheet.tokenId] = current_hp
+    update_party_member_config(room.id, sheet.id, lambda member: set_member_conditions(member, next_conditions))
+
+
+def hit_points_after_max_reductions(hp: HitPoints, reductions: list[ActiveMaxHitPointReduction]) -> HitPoints:
+    reduction_total = sum(max(0, reduction.amount) for reduction in reductions)
+    if reduction_total <= 0:
+        return hp
+    effective_max = max(1, hp.max - reduction_total)
+    return HitPoints(current=min(hp.current, effective_max), max=effective_max, temporary=hp.temporary)
+
+
+def conditions_for_exhaustion_level(conditions: list[ConditionType], exhaustion_level: int) -> list[ConditionType]:
+    next_conditions = [condition for condition in conditions if condition != ConditionType.EXHAUSTION]
+    if exhaustion_level > 0:
+        next_conditions.append(ConditionType.EXHAUSTION)
+    return normalized_conditions(next_conditions)
+
+
 def spend_resource_use(room: Room, sheet: CharacterSheet, resource_id: str, payload: RollPayload) -> None:
     resource = next((candidate for candidate in sheet.resources if candidate.id == resource_id), None)
     if resource is None:
@@ -1807,9 +1977,15 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
         for response_roll in response_rolls:
             room.pending_rolls[roll_queue_key(response_roll)] = response_roll
         resolution.responseRolls = response_rolls
+    max_hp_reduction_outcome = apply_max_hit_point_reduction_effect(room, resolved_roll, target, resolution)
+    if max_hp_reduction_outcome:
+        resolution.outcome = f"{resolution.outcome}; {max_hp_reduction_outcome}"
     if roll.resolution in {RollResolutionMode.APPLY_DAMAGE, RollResolutionMode.HEAL_SELF, RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS}:
         room.hit_points[target.tokenId] = resolution.targetHp.current
         room.temporary_hit_points[target.tokenId] = resolution.targetHp.temporary
+    death_outcome = apply_dead_condition_after_damage(resolution)
+    if death_outcome:
+        resolution.outcome = f"{resolution.outcome}; {death_outcome}"
     concentration_outcome, concentration_roll = resolve_concentration_save_after_damage(room, target, resolution)
     if concentration_outcome:
         resolution.outcome = f"{resolution.outcome}; {concentration_outcome}"
@@ -1827,6 +2003,11 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
         reset_sheet_temporary_hit_points(room, target, roll.restType)
         resolution.targetConditions = room.condition_overrides.get(target.tokenId, resolution.targetConditions)
         resolution.outcome = f"{resolution.outcome}; {target.name} gains the benefits of a {enum_label(roll.restType)}"
+    if roll.conditionRemovals:
+        removed_conditions = [condition for condition in roll.conditionRemovals if condition in resolution.targetConditions]
+        if removed_conditions:
+            resolution.targetConditions = [condition for condition in resolution.targetConditions if condition not in removed_conditions]
+            resolution.outcome = f"{resolution.outcome}; removes {text_list_label([enum_label(condition) for condition in removed_conditions])}"
     apply_resolved_conditions(room, target.id, target.conditions, resolution.targetConditions, roll, source)
     if concentration_spell_for_roll(source, roll) is not None and source is not None:
         concentration_update_sheet_ids.add(source.id)
@@ -1839,6 +2020,15 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
             for sheet_id in sorted(concentration_update_sheet_ids)
         ]
     return resolution
+
+
+def apply_dead_condition_after_damage(resolution: RollResolution) -> str | None:
+    if resolution.roll.resolution != RollResolutionMode.APPLY_DAMAGE:
+        return None
+    if resolution.targetHp.current > 0 or ConditionType.DEAD in resolution.targetConditions:
+        return None
+    resolution.targetConditions = normalized_conditions([*resolution.targetConditions, ConditionType.DEAD])
+    return f"{resolution.targetName} gains {enum_label(ConditionType.DEAD)}"
 
 
 def apply_source_healing_effect(
@@ -1865,6 +2055,30 @@ def apply_source_healing_effect(
         return None
     room.hit_points[source.tokenId] = next_hp
     return f"{source.name} heals {actual_healing} hit points"
+
+
+def apply_max_hit_point_reduction_effect(room: Room, roll: RollPayload, target: CharacterSheet, resolution: RollResolution) -> str | None:
+    if roll.maxHitPointReduction is None or roll.resolution != RollResolutionMode.APPLY_DAMAGE:
+        return None
+    if roll.maxHitPointReduction.mode != SpellMaxHitPointReductionMode.DAMAGE_TAKEN:
+        return None
+    if roll.damageSaveSucceeded:
+        return None
+    damage_taken = hit_point_damage_taken(target.hp, resolution.targetHp)
+    if damage_taken <= 0:
+        return None
+    source_spell_id = enum_value(SpellId, roll.source.sourceId) or SpellId.HARM
+    room.max_hit_point_reductions.setdefault(target.tokenId, []).append(
+        ActiveMaxHitPointReduction(
+            amount=damage_taken,
+            sourceSpellId=source_spell_id,
+            sourceName=roll.sourceLabel,
+            reset=roll.maxHitPointReduction.reset,
+        )
+    )
+    resolution.targetHp = hit_points_after_max_reductions(resolution.targetHp, room.max_hit_point_reductions.get(target.tokenId, []))
+    save_room_to_disk(room)
+    return f"{target.name}'s Hit Point maximum is reduced by {damage_taken} until {enum_label(roll.maxHitPointReduction.reset)}"
 
 
 def hit_point_damage_taken(before: HitPoints, after: HitPoints) -> int:
@@ -1913,8 +2127,11 @@ def resolve_damage_save_for_roll(roll: RollPayload, target: CharacterSheet) -> t
         disadvantage=disadvantage,
     )
     save_label = roll_advantage_log_label(response_roll)
-    if response_roll.total < roll.damageSaveDc:
-        return f"{target.name} fails DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label}", response_roll, replace(roll, damageSaveSucceeded=False)
+    forced_failure = damage_save_forced_failure_applies(roll, target)
+    forced_failure_conditions = condition_saving_throw_forced_failure_conditions(target, roll.damageSavingThrow)
+    forced_failure_label = damage_save_forced_failure_label(target, forced_failure, forced_failure_conditions)
+    if forced_failure or forced_failure_conditions or response_roll.total < roll.damageSaveDc:
+        return f"{target.name} fails DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label}{forced_failure_label}", response_roll, replace(roll, damageSaveSucceeded=False)
     if roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE:
         return (
             f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label} for half damage",
@@ -1932,6 +2149,18 @@ def resolve_damage_save_for_roll(roll: RollPayload, target: CharacterSheet) -> t
 
 def damage_save_disadvantage_applies(roll: RollPayload, target: CharacterSheet) -> bool:
     return bool(roll.damageSaveDisadvantageCreatureTypes and set(roll.damageSaveDisadvantageCreatureTypes).intersection(target.creatureTypes))
+
+
+def damage_save_forced_failure_applies(roll: RollPayload, target: CharacterSheet) -> bool:
+    return bool(roll.damageSaveForcedFailureCreatureTypes and set(roll.damageSaveForcedFailureCreatureTypes).intersection(target.creatureTypes))
+
+
+def damage_save_forced_failure_label(target: CharacterSheet, creature_type_forced_failure: bool, condition_forced_failures: list[ConditionType]) -> str:
+    labels = []
+    if creature_type_forced_failure:
+        labels.append(creature_type_list_label(target.creatureTypes))
+    labels.extend(enum_label(condition) for condition in condition_forced_failures)
+    return f" due to {text_list_label(labels)}" if labels else ""
 
 
 def resolve_damage_triggered_condition_saves(
@@ -1963,7 +2192,9 @@ def resolve_damage_triggered_condition_saves(
         )
         condition_label = text_list_label([enum_label(condition) for condition in conditions])
         advantage_label = roll_advantage_log_label(response_roll)
-        if response_roll.total >= save_dc:
+        forced_failure_conditions = condition_saving_throw_forced_failure_conditions(target, saving_throw)
+        forced_failure_label = f" due to {text_list_label([enum_label(condition) for condition in forced_failure_conditions])}" if forced_failure_conditions else ""
+        if not forced_failure_conditions and response_roll.total >= save_dc:
             outcomes.append(
                 (
                     f"{target.name} passes DC {save_dc} {enum_label(saving_throw)} save{advantage_label} after taking damage and ends {condition_label}",
@@ -1974,7 +2205,7 @@ def resolve_damage_triggered_condition_saves(
         else:
             outcomes.append(
                 (
-                    f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label} after taking damage; {condition_label} remains",
+                    f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label}{forced_failure_label} after taking damage; {condition_label} remains",
                     [],
                     response_roll,
                 )
@@ -2006,15 +2237,17 @@ def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> li
             advantage_conditions=[ConditionType.PROTECTION_FROM_POISON] if advantage else None,
         )
         advantage_label = roll_advantage_log_label(response_roll)
+        forced_failure_conditions = condition_saving_throw_forced_failure_conditions(target, saving_throw)
+        forced_failure_label = f" due to {text_list_label([enum_label(condition) for condition in forced_failure_conditions])}" if forced_failure_conditions else ""
         conditions = [effect.condition for effect in effects if effect.condition is not None]
-        if response_roll.total < save_dc:
+        if forced_failure_conditions or response_roll.total < save_dc:
             if not conditions:
-                outcomes.append((f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label}", None, response_roll))
+                outcomes.append((f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label}{forced_failure_label}", None, response_roll))
             else:
                 condition_label = text_list_label([enum_label(condition) for condition in conditions])
                 outcomes.extend(
                     (
-                        f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label} and gains {condition_label}",
+                        f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label}{forced_failure_label} and gains {condition_label}",
                         condition,
                         response_roll,
                     )
@@ -2214,6 +2447,10 @@ def resolve_concentration_save_after_damage(room: Room, target: CharacterSheet, 
     damage_taken = hit_point_damage_taken(target.hp, resolution.targetHp)
     if active is None or damage_taken <= 0:
         return None, None
+    if ConditionType.DEAD in resolution.targetConditions:
+        removed_conditions = clear_active_concentration(room, target.id)
+        removed_label = f" and removes {text_list_label(removed_conditions)}" if removed_conditions else ""
+        return f"{target.name} is {enum_label(ConditionType.DEAD)}; {active.spellName} ends{removed_label}", None
     save_dc = max(10, damage_taken // 2)
     response_roll = response_ability_roll(
         sheet=target,
@@ -2424,6 +2661,8 @@ def save_room_to_disk(room: Room) -> None:
         "boardId": room.board_id,
         "resources": room.resource_uses,
         "activeConcentrations": active_concentrations_to_dict(room.active_concentrations),
+        "maxHitPointReductions": max_hit_point_reductions_to_dict(room.max_hit_point_reductions),
+        "exhaustionLevels": room.exhaustion_levels,
     }
     path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -2452,6 +2691,8 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.roll_history = []
     room.hit_points = {}
     room.temporary_hit_points = {}
+    room.max_hit_point_reductions = load_saved_max_hit_point_reductions(room.id)
+    room.exhaustion_levels = load_saved_exhaustion_levels(room.id)
     room.condition_overrides = {}
     room.condition_durations = {}
     room.condition_removals = {}
@@ -2531,6 +2772,92 @@ def load_saved_resource_uses(room_id: str) -> dict[str, dict[str, int]]:
         if token_id and token_resources:
             resources[token_id] = token_resources
     return resources
+
+
+def load_saved_exhaustion_levels(room_id: str) -> dict[str, int]:
+    path = existing_save_path(room_id)
+    if not path.exists():
+        return {}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    raw_levels = data.get("exhaustionLevels")
+    if not isinstance(raw_levels, dict):
+        return {}
+
+    levels: dict[str, int] = {}
+    for raw_sheet_id, raw_level in raw_levels.items():
+        sheet_id = sanitize_asset_id(str(raw_sheet_id))
+        try:
+            level = clamp_int(int(raw_level), 0, 6)
+        except (TypeError, ValueError):
+            continue
+        if sheet_id and level > 0:
+            levels[sheet_id] = level
+    return levels
+
+
+def max_hit_point_reductions_to_dict(reductions: dict[str, list[ActiveMaxHitPointReduction]]) -> dict[str, Any]:
+    return {
+        sheet_id: [
+            {
+                "amount": reduction.amount,
+                "sourceSpellId": enum_key(reduction.sourceSpellId),
+                "sourceName": reduction.sourceName,
+                "reset": enum_key(reduction.reset),
+            }
+            for reduction in sheet_reductions
+        ]
+        for sheet_id, sheet_reductions in reductions.items()
+        if sheet_reductions
+    }
+
+
+def load_saved_max_hit_point_reductions(room_id: str) -> dict[str, list[ActiveMaxHitPointReduction]]:
+    path = existing_save_path(room_id)
+    if not path.exists():
+        return {}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    raw_reductions = data.get("maxHitPointReductions")
+    if not isinstance(raw_reductions, dict):
+        return {}
+
+    reductions: dict[str, list[ActiveMaxHitPointReduction]] = {}
+    for raw_sheet_id, raw_sheet_reductions in raw_reductions.items():
+        if not isinstance(raw_sheet_reductions, list):
+            continue
+        sheet_id = sanitize_asset_id(str(raw_sheet_id))
+        sheet_reductions: list[ActiveMaxHitPointReduction] = []
+        for raw_reduction in raw_sheet_reductions:
+            if not isinstance(raw_reduction, dict):
+                continue
+            source_spell_id = enum_value(SpellId, raw_reduction.get("sourceSpellId"))
+            reset = enum_value(RestType, raw_reduction.get("reset"))
+            try:
+                amount = max(0, int(raw_reduction.get("amount")))
+            except (TypeError, ValueError):
+                continue
+            if not sheet_id or source_spell_id is None or reset is None or amount <= 0:
+                continue
+            sheet_reductions.append(
+                ActiveMaxHitPointReduction(
+                    amount=amount,
+                    sourceSpellId=source_spell_id,
+                    sourceName=str(raw_reduction.get("sourceName") or enum_label(source_spell_id)),
+                    reset=reset,
+                )
+            )
+        if sheet_reductions:
+            reductions[sheet_id] = sheet_reductions
+    return reductions
 
 
 def active_concentrations_to_dict(active_concentrations: dict[str, ActiveConcentration]) -> dict[str, Any]:

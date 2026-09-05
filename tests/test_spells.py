@@ -17,6 +17,7 @@ from dnd_board.character_sheet import (
     SpellEffectTrigger,
     SpellId,
     SpellLinkedHealingAmount,
+    SpellMaxHitPointReductionMode,
     SpellRangeType,
     SpellSaveOutcome,
     SpellScalingType,
@@ -863,21 +864,82 @@ def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
 
 
 def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None:
+    blight = spell_entry(SpellId.BLIGHT)
+    blade_barrier = spell_entry(SpellId.BLADE_BARRIER)
+    chain_lightning = spell_entry(SpellId.CHAIN_LIGHTNING)
+    circle_of_death = spell_entry(SpellId.CIRCLE_OF_DEATH)
     cone_of_cold = spell_entry(SpellId.CONE_OF_COLD)
     destructive_wave = spell_entry(SpellId.DESTRUCTIVE_WAVE)
+    disintegrate = spell_entry(SpellId.DISINTEGRATE)
+    finger_of_death = spell_entry(SpellId.FINGER_OF_DEATH)
     fire_shield = spell_entry(SpellId.FIRE_SHIELD)
+    fire_storm = spell_entry(SpellId.FIRE_STORM)
     flame_strike = spell_entry(SpellId.FLAME_STRIKE)
     greater_invisibility = spell_entry(SpellId.GREATER_INVISIBILITY)
+    harm = spell_entry(SpellId.HARM)
+    heal = spell_entry(SpellId.HEAL)
     hold_monster = spell_entry(SpellId.HOLD_MONSTER)
     ice_storm = spell_entry(SpellId.ICE_STORM)
     mass_cure_wounds = spell_entry(SpellId.MASS_CURE_WOUNDS)
+    otiluke_freezing_sphere = spell_entry(SpellId.OTILUKE_S_FREEZING_SPHERE)
     phantasmal_killer = spell_entry(SpellId.PHANTASMAL_KILLER)
     staggering_smite = spell_entry(SpellId.STAGGERING_SMITE)
     steel_wind_strike = spell_entry(SpellId.STEEL_WIND_STRIKE)
     stoneskin = spell_entry(SpellId.STONESKIN)
+    sunbeam = spell_entry(SpellId.SUNBEAM)
+    sunburst = spell_entry(SpellId.SUNBURST)
     synaptic_static = spell_entry(SpellId.SYNAPTIC_STATIC)
+    meteor_swarm = spell_entry(SpellId.METEOR_SWARM)
     vitriolic_sphere = spell_entry(SpellId.VITRIOLIC_SPHERE)
     wall_of_fire = spell_entry(SpellId.WALL_OF_FIRE)
+    wall_of_thorns = spell_entry(SpellId.WALL_OF_THORNS)
+
+    assert blight is not None and blight.effects is not None
+    assert blight.effects[0].damage is not None
+    assert blight.effects[0].damage.dice.dice == "8d8"
+    assert blight.effects[0].damage.damageType == DamageType.NECROTIC
+    assert blight.effects[0].savingThrow is not None
+    assert blight.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert blight.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert blight.effects[0].savingThrow.forcedFailureCreatureTypes == [CreatureType.PLANT]
+    assert blight.effects[0].scaling is not None
+    assert blight.effects[0].scaling[0].additionalDice is not None
+    assert blight.effects[0].scaling[0].additionalDice.dice == "1d8"
+
+    assert blade_barrier is not None and blade_barrier.effects is not None
+    assert blade_barrier.targeting.area.shape == SpellAreaShape.LINE
+    assert blade_barrier.targeting.area.lengthFeet == 100
+    assert blade_barrier.targeting.area.widthFeet == 5
+    assert blade_barrier.effects[0].damage is not None
+    assert blade_barrier.effects[0].damage.dice.dice == "6d10"
+    assert blade_barrier.effects[0].damage.damageType == DamageType.FORCE
+    assert blade_barrier.effects[0].savingThrow is not None
+    assert blade_barrier.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert blade_barrier.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert chain_lightning is not None and chain_lightning.effects is not None
+    assert chain_lightning.effects[0].damage is not None
+    assert chain_lightning.effects[0].damage.dice.dice == "10d8"
+    assert chain_lightning.effects[0].damage.damageType == DamageType.LIGHTNING
+    assert chain_lightning.effects[0].instances == 4
+    assert chain_lightning.effects[0].instanceLabel == "Bolt"
+    assert chain_lightning.effects[0].savingThrow is not None
+    assert chain_lightning.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert chain_lightning.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert chain_lightning.effects[0].scaling is not None
+    assert chain_lightning.effects[0].scaling[0].additionalInstances == 1
+
+    assert circle_of_death is not None and circle_of_death.effects is not None
+    assert circle_of_death.targeting.area.shape == SpellAreaShape.RADIUS
+    assert circle_of_death.targeting.area.radiusFeet == 60
+    assert circle_of_death.effects[0].damage is not None
+    assert circle_of_death.effects[0].damage.dice.dice == "8d8"
+    assert circle_of_death.effects[0].damage.damageType == DamageType.NECROTIC
+    assert circle_of_death.effects[0].savingThrow is not None
+    assert circle_of_death.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert circle_of_death.effects[0].scaling is not None
+    assert circle_of_death.effects[0].scaling[0].additionalDice is not None
+    assert circle_of_death.effects[0].scaling[0].additionalDice.dice == "2d8"
 
     assert cone_of_cold is not None and cone_of_cold.effects is not None
     assert cone_of_cold.targeting.area.shape == SpellAreaShape.CONE
@@ -921,6 +983,38 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert flame_strike.effects[0].scaling[0].additionalDice is not None
     assert flame_strike.effects[0].scaling[0].additionalDice.dice == "1d6"
 
+    assert disintegrate is not None and disintegrate.effects is not None
+    assert disintegrate.effects[0].damage is not None
+    assert disintegrate.effects[0].damage.dice.dice == "10d6"
+    assert disintegrate.effects[0].damage.dice.staticBonus == 40
+    assert disintegrate.effects[0].damage.damageType == DamageType.FORCE
+    assert disintegrate.effects[0].savingThrow is not None
+    assert disintegrate.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert disintegrate.effects[0].savingThrow.outcome == SpellSaveOutcome.NEGATES
+    assert disintegrate.effects[0].scaling is not None
+    assert disintegrate.effects[0].scaling[0].additionalDice is not None
+    assert disintegrate.effects[0].scaling[0].additionalDice.dice == "3d6"
+
+    assert finger_of_death is not None and finger_of_death.effects is not None
+    assert finger_of_death.effects[0].damage is not None
+    assert finger_of_death.effects[0].damage.dice.dice == "7d8"
+    assert finger_of_death.effects[0].damage.dice.staticBonus == 30
+    assert finger_of_death.effects[0].damage.damageType == DamageType.NECROTIC
+    assert finger_of_death.effects[0].savingThrow is not None
+    assert finger_of_death.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert finger_of_death.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert fire_storm is not None and fire_storm.effects is not None
+    assert fire_storm.targeting.area.shape == SpellAreaShape.CUBE
+    assert fire_storm.targeting.area.sizeFeet == 10
+    assert fire_storm.effects[0].damage is not None
+    assert fire_storm.effects[0].damage.dice.dice == "7d10"
+    assert fire_storm.effects[0].damage.damageType == DamageType.FIRE
+    assert fire_storm.effects[0].target == SpellEffectTarget.AREA
+    assert fire_storm.effects[0].savingThrow is not None
+    assert fire_storm.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert fire_storm.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
     assert hold_monster is not None and hold_monster.effects is not None
     assert hold_monster.effects[0].conditions is not None
     assert hold_monster.effects[0].conditions[0].condition == ConditionType.PARALYZED
@@ -928,6 +1022,24 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert hold_monster.effects[0].savingThrow.ability == AbilityType.WISDOM
     assert hold_monster.effects[0].savingThrow.repeat == SpellEffectTrigger.END_OF_TURN
     assert hold_monster.effects[0].scaling is not None
+
+    assert harm is not None and harm.effects is not None
+    assert harm.effects[0].damage is not None
+    assert harm.effects[0].damage.dice.dice == "14d6"
+    assert harm.effects[0].damage.damageType == DamageType.NECROTIC
+    assert harm.effects[0].savingThrow is not None
+    assert harm.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert harm.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert harm.effects[0].maxHitPointReduction is not None
+    assert harm.effects[0].maxHitPointReduction.mode == SpellMaxHitPointReductionMode.DAMAGE_TAKEN
+    assert harm.effects[0].maxHitPointReduction.reset == RestType.LONG_REST
+
+    assert heal is not None and heal.effects is not None
+    assert heal.effects[0].healing is not None
+    assert heal.effects[0].healing.dice.staticBonus == 70
+    assert heal.effects[0].conditionRemovals == [ConditionType.BLINDED, ConditionType.DEAFENED, ConditionType.POISONED]
+    assert heal.effects[0].scaling is not None
+    assert heal.effects[0].scaling[0].additionalStaticBonus == 10
 
     assert ice_storm is not None and ice_storm.effects is not None
     assert ice_storm.targeting.area.shape == SpellAreaShape.CYLINDER
@@ -954,6 +1066,19 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert mass_cure_wounds.effects[0].scaling[0].additionalDice is not None
     assert mass_cure_wounds.effects[0].scaling[0].additionalDice.dice == "1d8"
 
+    assert otiluke_freezing_sphere is not None and otiluke_freezing_sphere.effects is not None
+    assert otiluke_freezing_sphere.targeting.area.shape == SpellAreaShape.RADIUS
+    assert otiluke_freezing_sphere.targeting.area.radiusFeet == 60
+    assert otiluke_freezing_sphere.effects[0].damage is not None
+    assert otiluke_freezing_sphere.effects[0].damage.dice.dice == "10d6"
+    assert otiluke_freezing_sphere.effects[0].damage.damageType == DamageType.COLD
+    assert otiluke_freezing_sphere.effects[0].savingThrow is not None
+    assert otiluke_freezing_sphere.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert otiluke_freezing_sphere.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert otiluke_freezing_sphere.effects[0].scaling is not None
+    assert otiluke_freezing_sphere.effects[0].scaling[0].additionalDice is not None
+    assert otiluke_freezing_sphere.effects[0].scaling[0].additionalDice.dice == "1d6"
+
     assert steel_wind_strike is not None and steel_wind_strike.effects is not None
     assert steel_wind_strike.effects[0].attack == SpellAttackType.MELEE_SPELL_ATTACK
     assert steel_wind_strike.effects[0].damage is not None
@@ -961,6 +1086,31 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert steel_wind_strike.effects[0].damage.damageType == DamageType.FORCE
     assert steel_wind_strike.effects[0].instances == 5
     assert steel_wind_strike.effects[0].instanceLabel == "Target"
+
+    assert sunbeam is not None and sunbeam.effects is not None
+    assert sunbeam.targeting.area.shape == SpellAreaShape.LINE
+    assert sunbeam.targeting.area.lengthFeet == 60
+    assert sunbeam.targeting.area.widthFeet == 5
+    assert sunbeam.effects[0].damage is not None
+    assert sunbeam.effects[0].damage.dice.dice == "6d8"
+    assert sunbeam.effects[0].damage.damageType == DamageType.RADIANT
+    assert sunbeam.effects[0].savingThrow is not None
+    assert sunbeam.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert sunbeam.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert sunbeam.effects[0].conditions is not None
+    assert sunbeam.effects[0].conditions[0].condition == ConditionType.BLINDED
+
+    assert sunburst is not None and sunburst.effects is not None
+    assert sunburst.targeting.area.shape == SpellAreaShape.RADIUS
+    assert sunburst.targeting.area.radiusFeet == 60
+    assert sunburst.effects[0].damage is not None
+    assert sunburst.effects[0].damage.dice.dice == "12d6"
+    assert sunburst.effects[0].damage.damageType == DamageType.RADIANT
+    assert sunburst.effects[0].savingThrow is not None
+    assert sunburst.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert sunburst.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert sunburst.effects[0].conditions is not None
+    assert sunburst.effects[0].conditions[0].condition == ConditionType.BLINDED
 
     assert synaptic_static is not None and synaptic_static.effects is not None
     assert synaptic_static.targeting.area.shape == SpellAreaShape.RADIUS
@@ -974,6 +1124,16 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert len(synaptic_static.effects) == 1
     assert synaptic_static.effects[0].conditions is not None
     assert synaptic_static.effects[0].conditions[0].condition == ConditionType.SYNAPTIC_STATIC
+
+    assert meteor_swarm is not None and meteor_swarm.effects is not None
+    assert meteor_swarm.targeting.area.shape == SpellAreaShape.RADIUS
+    assert meteor_swarm.targeting.area.radiusFeet == 40
+    assert meteor_swarm.effects[0].damageComponents is not None
+    assert [component.dice.dice for component in meteor_swarm.effects[0].damageComponents] == ["20d6", "20d6"]
+    assert [component.damageType for component in meteor_swarm.effects[0].damageComponents] == [DamageType.FIRE, DamageType.BLUDGEONING]
+    assert meteor_swarm.effects[0].savingThrow is not None
+    assert meteor_swarm.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert meteor_swarm.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
 
     assert fire_shield is not None and fire_shield.effects is not None
     assert [effect.actionLabel for effect in fire_shield.effects] == ["Warm Shield", "Warm Retaliation", "Chill Shield", "Chill Retaliation"]
@@ -1044,6 +1204,21 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert wall_of_fire.effects[0].savingThrow.ability == AbilityType.DEXTERITY
     assert wall_of_fire.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
     assert wall_of_fire.effects[1].savingThrow is None
+
+    assert wall_of_thorns is not None and wall_of_thorns.effects is not None
+    assert wall_of_thorns.targeting.area.shape == SpellAreaShape.LINE
+    assert wall_of_thorns.targeting.area.lengthFeet == 60
+    assert wall_of_thorns.targeting.area.widthFeet == 5
+    assert [effect.actionLabel for effect in wall_of_thorns.effects] == ["Appears", "Through Wall"]
+    assert [effect.damage.damageType for effect in wall_of_thorns.effects if effect.damage is not None] == [
+        DamageType.PIERCING,
+        DamageType.SLASHING,
+    ]
+    assert all(effect.damage is not None and effect.damage.dice.dice == "7d8" for effect in wall_of_thorns.effects)
+    assert all(effect.savingThrow is not None and effect.savingThrow.ability == AbilityType.DEXTERITY for effect in wall_of_thorns.effects)
+    assert all(effect.savingThrow is not None and effect.savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE for effect in wall_of_thorns.effects)
+    assert all(effect.scaling is not None and effect.scaling[0].additionalDice is not None for effect in wall_of_thorns.effects)
+    assert all(effect.scaling is not None and effect.scaling[0].additionalDice is not None and effect.scaling[0].additionalDice.dice == "1d8" for effect in wall_of_thorns.effects)
 
 
 def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics() -> None:

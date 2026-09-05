@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MutableRefObject } from "react";
 import { RollLogEntryType, RollResolutionMode, SheetSectionType, TokenKind } from "./types";
-import type { AbilityScores, AbilityType, Asset, Board, CharacterBuilderDraft, CharacterBuilderOptions, CharacterSheet, ConditionType, DamageType, EquipmentSlot, FogState, PlayerSummary, ProgressionChoice, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
+import type { AbilityScores, AbilityType, Asset, Board, CharacterBuilderDraft, CharacterBuilderOptions, CharacterSheet, ConditionType, DamageType, DiceType, EquipmentSlot, FogState, PlayerSummary, ProgressionChoice, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
 
 const DEFAULT_BOARD_WIDTH = 1200;
 const DEFAULT_BOARD_HEIGHT = 720;
@@ -39,14 +39,17 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "commandFlee",
   "commandGrovel",
   "commandHalt",
+  "dead",
   "deafened",
-  "exhaustion",
   "faerieFire",
+  "fullCover",
   "flying",
   "frightened",
   "grappled",
   "guidance",
+  "halfCover",
   "hasted",
+  "heavilyObscured",
   "incapacitated",
   "invisible",
   "longstrider",
@@ -76,6 +79,7 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "slowed",
   "stunned",
   "synapticStatic",
+  "threeQuartersCover",
   "unconscious"
 ];
 type DamageDefenseType = "resistance" | "vulnerability" | "immunity";
@@ -950,6 +954,24 @@ export function App() {
     [playerKey]
   );
 
+  const updateExhaustion = useCallback(
+    async (sheet: CharacterSheet, level: number) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/exhaustion?playerKey=${encodeURIComponent(playerKey)}&level=${encodeURIComponent(level)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      const body = (await response.json()) as { sheet: CharacterSheet };
+      if (body.sheet) {
+        setSheets((current) => current.map((candidate) => (candidate.id === body.sheet.id ? body.sheet : candidate)));
+      }
+    },
+    [playerKey]
+  );
+
   const updateDamageDefense = useCallback(
     async (sheet: CharacterSheet, defense: DamageDefenseType, damageType: DamageType, active: boolean) => {
       const response = await fetch(
@@ -964,6 +986,22 @@ export function App() {
       if (body.sheet) {
         setSheets((current) => current.map((candidate) => (candidate.id === body.sheet.id ? body.sheet : candidate)));
       }
+    },
+    [playerKey]
+  );
+
+  const rollAdHocDice = useCallback(
+    async (dice: DiceType, count: number) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/dice?playerKey=${encodeURIComponent(playerKey)}&dice=${encodeURIComponent(dice)}&count=${encodeURIComponent(count)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return null;
+      }
+      const body = (await response.json()) as { roll: RollPayload };
+      return body.roll;
     },
     [playerKey]
   );
@@ -1006,10 +1044,12 @@ export function App() {
         onRollSpellDamage={rollSpellDamage}
         onRollSpellHealing={rollSpellHealing}
         onRollSpellEffect={rollSpellEffect}
+        onRollAdHocDice={rollAdHocDice}
         onClearSheetRolls={clearSheetRolls}
         onRestSheets={restSheets}
         onUpdateProgressionChoice={updateProgressionChoice}
         onUpdateCondition={updateCondition}
+        onUpdateExhaustion={updateExhaustion}
         onUpdateDamageDefense={updateDamageDefense}
         onUpdateEquipmentSlot={updateEquipmentSlot}
         onUpdateSheetLevel={updateSheetLevel}
@@ -1202,9 +1242,11 @@ type SheetViewProps = {
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
+  onRollAdHocDice: (dice: DiceType, count: number) => Promise<RollPayload | null>;
   onRestSheets: (rest: "short" | "long") => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateCondition: (sheet: CharacterSheet, condition: ConditionType, active: boolean) => void;
+  onUpdateExhaustion: (sheet: CharacterSheet, level: number) => void;
   onUpdateDamageDefense: (sheet: CharacterSheet, defense: DamageDefenseType, damageType: DamageType, active: boolean) => void;
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
@@ -1217,7 +1259,7 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollSpellHealing, onRollSpellEffect, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollSpellHealing, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -1321,6 +1363,7 @@ function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreate
           onRollSpellEffect={onRollSpellEffect}
           onUpdateProgressionChoice={onUpdateProgressionChoice}
           onUpdateCondition={onUpdateCondition}
+          onUpdateExhaustion={onUpdateExhaustion}
           onUpdateDamageDefense={onUpdateDamageDefense}
           onUpdateEquipmentSlot={onUpdateEquipmentSlot}
           onUpdateSheetLevel={onUpdateSheetLevel}
@@ -1392,6 +1435,8 @@ function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreate
         </div>
       )}
 
+      <AdHocDiceRoller onRoll={onRollAdHocDice} />
+
       <aside className="roll-log">
         <h2>Logs</h2>
         {rollHistory.length > 0 && (
@@ -1406,6 +1451,75 @@ function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreate
   );
 }
 
+const AD_HOC_DICE_TYPES: DiceType[] = ["d4", "d6", "d8", "d10", "d12", "d20"];
+
+function AdHocDiceRoller({ onRoll }: { onRoll: (dice: DiceType, count: number) => Promise<RollPayload | null> }) {
+  const [counts, setCounts] = useState<Record<DiceType, number>>({
+    d4: 1,
+    d6: 1,
+    d8: 1,
+    d10: 1,
+    d12: 1,
+    d20: 1
+  });
+  const [lastRolls, setLastRolls] = useState<Partial<Record<DiceType, RollPayload>>>({});
+  const [rollingDice, setRollingDice] = useState<DiceType | null>(null);
+
+  const updateCount = (dice: DiceType, delta: 1 | -1) => {
+    setCounts((current) => ({ ...current, [dice]: Math.min(20, Math.max(1, current[dice] + delta)) }));
+  };
+
+  const rollDice = async (dice: DiceType) => {
+    setRollingDice(dice);
+    try {
+      const roll = await onRoll(dice, counts[dice]);
+      if (roll) {
+        setLastRolls((current) => ({ ...current, [dice]: roll }));
+      }
+    } finally {
+      setRollingDice(null);
+    }
+  };
+
+  return (
+    <section className="ad-hoc-dice-roller">
+      <button className="ad-hoc-dice-handle" aria-label="Open dice roller" type="button">
+        &lt;
+      </button>
+      <div className="ad-hoc-dice-panel">
+        <h2>Dice Roller</h2>
+        <div className="ad-hoc-dice-list">
+          {AD_HOC_DICE_TYPES.map((dice) => {
+            const lastRoll = lastRolls[dice];
+            return (
+              <div className="ad-hoc-dice-row" key={dice}>
+                <button className="ad-hoc-roll-button" disabled={rollingDice === dice} onClick={() => rollDice(dice)} type="button">
+                  Roll {dice.toUpperCase()}
+                </button>
+                <div className="ad-hoc-count-controls" aria-label={`${dice} count`}>
+                  <button disabled={counts[dice] <= 1} onClick={() => updateCount(dice, -1)} type="button">
+                    -
+                  </button>
+                  <strong>{counts[dice]}</strong>
+                  <button disabled={counts[dice] >= 20} onClick={() => updateCount(dice, 1)} type="button">
+                    +
+                  </button>
+                </div>
+                <ol className="ad-hoc-result-slot" aria-live="polite">
+                  {lastRoll ? (
+                    <RollCard compact={false} roll={lastRoll} roller={undefined} draggable={false} onDragEnd={() => undefined} onDragStart={() => undefined} />
+                  ) : (
+                    <span>-</span>
+                  )}
+                </ol>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
 function CharacterBuilderPanel({
   isDm,
   onCreateCharacter,
@@ -2221,7 +2335,7 @@ function SheetCard({
         {(sheet.activeConcentration || sheet.conditions.length > 0) && (
           <div className="condition-list">
             {sheet.activeConcentration && <span className="concentration-pill">Concentration: {sheet.activeConcentration.spellName}</span>}
-            {sheet.conditions.map((condition) => <span key={condition}>{cleanName(condition)}</span>)}
+            {sheet.conditions.map((condition) => <span className={condition === "dead" ? "dead-pill" : ""} key={condition}>{cleanName(condition)}</span>)}
           </div>
         )}
       </div>
@@ -2295,17 +2409,28 @@ function pendingChoiceSummary(sheet: CharacterSheet): string {
 function ConditionPanel({
   canRoll,
   sheet,
-  onUpdateCondition
+  onUpdateCondition,
+  onUpdateExhaustion
 }: {
   canRoll: boolean;
   sheet: CharacterSheet;
   onUpdateCondition: (sheet: CharacterSheet, condition: ConditionType, active: boolean) => void;
+  onUpdateExhaustion: (sheet: CharacterSheet, level: number) => void;
 }) {
   const activeConditions = new Set(sheet.conditions);
+  const exhaustionLevel = sheet.exhaustionLevel ?? (activeConditions.has("exhaustion") ? 1 : 0);
 
   return (
     <section className="sheet-panel">
       <h2>Conditions</h2>
+      <div className="resource-row">
+        <span>Exhaustion</span>
+        <div className="resource-controls">
+          <button disabled={!canRoll || exhaustionLevel <= 0} onClick={() => onUpdateExhaustion(sheet, exhaustionLevel - 1)} type="button">-</button>
+          <strong>{exhaustionLevel}</strong>
+          <button disabled={!canRoll || exhaustionLevel >= 6} onClick={() => onUpdateExhaustion(sheet, exhaustionLevel + 1)} type="button">+</button>
+        </div>
+      </div>
       <div className="condition-toggle-grid">
         {CONDITION_OPTIONS.map((condition) => {
           const active = activeConditions.has(condition);
@@ -2926,6 +3051,7 @@ function FullSheet({
   onRollSpellEffect,
   onUpdateProgressionChoice,
   onUpdateCondition,
+  onUpdateExhaustion,
   onUpdateDamageDefense,
   onUpdateEquipmentSlot,
   onUpdateSheetLevel,
@@ -2952,6 +3078,7 @@ function FullSheet({
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateCondition: (sheet: CharacterSheet, condition: ConditionType, active: boolean) => void;
+  onUpdateExhaustion: (sheet: CharacterSheet, level: number) => void;
   onUpdateDamageDefense: (sheet: CharacterSheet, defense: DamageDefenseType, damageType: DamageType, active: boolean) => void;
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
@@ -3053,7 +3180,7 @@ function FullSheet({
           </div>
         </section>
 
-        <ConditionPanel canRoll={canRoll} sheet={sheet} onUpdateCondition={onUpdateCondition} />
+        <ConditionPanel canRoll={canRoll} sheet={sheet} onUpdateCondition={onUpdateCondition} onUpdateExhaustion={onUpdateExhaustion} />
         {(isDm || hasDamageDefenses(sheet)) && (
           <DamageDefensePanel isDm={isDm} sheet={sheet} onUpdateDamageDefense={onUpdateDamageDefense} />
         )}

@@ -93,6 +93,7 @@ from dnd_board.character_sheet import (
     build_ability_check_roll_payload,
     condition_adjusted_armor_class,
     condition_adjusted_speed,
+    condition_adjusted_speed_for_exhaustion,
     condition_armor_class_bonus,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
@@ -273,12 +274,107 @@ def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch
     assert hasted_dexterity_save_roll.advantageConditions == [ConditionType.HASTED]
     assert hasted_strength_save_roll.die == "d20"
     assert hasted_strength_save_roll.advantageConditions is None
+    half_cover_sheet = replace(basic_sheet(), conditions=[ConditionType.HALF_COVER])
+    three_quarters_cover_sheet = replace(basic_sheet(), conditions=[ConditionType.THREE_QUARTERS_COVER])
+    full_cover_sheet = replace(basic_sheet(), conditions=[ConditionType.FULL_COVER])
+    half_cover_dexterity_save_roll = build_saving_throw_roll_payload(half_cover_sheet, "player-1", AbilityType.DEXTERITY)
+    half_cover_strength_save_roll = build_saving_throw_roll_payload(half_cover_sheet, "player-1", AbilityType.STRENGTH)
+    three_quarters_cover_dexterity_save_roll = build_saving_throw_roll_payload(three_quarters_cover_sheet, "player-1", AbilityType.DEXTERITY)
+    full_cover_dexterity_save_roll = build_saving_throw_roll_payload(full_cover_sheet, "player-1", AbilityType.DEXTERITY)
+    assert ("Half Cover", 2) in [(part.source, part.value) for part in half_cover_dexterity_save_roll.modifierBreakdown]
+    assert ("Half Cover", 2) not in [(part.source, part.value) for part in half_cover_strength_save_roll.modifierBreakdown]
+    assert ("Three Quarters Cover", 5) in [(part.source, part.value) for part in three_quarters_cover_dexterity_save_roll.modifierBreakdown]
+    assert "Full Cover" not in [part.source for part in full_cover_dexterity_save_roll.modifierBreakdown]
     assert condition_armor_class_bonus([ConditionType.SHIELDED]) == 5
     assert condition_armor_class_bonus([ConditionType.SHIELDED, ConditionType.SHIELD_OF_FAITH, ConditionType.HASTED, ConditionType.SLOWED]) == 7
+    assert condition_armor_class_bonus([ConditionType.HALF_COVER]) == 2
+    assert condition_armor_class_bonus([ConditionType.THREE_QUARTERS_COVER]) == 5
+    assert condition_armor_class_bonus([ConditionType.FULL_COVER]) == 0
     assert condition_adjusted_speed(30, [ConditionType.HASTED]) == 60
     assert condition_adjusted_speed(30, [ConditionType.SLOWED]) == 15
     assert condition_adjusted_speed(30, [ConditionType.LONGSTRIDER]) == 40
     assert condition_adjusted_speed(30, [ConditionType.HASTED, ConditionType.SLOWED, ConditionType.LONGSTRIDER]) == 40
+
+
+def test_conditions_modify_attack_roll_advantage_and_target_resolution(monkeypatch) -> None:
+    rolls = iter([5, 15, 15, 5, 15, 5, 15, 5])
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(rolls))
+    attacker = basic_sheet()
+    invisible_attacker = replace(basic_sheet(), conditions=[ConditionType.INVISIBLE])
+    blinded_attacker = replace(basic_sheet(), conditions=[ConditionType.BLINDED])
+    target = replace(basic_sheet(), armorClass=18)
+    blinded_target = replace(target, conditions=[ConditionType.BLINDED])
+    invisible_target = replace(target, conditions=[ConditionType.INVISIBLE])
+
+    invisible_roll = build_attack_roll_payload(invisible_attacker, "player-1", invisible_attacker.attacks[0])
+    blinded_roll = build_attack_roll_payload(blinded_attacker, "player-1", blinded_attacker.attacks[0])
+    target_advantage_resolution = resolve_roll_against_target(build_attack_roll_payload(attacker, "player-1", attacker.attacks[0]), blinded_target)
+    target_disadvantage_resolution = resolve_roll_against_target(build_attack_roll_payload(attacker, "player-1", attacker.attacks[0]), invisible_target)
+
+    assert invisible_roll.die == "2d20kh1"
+    assert invisible_roll.dice == [5, 15]
+    assert invisible_roll.advantageConditions == [ConditionType.INVISIBLE]
+    assert blinded_roll.die == "2d20kl1"
+    assert blinded_roll.dice == [15, 5]
+    assert blinded_roll.disadvantageConditions == [ConditionType.BLINDED]
+    assert target_advantage_resolution.roll.die == "2d20kh1"
+    assert target_advantage_resolution.roll.dice == [15, 5]
+    assert target_advantage_resolution.roll.advantageConditions == [ConditionType.BLINDED]
+    assert target_advantage_resolution.outcome == "hits"
+    assert target_disadvantage_resolution.roll.die == "2d20kl1"
+    assert target_disadvantage_resolution.roll.dice == [15, 5]
+    assert target_disadvantage_resolution.roll.disadvantageConditions == [ConditionType.INVISIBLE]
+    assert target_disadvantage_resolution.outcome == "misses"
+
+
+def test_conditions_apply_speed_resistance_and_save_effects(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 12)
+    restrained = replace(basic_sheet(), conditions=[ConditionType.RESTRAINED])
+    paralyzed = replace(basic_sheet(), conditions=[ConditionType.PARALYZED])
+    petrified = replace(basic_sheet(), conditions=[ConditionType.PETRIFIED])
+    poisoned = replace(basic_sheet(), conditions=[ConditionType.POISONED])
+
+    restrained_dexterity_save = build_saving_throw_roll_payload(restrained, "player-1", AbilityType.DEXTERITY)
+    restrained_strength_save = build_saving_throw_roll_payload(restrained, "player-1", AbilityType.STRENGTH)
+    paralyzed_dexterity_save = build_saving_throw_roll_payload(paralyzed, "player-1", AbilityType.DEXTERITY)
+    poisoned_check = build_ability_check_roll_payload(poisoned, "player-1", AbilityType.STRENGTH)
+
+    assert condition_adjusted_speed(30, [ConditionType.HASTED, ConditionType.GRAPPLED]) == 0
+    assert condition_adjusted_speed(30, [ConditionType.LONGSTRIDER, ConditionType.RESTRAINED]) == 0
+    assert condition_adjusted_speed(30, [ConditionType.PARALYZED]) == 0
+    assert restrained_dexterity_save.die == "2d20kl1"
+    assert restrained_dexterity_save.disadvantageConditions == [ConditionType.RESTRAINED]
+    assert restrained_strength_save.die == "d20"
+    assert paralyzed_dexterity_save.modifierBreakdown[-1].source == "Paralyzed"
+    assert "Automatically fails Dexterity saving throws." in paralyzed_dexterity_save.modifierBreakdown[-1].description
+    assert poisoned_check.die == "2d20kl1"
+    assert poisoned_check.disadvantageConditions == [ConditionType.POISONED]
+    assert effective_damage_resistances(petrified) == set(DamageType)
+
+
+def test_exhaustion_levels_modify_rolls_and_speed(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 12)
+    level_one = replace(basic_sheet(), conditions=[ConditionType.EXHAUSTION], exhaustionLevel=1)
+    level_three = replace(basic_sheet(), conditions=[ConditionType.EXHAUSTION], exhaustionLevel=3)
+
+    check_roll = build_ability_check_roll_payload(level_one, "player-1", AbilityType.STRENGTH)
+    attack_roll = build_attack_roll_payload(level_three, "player-1", level_three.attacks[0])
+    save_roll = build_saving_throw_roll_payload(level_three, "player-1", AbilityType.WISDOM)
+
+    assert check_roll.die == "d20"
+    assert check_roll.modifierBreakdown[-1].source == "Exhaustion"
+    assert check_roll.modifierBreakdown[-1].value == -2
+    assert attack_roll.die == "d20"
+    assert attack_roll.modifierBreakdown[-1].source == "Exhaustion"
+    assert attack_roll.modifierBreakdown[-1].value == -6
+    assert save_roll.die == "d20"
+    assert save_roll.modifierBreakdown[-1].source == "Exhaustion"
+    assert save_roll.modifierBreakdown[-1].value == -6
+    assert condition_adjusted_speed_for_exhaustion(30, [], 1) == 25
+    assert condition_adjusted_speed_for_exhaustion(30, [], 2) == 20
+    assert condition_adjusted_speed_for_exhaustion(30, [ConditionType.LONGSTRIDER], 2) == 30
+    assert condition_adjusted_speed_for_exhaustion(30, [ConditionType.HASTED], 2) == 50
+    assert condition_adjusted_speed_for_exhaustion(30, [ConditionType.LONGSTRIDER], 6) == 10
 
 
 def test_mage_armor_condition_uses_spell_armor_class_only_without_worn_armor() -> None:

@@ -523,6 +523,13 @@ canvas.is-dragging,
   color: #a8f0d5;
 }
 
+.condition-list .dead-pill {
+  background: rgba(181, 52, 61, 0.22);
+  border-color: rgba(255, 103, 116, 0.82);
+  color: #ffd7dc;
+  font-weight: 700;
+}
+
 .condition-toggle-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
@@ -538,6 +545,119 @@ canvas.is-dragging,
 .condition-toggle-grid button.active {
   background: #d89c46;
   color: #1b1207;
+}
+
+.ad-hoc-dice-roller {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: 36px 306px;
+  max-width: calc(100vw - 12px);
+  transform: translate(calc(100% - 36px), -50%);
+  transition: transform 140ms ease;
+}
+
+.ad-hoc-dice-roller:hover,
+.ad-hoc-dice-roller:focus-within {
+  transform: translate(0, -50%);
+}
+
+.ad-hoc-dice-handle {
+  align-self: center;
+  width: 36px;
+  min-width: 36px;
+  min-height: 72px;
+  border-radius: 8px 0 0 8px;
+  border-right: 0;
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+
+.ad-hoc-dice-panel {
+  border: 1px solid rgba(216, 156, 70, 0.36);
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  padding: 10px;
+  background: rgba(31, 18, 9, 0.96);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
+}
+
+.ad-hoc-dice-panel h2 {
+  margin: 0 0 10px;
+}
+
+.ad-hoc-dice-list {
+  display: grid;
+  gap: 6px;
+}
+
+.ad-hoc-dice-row {
+  display: grid;
+  grid-template-columns: 90px 78px 104px;
+  align-items: center;
+  gap: 6px;
+}
+
+.ad-hoc-roll-button {
+  min-width: 0;
+}
+
+.ad-hoc-count-controls {
+  display: grid;
+  grid-template-columns: 24px 1fr 24px;
+  align-items: center;
+  gap: 4px;
+}
+
+.ad-hoc-count-controls button {
+  min-width: 24px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.ad-hoc-count-controls strong {
+  color: #f7dfaa;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.ad-hoc-result-slot {
+  display: block;
+  list-style: none;
+  margin: 0;
+  width: 104px;
+  min-height: 104px;
+  border: 1px solid rgba(216, 156, 70, 0.3);
+  border-radius: 6px;
+  padding: 0;
+  background: rgba(20, 12, 6, 0.5);
+  overflow: hidden;
+}
+
+.ad-hoc-result-slot > span {
+  display: grid;
+  min-height: 104px;
+  place-items: center;
+}
+
+.ad-hoc-result-slot .roll-card {
+  grid-template-columns: 1fr;
+  min-height: 104px;
+  padding: 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ad-hoc-result-slot .die-badge {
+  justify-self: center;
+}
+
+.ad-hoc-result-slot .roll-main,
+.ad-hoc-result-slot .roll-total {
+  display: none;
 }
 
 .damage-defense-list {

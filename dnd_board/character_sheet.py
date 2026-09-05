@@ -41,6 +41,7 @@ class SheetSectionType(Enum):
     ABILITIES = auto()
     ABILITY_SCORES = auto()
     SPELLS = auto()
+    DICE_ROLLER = auto()
 
 
 class ProgressionChoiceType(Enum):
@@ -85,6 +86,12 @@ def enum_label(member: Enum) -> str:
     if isinstance(member.value, str):
         return member.value
     return UIStringFormatter.clean_name(member.name)
+
+
+def text_list_label(values: list[str]) -> str:
+    if len(values) <= 1:
+        return values[0] if values else ""
+    return f"{', '.join(values[:-1])}, and {values[-1]}"
 
 
 class TypedJsonPrimitiveType(Enum):
@@ -802,14 +809,18 @@ class ConditionType(Enum):
     COMMAND_FLEE = auto()
     COMMAND_GROVEL = auto()
     COMMAND_HALT = auto()
+    DEAD = auto()
     DEAFENED = auto()
     EXHAUSTION = auto()
     FAERIE_FIRE = auto()
+    FULL_COVER = auto()
     FLYING = auto()
     FRIGHTENED = auto()
     GRAPPLED = auto()
     GUIDANCE = auto()
+    HALF_COVER = auto()
     HASTED = auto()
+    HEAVILY_OBSCURED = auto()
     INCAPACITATED = auto()
     INVISIBLE = auto()
     LONGSTRIDER = auto()
@@ -839,6 +850,7 @@ class ConditionType(Enum):
     SLOWED = auto()
     STUNNED = auto()
     SYNAPTIC_STATIC = auto()
+    THREE_QUARTERS_COVER = auto()
     UNCONSCIOUS = auto()
 
 
@@ -1023,6 +1035,16 @@ class SpellSourceHealingEffect:
     amount: SpellLinkedHealingAmount
 
 
+class SpellMaxHitPointReductionMode(Enum):
+    DAMAGE_TAKEN = auto()
+
+
+@dataclass(frozen=True)
+class SpellMaxHitPointReduction:
+    mode: SpellMaxHitPointReductionMode
+    reset: RestType = RestType.LONG_REST
+
+
 @dataclass(frozen=True)
 class SpellConditionEffect:
     condition: ConditionType
@@ -1048,6 +1070,7 @@ class SpellSavingThrow:
     outcome: SpellSaveOutcome = SpellSaveOutcome.NEGATES
     repeat: SpellEffectTrigger | None = None
     disadvantageCreatureTypes: list[CreatureType] | None = None
+    forcedFailureCreatureTypes: list[CreatureType] | None = None
 
 
 @dataclass(frozen=True)
@@ -1072,8 +1095,10 @@ class SpellEffect:
     damageComponents: list[SpellDamageEffect] | None = None
     healing: SpellHealingEffect | None = None
     sourceHealing: SpellSourceHealingEffect | None = None
+    maxHitPointReduction: SpellMaxHitPointReduction | None = None
     temporaryHitPoints: SpellEffectDice | None = None
     conditions: list[SpellConditionEffect] | None = None
+    conditionRemovals: list[ConditionType] | None = None
     rollModifier: SpellRollModifierEffect | None = None
     scaling: list[SpellScaling] | None = None
     restType: RestType | None = None
@@ -1510,6 +1535,7 @@ class CharacterSheet:
     spellbook: list[SpellEntry]
     proficiencies: list[str]
     conditions: list[ConditionType]
+    exhaustionLevel: int
     creatureTypes: list[CreatureType]
     damageResistances: list[DamageType]
     damageVulnerabilities: list[DamageType]
@@ -1547,9 +1573,12 @@ class RollPayload:
     damageSaveOutcome: SpellSaveOutcome | None = None
     damageSaveSucceeded: bool | None = None
     damageSaveDisadvantageCreatureTypes: list[CreatureType] | None = None
+    damageSaveForcedFailureCreatureTypes: list[CreatureType] | None = None
     targetCreatureTypes: list[CreatureType] | None = None
     sourceHealing: SpellSourceHealingEffect | None = None
+    maxHitPointReduction: SpellMaxHitPointReduction | None = None
     conditionEffects: list[ConditionEffect] | None = None
+    conditionRemovals: list[ConditionType] | None = None
     restType: RestType | None = None
     resourceSpent: RollResourceSpend | None = None
 
@@ -1720,6 +1749,7 @@ def build_character_sheet(
         spellbook=configured_spellbook,
         proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
         conditions=sheet_config.conditions if sheet_config and sheet_config.conditions else [],
+        exhaustionLevel=1 if sheet_config and sheet_config.conditions and ConditionType.EXHAUSTION in sheet_config.conditions else 0,
         creatureTypes=sheet_config.creatureTypes if sheet_config and sheet_config.creatureTypes else [CreatureType.HUMANOID] if kind == TokenKind.CHARACTER else [],
         damageResistances=sheet_config.damageResistances if sheet_config and sheet_config.damageResistances else [],
         damageVulnerabilities=sheet_config.damageVulnerabilities if sheet_config and sheet_config.damageVulnerabilities else [],
@@ -1738,13 +1768,15 @@ def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
     ]
     if action.toHitBonus:
         modifier_breakdown.append(RollModifierBreakdown(source=f"{action.name} Attack Bonus", value=action.toHitBonus))
-    created_at = time_ns()
     if action.proficient:
         modifier_breakdown.append(RollModifierBreakdown(source="Proficiency", value=sheet.proficiencyBonus))
     modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.ATTACK_ROLL))
+    modifier_breakdown.extend(exhaustion_d20_modifier_breakdown(sheet))
     modifier = sum(part.value for part in modifier_breakdown)
-
-    dice = [random.randint(1, 20)]
+    advantage_conditions = condition_outgoing_attack_advantage_conditions(sheet)
+    disadvantage_conditions = condition_outgoing_attack_disadvantage_conditions(sheet)
+    dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions)
+    created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
         sheetId=sheet.id,
@@ -1757,11 +1789,13 @@ def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         iconUrl=None,
         dice=dice,
         diceType=DiceType.D20,
-        die=enum_key(DiceType.D20),
+        die=die,
         modifier=modifier,
         modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + modifier,
+        total=die_roll + modifier,
         createdAt=created_at,
+        advantageConditions=advantage_conditions or None,
+        disadvantageConditions=disadvantage_conditions or None,
         damageType=action.damageType,
     )
 
@@ -1813,8 +1847,11 @@ def build_spell_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: S
         RollModifierBreakdown(source="Proficiency", value=sheet.proficiencyBonus),
     ]
     modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.ATTACK_ROLL))
+    modifier_breakdown.extend(exhaustion_d20_modifier_breakdown(sheet))
     modifier = sum(part.value for part in modifier_breakdown)
-    dice = [random.randint(1, 20)]
+    advantage_conditions = condition_outgoing_attack_advantage_conditions(sheet)
+    disadvantage_conditions = condition_outgoing_attack_disadvantage_conditions(sheet)
+    dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions)
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -1828,11 +1865,13 @@ def build_spell_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: S
         iconUrl=None,
         dice=dice,
         diceType=DiceType.D20,
-        die=enum_key(DiceType.D20),
+        die=die,
         modifier=modifier,
         modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + modifier,
+        total=die_roll + modifier,
         createdAt=created_at,
+        advantageConditions=advantage_conditions or None,
+        disadvantageConditions=disadvantage_conditions or None,
         damageType=first_spell_damage_type(spell),
     )
 
@@ -1885,8 +1924,10 @@ def build_spell_damage_roll_payload(
         damageSaveDc=spell_save_dc(sheet, spell) if effect.savingThrow is not None else None,
         damageSaveOutcome=effect.savingThrow.outcome if effect.savingThrow is not None else None,
         damageSaveDisadvantageCreatureTypes=effect.savingThrow.disadvantageCreatureTypes if effect.savingThrow is not None else None,
+        damageSaveForcedFailureCreatureTypes=effect.savingThrow.forcedFailureCreatureTypes if effect.savingThrow is not None else None,
         targetCreatureTypes=effect.targetCreatureTypes,
         sourceHealing=effect.sourceHealing,
+        maxHitPointReduction=effect.maxHitPointReduction,
         conditionEffects=spell_damage_condition_effects(effect),
         restType=effect.restType,
     )
@@ -1975,6 +2016,7 @@ def build_spell_healing_roll_payload(
         modifierBreakdown=modifier_breakdown,
         total=sum(dice) + modifier,
         createdAt=created_at,
+        conditionRemovals=effect.conditionRemovals,
         restType=effect.restType,
     )
 
@@ -2186,6 +2228,8 @@ def build_ability_check_roll_payload(sheet: CharacterSheet, roller: str, ability
     ability_score = getattr(sheet.abilityScores, enum_key(ability))
     modifier_breakdown = [RollModifierBreakdown(source=enum_label(ability), value=ability_modifier(ability_score))]
     modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.ABILITY_CHECK))
+    modifier_breakdown.extend(exhaustion_d20_modifier_breakdown(sheet))
+    disadvantage_conditions = condition_ability_check_disadvantage_conditions(sheet)
     return build_d20_roll_payload(
         sheet=sheet,
         roller=roller,
@@ -2193,6 +2237,7 @@ def build_ability_check_roll_payload(sheet: CharacterSheet, roller: str, ability
         source_label=enum_label(ability),
         label=f"{enum_label(ability)} Check",
         modifier_breakdown=modifier_breakdown,
+        disadvantage_conditions=disadvantage_conditions,
     )
 
 
@@ -2208,9 +2253,14 @@ def build_saving_throw_roll_payload(sheet: CharacterSheet, roller: str, ability:
             modifier_breakdown.append(RollModifierBreakdown(source="Proficiency", value=sheet.proficiencyBonus))
     if ability == AbilityType.DEXTERITY and ConditionType.SLOWED in sheet.conditions:
         modifier_breakdown.append(RollModifierBreakdown(source=enum_label(ConditionType.SLOWED), value=-2, description="Subtract 2 from Dexterity saving throws."))
+    modifier_breakdown.extend(cover_saving_throw_bonus_breakdown(sheet.conditions, ability))
     modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.SAVING_THROW))
+    modifier_breakdown.extend(exhaustion_d20_modifier_breakdown(sheet))
     advantage_conditions = condition_saving_throw_advantage_conditions(sheet, ability)
     disadvantage_conditions = condition_saving_throw_disadvantage_conditions(sheet, ability)
+    forced_failure_conditions = condition_saving_throw_forced_failure_conditions(sheet, ability)
+    if forced_failure_conditions:
+        modifier_breakdown.append(RollModifierBreakdown(source=text_list_label([enum_label(condition) for condition in forced_failure_conditions]), value=0, description=f"Automatically fails {enum_label(ability)} saving throws."))
     return build_d20_roll_payload(
         sheet=sheet,
         roller=roller,
@@ -2287,11 +2337,68 @@ def active_roll_modifier_breakdown(sheet: CharacterSheet, target: RollModifierEf
     return modifiers
 
 
+def exhaustion_d20_modifier_breakdown(sheet: CharacterSheet) -> list[RollModifierBreakdown]:
+    if sheet.exhaustionLevel <= 0:
+        return []
+    penalty = -2 * min(sheet.exhaustionLevel, 6)
+    return [
+        RollModifierBreakdown(
+            source=enum_label(ConditionType.EXHAUSTION),
+            value=penalty,
+            description=f"Subtract {abs(penalty)} from D20 Tests.",
+        )
+    ]
+
+
 CONDITION_SAVING_THROW_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
     ConditionType.HASTED: {AbilityType.DEXTERITY},
 }
 
-CONDITION_SAVING_THROW_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {}
+CONDITION_SAVING_THROW_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.RESTRAINED: {AbilityType.DEXTERITY},
+}
+
+CONDITION_SAVING_THROW_FORCED_FAILURES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.PARALYZED: {AbilityType.STRENGTH, AbilityType.DEXTERITY},
+    ConditionType.PETRIFIED: {AbilityType.STRENGTH, AbilityType.DEXTERITY},
+    ConditionType.STUNNED: {AbilityType.STRENGTH, AbilityType.DEXTERITY},
+    ConditionType.UNCONSCIOUS: {AbilityType.STRENGTH, AbilityType.DEXTERITY},
+}
+
+CONDITION_OUTGOING_ATTACK_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.HEAVILY_OBSCURED: None,
+    ConditionType.INVISIBLE: None,
+}
+
+CONDITION_OUTGOING_ATTACK_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.BLINDED: None,
+    ConditionType.FRIGHTENED: None,
+    ConditionType.PHANTASMAL_KILLER: None,
+    ConditionType.POISONED: None,
+    ConditionType.PRONE: None,
+    ConditionType.RESTRAINED: None,
+}
+
+CONDITION_INCOMING_ATTACK_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.BLINDED: None,
+    ConditionType.FAERIE_FIRE: None,
+    ConditionType.PARALYZED: None,
+    ConditionType.PETRIFIED: None,
+    ConditionType.RESTRAINED: None,
+    ConditionType.STUNNED: None,
+    ConditionType.UNCONSCIOUS: None,
+}
+
+CONDITION_INCOMING_ATTACK_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.HEAVILY_OBSCURED: None,
+    ConditionType.INVISIBLE: None,
+}
+
+CONDITION_ABILITY_CHECK_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.FRIGHTENED: None,
+    ConditionType.PHANTASMAL_KILLER: None,
+    ConditionType.POISONED: None,
+}
 
 
 def condition_saving_throw_advantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
@@ -2300,6 +2407,37 @@ def condition_saving_throw_advantage_conditions(sheet: CharacterSheet, ability: 
 
 def condition_saving_throw_disadvantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
     return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_SAVING_THROW_DISADVANTAGES)
+
+
+def condition_saving_throw_forced_failure_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
+    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_SAVING_THROW_FORCED_FAILURES)
+
+
+def condition_outgoing_attack_advantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
+    return condition_roll_conditions(sheet.conditions, CONDITION_OUTGOING_ATTACK_ADVANTAGES)
+
+
+def condition_outgoing_attack_disadvantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
+    return condition_roll_conditions(sheet.conditions, CONDITION_OUTGOING_ATTACK_DISADVANTAGES)
+
+
+def condition_incoming_attack_advantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
+    return condition_roll_conditions(sheet.conditions, CONDITION_INCOMING_ATTACK_ADVANTAGES)
+
+
+def condition_incoming_attack_disadvantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
+    return condition_roll_conditions(sheet.conditions, CONDITION_INCOMING_ATTACK_DISADVANTAGES)
+
+
+def condition_ability_check_disadvantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
+    return condition_roll_conditions(sheet.conditions, CONDITION_ABILITY_CHECK_DISADVANTAGES)
+
+
+def condition_roll_conditions(
+    conditions: list[ConditionType],
+    rule_map: dict[ConditionType, set[AbilityType] | None],
+) -> list[ConditionType]:
+    return [condition for condition in conditions if condition in rule_map]
 
 
 def condition_saving_throw_roll_conditions(
@@ -2318,15 +2456,37 @@ def condition_saving_throw_roll_conditions(
 
 
 CONDITION_ARMOR_CLASS_BONUSES: dict[ConditionType, int] = {
+    ConditionType.HALF_COVER: 2,
     ConditionType.HASTED: 2,
     ConditionType.SHIELDED: 5,
     ConditionType.SHIELD_OF_FAITH: 2,
     ConditionType.SLOWED: -2,
+    ConditionType.THREE_QUARTERS_COVER: 5,
 }
 
 
 def condition_armor_class_bonus(conditions: list[ConditionType]) -> int:
     return sum(CONDITION_ARMOR_CLASS_BONUSES.get(condition, 0) for condition in conditions)
+
+
+COVER_DEXTERITY_SAVE_BONUSES: dict[ConditionType, int] = {
+    ConditionType.HALF_COVER: 2,
+    ConditionType.THREE_QUARTERS_COVER: 5,
+}
+
+
+def cover_saving_throw_bonus_breakdown(conditions: list[ConditionType], ability: AbilityType) -> list[RollModifierBreakdown]:
+    if ability != AbilityType.DEXTERITY:
+        return []
+    return [
+        RollModifierBreakdown(
+            source=enum_label(condition),
+            value=bonus,
+            description=f"Add {bonus} to Dexterity saving throws from cover.",
+        )
+        for condition, bonus in COVER_DEXTERITY_SAVE_BONUSES.items()
+        if condition in conditions
+    ]
 
 
 def condition_adjusted_armor_class(sheet: CharacterSheet) -> int:
@@ -2339,6 +2499,10 @@ def condition_adjusted_armor_class(sheet: CharacterSheet) -> int:
 
 
 def condition_adjusted_speed(speed: int, conditions: list[ConditionType]) -> int:
+    return condition_adjusted_speed_for_exhaustion(speed, conditions, 1 if ConditionType.EXHAUSTION in conditions else 0)
+
+
+def condition_adjusted_speed_for_exhaustion(speed: int, conditions: list[ConditionType], exhaustion_level: int) -> int:
     adjusted = speed
     if ConditionType.HASTED in conditions:
         adjusted *= 2
@@ -2346,6 +2510,21 @@ def condition_adjusted_speed(speed: int, conditions: list[ConditionType]) -> int
         adjusted = max(0, adjusted // 2)
     if ConditionType.LONGSTRIDER in conditions:
         adjusted += 10
+    if exhaustion_level > 0:
+        adjusted = max(0, adjusted - 5 * min(exhaustion_level, 6))
+    if any(
+        condition in conditions
+        for condition in (
+            ConditionType.GRAPPLED,
+            ConditionType.DEAD,
+            ConditionType.PARALYZED,
+            ConditionType.PETRIFIED,
+            ConditionType.RESTRAINED,
+            ConditionType.STUNNED,
+            ConditionType.UNCONSCIOUS,
+        )
+    ):
+        adjusted = 0
     return adjusted
 
 
@@ -2355,6 +2534,20 @@ def worn_armor(equipment: list[EquipmentItem]) -> EquipmentItem | None:
 
 def equipped_shield_bonus(equipment: list[EquipmentItem]) -> int:
     return sum(item.armorClassBonus for item in equipment if item.itemType == EquipmentType.SHIELD and item.slot in {EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND})
+
+
+def condition_d20_roll(
+    advantage_conditions: list[ConditionType] | None = None,
+    disadvantage_conditions: list[ConditionType] | None = None,
+) -> tuple[list[int], int, str]:
+    has_advantage = bool(advantage_conditions) and not disadvantage_conditions
+    has_disadvantage = bool(disadvantage_conditions) and not advantage_conditions
+    dice = [random.randint(1, 20)]
+    if has_advantage or has_disadvantage:
+        dice.append(random.randint(1, 20))
+    die_roll = min(dice) if has_disadvantage else max(dice)
+    die = "2d20kl1" if has_disadvantage else "2d20kh1" if has_advantage else enum_key(DiceType.D20)
+    return dice, die_roll, die
 
 
 def build_d20_roll_payload(
@@ -2369,12 +2562,7 @@ def build_d20_roll_payload(
     disadvantage_conditions: list[ConditionType] | None = None,
 ) -> RollPayload:
     modifier = sum(part.value for part in modifier_breakdown)
-    dice = [random.randint(1, 20)]
-    has_advantage = bool(advantage_conditions) and not disadvantage_conditions
-    has_disadvantage = bool(disadvantage_conditions) and not advantage_conditions
-    if has_advantage or has_disadvantage:
-        dice.append(random.randint(1, 20))
-    die_roll = min(dice) if has_disadvantage else max(dice)
+    dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions)
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -2388,7 +2576,7 @@ def build_d20_roll_payload(
         iconUrl=None,
         dice=dice,
         diceType=DiceType.D20,
-        die="2d20kl1" if has_disadvantage else "2d20kh1" if has_advantage else enum_key(DiceType.D20),
+        die=die,
         modifier=modifier,
         modifierBreakdown=modifier_breakdown,
         advantageConditions=advantage_conditions or None,
@@ -2482,6 +2670,7 @@ def roll_action_modifier_label(action: RollAction) -> str:
 
 
 def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> RollResolution:
+    roll = attack_roll_with_target_condition_modifiers(roll, target)
     target_conditions = list(target.conditions)
     damage_blocked_by_creature_type = False
     if roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
@@ -2533,6 +2722,33 @@ def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> Ro
         outcome=outcome,
         createdAt=time_ns(),
     )
+
+
+def attack_roll_with_target_condition_modifiers(roll: RollPayload, target: CharacterSheet) -> RollPayload:
+    if roll.resolution != RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
+        return roll
+    advantage_conditions = unique_conditions([*(roll.advantageConditions or []), *condition_incoming_attack_advantage_conditions(target)])
+    disadvantage_conditions = unique_conditions([*(roll.disadvantageConditions or []), *condition_incoming_attack_disadvantage_conditions(target)])
+    if advantage_conditions == (roll.advantageConditions or []) and disadvantage_conditions == (roll.disadvantageConditions or []):
+        return roll
+    dice = list(roll.dice[:1] or [random.randint(1, 20)])
+    has_advantage = bool(advantage_conditions) and not disadvantage_conditions
+    has_disadvantage = bool(disadvantage_conditions) and not advantage_conditions
+    if has_advantage or has_disadvantage:
+        dice.append(random.randint(1, 20))
+    die_roll = min(dice) if has_disadvantage else max(dice)
+    return replace(
+        roll,
+        dice=dice,
+        die="2d20kl1" if has_disadvantage else "2d20kh1" if has_advantage else enum_key(DiceType.D20),
+        total=die_roll + roll.modifier,
+        advantageConditions=advantage_conditions or None,
+        disadvantageConditions=disadvantage_conditions or None,
+    )
+
+
+def unique_conditions(conditions: list[ConditionType]) -> list[ConditionType]:
+    return list(dict.fromkeys(conditions))
 
 
 def resolved_damage_total_and_outcome(roll: RollPayload, target: CharacterSheet) -> tuple[int, str]:
@@ -2606,6 +2822,11 @@ def effective_damage_resistances(target: CharacterSheet) -> set[DamageType]:
 def effective_damage_resistance_list(target: CharacterSheet) -> list[DamageType]:
     resistances = set(target.damageResistances)
     ordered_resistances = list(target.damageResistances)
+    if ConditionType.PETRIFIED in target.conditions:
+        for damage_type in DamageType:
+            resistances.add(damage_type)
+            if damage_type not in ordered_resistances:
+                ordered_resistances.append(damage_type)
     if ConditionType.PROTECTION_FROM_POISON in target.conditions:
         resistances.add(DamageType.POISON)
         if DamageType.POISON not in ordered_resistances:
@@ -2682,6 +2903,8 @@ def apply_condition_outcomes(current_conditions: list[ConditionType], outcomes: 
             next_conditions.append(condition)
     if ConditionType.PROTECTION_FROM_POISON in next_conditions and ConditionType.POISONED in next_conditions:
         next_conditions.remove(ConditionType.POISONED)
+    if ConditionType.DEAD in next_conditions:
+        next_conditions = [condition for condition in next_conditions if condition != ConditionType.UNCONSCIOUS]
     return next_conditions
 
 
@@ -3232,6 +3455,8 @@ def typed_json_registry() -> dict[str, type[Any]]:
             SpellId,
             SpellLineArea,
             SpellLinkedHealingAmount,
+            SpellMaxHitPointReduction,
+            SpellMaxHitPointReductionMode,
             SpellNoArea,
             SpellRadiusArea,
             SpellRangeType,

@@ -182,19 +182,6 @@
                     }
                   ]
                 },
-                "conditions": {
-                  "$type": "list",
-                  "items": [
-                    {
-                      "$type": "ConditionType",
-                      "value": "POISONED"
-                    },
-                    {
-                      "$type": "ConditionType",
-                      "value": "SLOWED"
-                    }
-                  ]
-                },
                 "attacks": {
                   "$type": "list",
                   "items": [
@@ -573,6 +560,10 @@
                     {
                       "$type": "ConditionType",
                       "value": "POISONED"
+                    },
+                    {
+                      "$type": "ConditionType",
+                      "value": "DEAD"
                     }
                   ]
                 }
@@ -908,10 +899,6 @@
                     {
                       "$type": "ConditionType",
                       "value": "PROTECTION_FROM_POISON"
-                    },
-                    {
-                      "$type": "ConditionType",
-                      "value": "BLESSED"
                     }
                   ]
                 },
@@ -6296,6 +6283,210 @@
                         "status": {
                           "$type": "SpellStatus",
                           "fields": {
+                            "reset": {
+                              "$type": "RestType",
+                              "value": "NONE"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "HARM"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "HARM"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 6
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "NECROMANCY"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 60
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "INSTANTANEOUS"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Cleric. Casting time: Action. Range: 60 ft. Components: Verbal, Somatic. Duration: Instantaneous."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "effects": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellEffect",
+                              "fields": {
+                                "kind": {
+                                  "$type": "SpellEffectKind",
+                                  "value": "DAMAGE"
+                                },
+                                "trigger": {
+                                  "$type": "SpellEffectTrigger",
+                                  "value": "ON_CAST"
+                                },
+                                "target": {
+                                  "$type": "SpellEffectTarget",
+                                  "value": "TARGET"
+                                },
+                                "attack": {
+                                  "$type": "SpellAttackType",
+                                  "value": "NONE"
+                                },
+                                "savingThrow": {
+                                  "$type": "SpellSavingThrow",
+                                  "fields": {
+                                    "ability": {
+                                      "$type": "AbilityType",
+                                      "value": "CONSTITUTION"
+                                    },
+                                    "outcome": {
+                                      "$type": "SpellSaveOutcome",
+                                      "value": "HALF_DAMAGE"
+                                    }
+                                  }
+                                },
+                                "damage": {
+                                  "$type": "SpellDamageEffect",
+                                  "fields": {
+                                    "dice": {
+                                      "$type": "SpellEffectDice",
+                                      "fields": {
+                                        "diceCount": {
+                                          "$type": "int",
+                                          "value": 14
+                                        },
+                                        "diceType": {
+                                          "$type": "DiceType",
+                                          "value": "D6"
+                                        },
+                                        "staticBonus": {
+                                          "$type": "int",
+                                          "value": 0
+                                        },
+                                        "bonusSpellcastingAbility": {
+                                          "$type": "bool",
+                                          "value": false
+                                        }
+                                      }
+                                    },
+                                    "damageType": {
+                                      "$type": "DamageType",
+                                      "value": "NECROTIC"
+                                    }
+                                  }
+                                },
+                                "maxHitPointReduction": {
+                                  "$type": "SpellMaxHitPointReduction",
+                                  "fields": {
+                                    "mode": {
+                                      "$type": "SpellMaxHitPointReductionMode",
+                                      "value": "DAMAGE_TAKEN"
+                                    },
+                                    "reset": {
+                                      "$type": "RestType",
+                                      "value": "LONG_REST"
+                                    }
+                                  }
+                                },
+                                "instances": {
+                                  "$type": "int",
+                                  "value": 1
+                                },
+                                "instanceLabel": {
+                                  "$type": "str",
+                                  "value": ""
+                                },
+                                "actionLabel": {
+                                  "$type": "str",
+                                  "value": ""
+                                },
+                                "description": {
+                                  "$type": "str",
+                                  "value": "On a failed save, the target's Hit Point maximum is reduced by the Necrotic damage it took until the target finishes a Long Rest."
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "status": {
+                          "$type": "SpellStatus",
+                          "fields": {
+                            "source": {
+                              "$type": "SpellSource",
+                              "value": "WIZARD"
+                            },
+                            "castingAbility": {
+                              "$type": "AbilityType",
+                              "value": "INTELLIGENCE"
+                            },
                             "reset": {
                               "$type": "RestType",
                               "value": "NONE"

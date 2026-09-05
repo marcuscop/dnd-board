@@ -30,7 +30,8 @@ export enum SheetSectionType {
   FEATURES = "features",
   ABILITIES = "abilities",
   ABILITY_SCORES = "abilityScores",
-  SPELLS = "spells"
+  SPELLS = "spells",
+  DICE_ROLLER = "diceRoller"
 }
 
 export type Token = {
@@ -90,14 +91,18 @@ export type ConditionType =
   | "commandFlee"
   | "commandGrovel"
   | "commandHalt"
+  | "dead"
   | "deafened"
   | "exhaustion"
   | "faerieFire"
+  | "fullCover"
   | "flying"
   | "frightened"
   | "grappled"
   | "guidance"
+  | "halfCover"
   | "hasted"
+  | "heavilyObscured"
   | "incapacitated"
   | "invisible"
   | "longstrider"
@@ -127,12 +132,14 @@ export type ConditionType =
   | "slowed"
   | "stunned"
   | "synapticStatic"
+  | "threeQuartersCover"
   | "unconscious";
 export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
 export type ConditionRemovalTrigger = "afterTakingDamage";
 export type RollModifierEffectOperation = "add" | "subtract";
 export type RollModifierEffectTarget = "abilityCheck" | "attackRoll" | "savingThrow" | "concentrationSave" | "armorClass";
+export type SpellMaxHitPointReductionMode = "damageTaken";
 export type ConditionEffect = {
   condition?: ConditionType;
   conditionLabel?: string;
@@ -282,6 +289,12 @@ export type SpellSourceHealingEffect = {
   amount: SpellLinkedHealingAmount;
   amountLabel: string;
 };
+export type SpellMaxHitPointReduction = {
+  mode: SpellMaxHitPointReductionMode;
+  modeLabel: string;
+  reset: RestType;
+  resetLabel: string;
+};
 export type SpellConditionEffect = {
   condition: ConditionType;
   conditionLabel: string;
@@ -311,6 +324,8 @@ export type SpellSavingThrow = {
   repeatLabel?: string;
   disadvantageCreatureTypes?: CreatureType[];
   disadvantageCreatureTypesLabel?: string[];
+  forcedFailureCreatureTypes?: CreatureType[];
+  forcedFailureCreatureTypesLabel?: string[];
 };
 export type SpellScaling = {
   scalingType: SpellScalingType;
@@ -337,8 +352,11 @@ export type SpellEffect = {
   damageComponents?: SpellDamageEffect[];
   healing?: SpellHealingEffect;
   sourceHealing?: SpellSourceHealingEffect;
+  maxHitPointReduction?: SpellMaxHitPointReduction;
   temporaryHitPoints?: SpellEffectDice;
   conditions?: SpellConditionEffect[];
+  conditionRemovals?: ConditionType[];
+  conditionRemovalsLabel?: string[];
   rollModifier?: SpellRollModifierEffect;
   scaling?: SpellScaling[];
   restType?: RestType;
@@ -664,6 +682,7 @@ export type CharacterSheet = {
   }[];
   proficiencies: string[];
   conditions: ConditionType[];
+  exhaustionLevel: number;
   activeConcentration?: {
     spellId: string;
     spellIdLabel: string;
@@ -747,10 +766,15 @@ export type RollPayload = {
   damageSaveOutcomeLabel?: string;
   damageSaveDisadvantageCreatureTypes?: CreatureType[];
   damageSaveDisadvantageCreatureTypesLabel?: string[];
+  damageSaveForcedFailureCreatureTypes?: CreatureType[];
+  damageSaveForcedFailureCreatureTypesLabel?: string[];
   targetCreatureTypes?: CreatureType[];
   targetCreatureTypesLabel?: string[];
   sourceHealing?: SpellSourceHealingEffect;
+  maxHitPointReduction?: SpellMaxHitPointReduction;
   conditionEffects?: ConditionEffect[];
+  conditionRemovals?: ConditionType[];
+  conditionRemovalsLabel?: string[];
   restType?: RestType;
   restTypeLabel?: string;
   resourceSpent?: {
