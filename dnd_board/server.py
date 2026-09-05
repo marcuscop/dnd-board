@@ -66,6 +66,7 @@ from dnd_board.character_sheet import (
     build_spell_condition_roll_payload,
     build_spell_damage_roll_payload,
     build_spell_healing_roll_payload,
+    build_spell_temporary_hit_points_roll_payload,
     spell_damage_effect_at,
     build_saving_throw_roll_payload,
     build_roll_action_payload,
@@ -239,6 +240,13 @@ class ActiveMaxHitPointReduction:
     reset: RestType
 
 
+@dataclass
+class ActiveMaxHitPointIncrease:
+    amount: int
+    sourceSpellId: SpellId
+    sourceName: str
+
+
 class DamageDefenseType(Enum):
     RESISTANCE = "resistance"
     VULNERABILITY = "vulnerability"
@@ -257,6 +265,7 @@ class Room:
     roll_history: list[RollLogEntry]
     hit_points: dict[str, int]
     temporary_hit_points: dict[str, int]
+    max_hit_point_increases: dict[str, list[ActiveMaxHitPointIncrease]]
     max_hit_point_reductions: dict[str, list[ActiveMaxHitPointReduction]]
     exhaustion_levels: dict[str, int]
     condition_overrides: dict[str, list[ConditionType]]
@@ -393,6 +402,7 @@ async def create_room_character(room_id: str, playerKey: str, payload: dict[str,
     room.resource_uses.pop(member.id, None)
     room.hit_points.pop(member.id, None)
     room.temporary_hit_points.pop(member.id, None)
+    room.max_hit_point_increases.pop(member.id, None)
     room.max_hit_point_reductions.pop(member.id, None)
     room.exhaustion_levels.pop(member.id, None)
     room.condition_overrides.pop(member.id, None)
@@ -428,6 +438,11 @@ async def roll_sheet_spell_damage(room_id: str, sheet_id: str, spell_id: str, pl
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/healing")
 async def roll_sheet_spell_healing(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None) -> dict[str, Any]:
     return await create_spell_healing_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel)
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/temporary-hit-points")
+async def roll_sheet_spell_temporary_hit_points(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None) -> dict[str, Any]:
+    return await create_spell_temporary_hit_points_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/effect")
@@ -526,6 +541,7 @@ async def update_sheet_level(room_id: str, sheet_id: str, playerKey: str, delta:
     room.resource_uses.pop(updated_member.id, None)
     room.hit_points.pop(updated_member.id, None)
     room.temporary_hit_points.pop(updated_member.id, None)
+    room.max_hit_point_increases.pop(updated_member.id, None)
     room.max_hit_point_reductions.pop(updated_member.id, None)
     room.exhaustion_levels.pop(updated_member.id, None)
     room.condition_overrides.pop(updated_member.id, None)
@@ -666,6 +682,7 @@ async def rest_room_sheets(room_id: str, playerKey: str, rest: str) -> dict[str,
             reset_sheet_resources(room, sheet, rest_type)
             reset_sheet_conditions(room, sheet, rest_type)
             reset_sheet_temporary_hit_points(room, sheet, rest_type)
+            reset_sheet_max_hit_point_increases(room, sheet, rest_type)
             reset_sheet_max_hit_point_reductions(room, sheet, rest_type)
             reset_sheet_exhaustion(room, sheet, rest_type)
     save_room_to_disk(room)
@@ -1179,6 +1196,7 @@ async def delete_token(room: Room, player: Player, token_id: str) -> None:
     remove_pending_rolls_for_token(room, token_id)
     room.hit_points.pop(token_id, None)
     room.temporary_hit_points.pop(token_id, None)
+    room.max_hit_point_increases.pop(token_id, None)
     room.max_hit_point_reductions.pop(token_id, None)
     room.exhaustion_levels.pop(token_id, None)
     room.condition_overrides.pop(token_id, None)
@@ -1221,6 +1239,7 @@ def get_or_create_room(room_id: str) -> Room:
         roll_history=[],
         hit_points={},
         temporary_hit_points={},
+        max_hit_point_increases=load_saved_max_hit_point_increases(room_id),
         max_hit_point_reductions=load_saved_max_hit_point_reductions(room_id),
         exhaustion_levels=load_saved_exhaustion_levels(room_id),
         condition_overrides={},
@@ -1377,6 +1396,7 @@ def token_to_sheet(
     )
     if room is not None:
         base_speed = sheet.speed
+        sheet.hp = hit_points_after_max_increases(sheet.hp, room.max_hit_point_increases.get(token.id, []), increase_current=token.id not in room.hit_points)
         sheet.hp.temporary = room.temporary_hit_points.get(token.id, sheet.hp.temporary)
         sheet.hp = hit_points_after_max_reductions(sheet.hp, room.max_hit_point_reductions.get(token.id, []))
         sheet.conditions = room.condition_overrides.get(token.id, sheet.conditions)
@@ -1444,6 +1464,19 @@ async def create_spell_healing_roll(room_id: str, sheet_id: str, player_key: str
     await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
     try:
         payload = build_spell_healing_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return await store_outgoing_roll(room, sheet, payload)
+
+
+async def create_spell_temporary_hit_points_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    spell = find_spell(sheet, spell_id)
+    validate_spell_slot_level(sheet, spell, spell_slot_level)
+    await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "Temporary Hit Points")
+    await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
+    try:
+        payload = build_spell_temporary_hit_points_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return await store_outgoing_roll(room, sheet, payload)
@@ -1639,6 +1672,7 @@ async def assert_roll_activation_allowed(
 
 
 INCAPACITATING_ROLL_CONDITIONS: tuple[ConditionType, ...] = (
+    ConditionType.BANISHED,
     ConditionType.DEAD,
     ConditionType.INCAPACITATED,
     ConditionType.PARALYZED,
@@ -1884,6 +1918,12 @@ def reset_sheet_max_hit_point_reductions(room: Room, sheet: CharacterSheet, rest
     room.max_hit_point_reductions.pop(sheet.tokenId, None)
 
 
+def reset_sheet_max_hit_point_increases(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
+    if rest_type != RestType.LONG_REST:
+        return
+    room.max_hit_point_increases.pop(sheet.tokenId, None)
+
+
 def reset_sheet_exhaustion(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
     if rest_type != RestType.LONG_REST:
         return
@@ -1906,6 +1946,15 @@ def hit_points_after_max_reductions(hp: HitPoints, reductions: list[ActiveMaxHit
         return hp
     effective_max = max(1, hp.max - reduction_total)
     return HitPoints(current=min(hp.current, effective_max), max=effective_max, temporary=hp.temporary)
+
+
+def hit_points_after_max_increases(hp: HitPoints, increases: list[ActiveMaxHitPointIncrease], *, increase_current: bool) -> HitPoints:
+    increase_total = sum(max(0, increase.amount) for increase in increases)
+    if increase_total <= 0:
+        return hp
+    effective_max = hp.max + increase_total
+    effective_current = hp.current + increase_total if increase_current else min(hp.current, effective_max)
+    return HitPoints(current=effective_current, max=effective_max, temporary=hp.temporary)
 
 
 def conditions_for_exhaustion_level(conditions: list[ConditionType], exhaustion_level: int) -> list[ConditionType]:
@@ -1980,6 +2029,9 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
     max_hp_reduction_outcome = apply_max_hit_point_reduction_effect(room, resolved_roll, target, resolution)
     if max_hp_reduction_outcome:
         resolution.outcome = f"{resolution.outcome}; {max_hp_reduction_outcome}"
+    max_hp_increase_outcome = apply_max_hit_point_increase_effect(room, resolved_roll, target, resolution)
+    if max_hp_increase_outcome:
+        resolution.outcome = f"{resolution.outcome}; {max_hp_increase_outcome}"
     if roll.resolution in {RollResolutionMode.APPLY_DAMAGE, RollResolutionMode.HEAL_SELF, RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS}:
         room.hit_points[target.tokenId] = resolution.targetHp.current
         room.temporary_hit_points[target.tokenId] = resolution.targetHp.temporary
@@ -2079,6 +2131,26 @@ def apply_max_hit_point_reduction_effect(room: Room, roll: RollPayload, target: 
     resolution.targetHp = hit_points_after_max_reductions(resolution.targetHp, room.max_hit_point_reductions.get(target.tokenId, []))
     save_room_to_disk(room)
     return f"{target.name}'s Hit Point maximum is reduced by {damage_taken} until {enum_label(roll.maxHitPointReduction.reset)}"
+
+
+def apply_max_hit_point_increase_effect(room: Room, roll: RollPayload, target: CharacterSheet, resolution: RollResolution) -> str | None:
+    if roll.maxHitPointIncrease is None or roll.resolution != RollResolutionMode.HEAL_SELF:
+        return None
+    increase = max(0, roll.total)
+    if increase <= 0:
+        return None
+    source_spell_id = enum_value(SpellId, roll.source.sourceId) or SpellId.AID
+    existing = room.max_hit_point_increases.setdefault(target.tokenId, [])
+    existing[:] = [active for active in existing if active.sourceSpellId != source_spell_id]
+    existing.append(ActiveMaxHitPointIncrease(amount=increase, sourceSpellId=source_spell_id, sourceName=roll.sourceLabel))
+    increased_max = target.hp.max + increase
+    resolution.targetHp = HitPoints(
+        current=min(target.hp.current + increase, increased_max),
+        max=increased_max,
+        temporary=resolution.targetHp.temporary,
+    )
+    save_room_to_disk(room)
+    return f"{target.name}'s Hit Point maximum increases by {increase}"
 
 
 def hit_point_damage_taken(before: HitPoints, after: HitPoints) -> int:
@@ -2239,11 +2311,13 @@ def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> li
         advantage_label = roll_advantage_log_label(response_roll)
         forced_failure_conditions = condition_saving_throw_forced_failure_conditions(target, saving_throw)
         forced_failure_label = f" due to {text_list_label([enum_label(condition) for condition in forced_failure_conditions])}" if forced_failure_conditions else ""
-        conditions = [effect.condition for effect in effects if effect.condition is not None]
+        resisted_conditions = [effect.condition for effect in effects if effect.condition is not None and condition_immunity_blocks(target, effect.condition)]
+        conditions = [effect.condition for effect in effects if effect.condition is not None and effect.condition not in resisted_conditions]
         if forced_failure_conditions or response_roll.total < save_dc:
-            if not conditions:
-                outcomes.append((f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label}{forced_failure_label}", None, response_roll))
-            else:
+            if resisted_conditions:
+                resisted_label = text_list_label([enum_label(condition) for condition in resisted_conditions])
+                outcomes.append((f"{target.name} resists {resisted_label}", None, response_roll))
+            if conditions:
                 condition_label = text_list_label([enum_label(condition) for condition in conditions])
                 outcomes.extend(
                     (
@@ -2253,6 +2327,8 @@ def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> li
                     )
                     for condition in conditions
                 )
+            if not conditions and not resisted_conditions:
+                outcomes.append((f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label}{forced_failure_label}", None, response_roll))
         else:
             effect_label = text_list_label([enum_label(condition) for condition in conditions]) if conditions else "effect"
             outcomes.append((f"{target.name} passes DC {save_dc} {enum_label(saving_throw)} save{advantage_label} against {effect_label}", None, response_roll))
@@ -2265,6 +2341,10 @@ def poison_protection_save_advantage(target: CharacterSheet, saving_throw: Abili
         and saving_throw == AbilityType.CONSTITUTION
         and any(effect.condition == ConditionType.POISONED for effect in effects)
     )
+
+
+def condition_immunity_blocks(target: CharacterSheet, condition: ConditionType) -> bool:
+    return condition == ConditionType.FRIGHTENED and ConditionType.HEROISM in target.conditions
 
 
 def text_list_label(values: list[str]) -> str:
@@ -2661,6 +2741,7 @@ def save_room_to_disk(room: Room) -> None:
         "boardId": room.board_id,
         "resources": room.resource_uses,
         "activeConcentrations": active_concentrations_to_dict(room.active_concentrations),
+        "maxHitPointIncreases": max_hit_point_increases_to_dict(room.max_hit_point_increases),
         "maxHitPointReductions": max_hit_point_reductions_to_dict(room.max_hit_point_reductions),
         "exhaustionLevels": room.exhaustion_levels,
     }
@@ -2691,6 +2772,7 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.roll_history = []
     room.hit_points = {}
     room.temporary_hit_points = {}
+    room.max_hit_point_increases = load_saved_max_hit_point_increases(room.id)
     room.max_hit_point_reductions = load_saved_max_hit_point_reductions(room.id)
     room.exhaustion_levels = load_saved_exhaustion_levels(room.id)
     room.condition_overrides = {}
@@ -2814,6 +2896,63 @@ def max_hit_point_reductions_to_dict(reductions: dict[str, list[ActiveMaxHitPoin
         for sheet_id, sheet_reductions in reductions.items()
         if sheet_reductions
     }
+
+
+def max_hit_point_increases_to_dict(increases: dict[str, list[ActiveMaxHitPointIncrease]]) -> dict[str, Any]:
+    return {
+        sheet_id: [
+            {
+                "amount": increase.amount,
+                "sourceSpellId": enum_key(increase.sourceSpellId),
+                "sourceName": increase.sourceName,
+            }
+            for increase in sheet_increases
+        ]
+        for sheet_id, sheet_increases in increases.items()
+        if sheet_increases
+    }
+
+
+def load_saved_max_hit_point_increases(room_id: str) -> dict[str, list[ActiveMaxHitPointIncrease]]:
+    path = existing_save_path(room_id)
+    if not path.exists():
+        return {}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    raw_increases = data.get("maxHitPointIncreases")
+    if not isinstance(raw_increases, dict):
+        return {}
+
+    increases: dict[str, list[ActiveMaxHitPointIncrease]] = {}
+    for raw_sheet_id, raw_sheet_increases in raw_increases.items():
+        if not isinstance(raw_sheet_increases, list):
+            continue
+        sheet_id = sanitize_asset_id(str(raw_sheet_id))
+        sheet_increases: list[ActiveMaxHitPointIncrease] = []
+        for raw_increase in raw_sheet_increases:
+            if not isinstance(raw_increase, dict):
+                continue
+            source_spell_id = enum_value(SpellId, raw_increase.get("sourceSpellId"))
+            try:
+                amount = max(0, int(raw_increase.get("amount")))
+            except (TypeError, ValueError):
+                continue
+            if not sheet_id or source_spell_id is None or amount <= 0:
+                continue
+            sheet_increases.append(
+                ActiveMaxHitPointIncrease(
+                    amount=amount,
+                    sourceSpellId=source_spell_id,
+                    sourceName=str(raw_increase.get("sourceName") or enum_label(source_spell_id)),
+                )
+            )
+        if sheet_increases:
+            increases[sheet_id] = sheet_increases
+    return increases
 
 
 def load_saved_max_hit_point_reductions(room_id: str) -> dict[str, list[ActiveMaxHitPointReduction]]:

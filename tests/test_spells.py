@@ -249,6 +249,7 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
     guiding_bolt = spell_entry(SpellId.GUIDING_BOLT)
     healing_word = spell_entry(SpellId.HEALING_WORD)
     hellish_rebuke = spell_entry(SpellId.HELLISH_REBUKE)
+    heroism = spell_entry(SpellId.HEROISM)
     hold_person = spell_entry(SpellId.HOLD_PERSON)
     ice_knife = spell_entry(SpellId.ICE_KNIFE)
     inflict_wounds = spell_entry(SpellId.INFLICT_WOUNDS)
@@ -425,6 +426,12 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
     assert hellish_rebuke.effects[0].savingThrow.ability == AbilityType.DEXTERITY
     assert hellish_rebuke.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
 
+    assert heroism is not None and heroism.effects is not None
+    assert heroism.effects[0].conditions is not None
+    assert heroism.effects[0].conditions[0].condition == ConditionType.HEROISM
+    assert heroism.effects[1].temporaryHitPoints is not None
+    assert heroism.effects[1].temporaryHitPoints.bonusSpellcastingAbility is True
+
     assert hold_person is not None and hold_person.effects is not None
     assert hold_person.effects[0].conditions is not None
     assert hold_person.effects[0].conditions[0].condition == ConditionType.PARALYZED
@@ -584,11 +591,15 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
 
 
 def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
+    aid = spell_entry(SpellId.AID)
     blindness_deafness = spell_entry(SpellId.BLINDNESS_DEAFNESS)
     cloud_of_daggers = spell_entry(SpellId.CLOUD_OF_DAGGERS)
+    dragon_breath = spell_entry(SpellId.DRAGON_S_BREATH)
+    flame_blade = spell_entry(SpellId.FLAME_BLADE)
     flaming_sphere = spell_entry(SpellId.FLAMING_SPHERE)
     heat_metal = spell_entry(SpellId.HEAT_METAL)
     invisibility = spell_entry(SpellId.INVISIBILITY)
+    lesser_restoration = spell_entry(SpellId.LESSER_RESTORATION)
     melfs_acid_arrow = spell_entry(SpellId.MELF_S_ACID_ARROW)
     mind_spike = spell_entry(SpellId.MIND_SPIKE)
     moonbeam = spell_entry(SpellId.MOONBEAM)
@@ -599,12 +610,22 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     shatter = spell_entry(SpellId.SHATTER)
     spike_growth = spell_entry(SpellId.SPIKE_GROWTH)
     spiritual_weapon = spell_entry(SpellId.SPIRITUAL_WEAPON)
+    suggestion = spell_entry(SpellId.SUGGESTION)
+    zone_of_truth = spell_entry(SpellId.ZONE_OF_TRUTH)
 
     assert blindness_deafness is not None and blindness_deafness.effects is not None
     assert [effect.conditions[0].condition for effect in blindness_deafness.effects if effect.conditions] == [ConditionType.BLINDED, ConditionType.DEAFENED]
     assert all(effect.savingThrow is not None and effect.savingThrow.ability == AbilityType.CONSTITUTION for effect in blindness_deafness.effects)
     assert all(effect.savingThrow is not None and effect.savingThrow.repeat == SpellEffectTrigger.END_OF_TURN for effect in blindness_deafness.effects)
     assert all(effect.scaling is not None and effect.scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL for effect in blindness_deafness.effects)
+
+    assert aid is not None and aid.effects is not None
+    assert aid.effects[0].healing is not None
+    assert aid.effects[0].healing.dice.staticBonus == 5
+    assert aid.effects[0].maxHitPointIncrease is not None
+    assert aid.effects[0].maxHitPointIncrease.staticBonus == 5
+    assert aid.effects[0].scaling is not None
+    assert aid.effects[0].scaling[0].additionalStaticBonus == 5
 
     assert cloud_of_daggers is not None and cloud_of_daggers.effects is not None
     assert cloud_of_daggers.effects[0].damage is not None
@@ -613,6 +634,29 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert cloud_of_daggers.effects[0].scaling is not None
     assert cloud_of_daggers.effects[0].scaling[0].additionalDice is not None
     assert cloud_of_daggers.effects[0].scaling[0].additionalDice.dice == "2d4"
+
+    assert dragon_breath is not None and dragon_breath.effects is not None
+    assert [effect.damage.damageType for effect in dragon_breath.effects if effect.damage is not None] == [
+        DamageType.ACID,
+        DamageType.COLD,
+        DamageType.FIRE,
+        DamageType.LIGHTNING,
+        DamageType.POISON,
+    ]
+    assert all(effect.target == SpellEffectTarget.AREA for effect in dragon_breath.effects)
+    assert all(effect.savingThrow is not None and effect.savingThrow.ability == AbilityType.DEXTERITY for effect in dragon_breath.effects)
+    assert all(effect.savingThrow is not None and effect.savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE for effect in dragon_breath.effects)
+    assert all(effect.scaling is not None and effect.scaling[0].additionalDice is not None and effect.scaling[0].additionalDice.dice == "1d6" for effect in dragon_breath.effects)
+
+    assert flame_blade is not None and flame_blade.effects is not None
+    assert flame_blade.effects[0].damage is not None
+    assert flame_blade.effects[0].damage.dice.dice == "3d6"
+    assert flame_blade.effects[0].damage.dice.bonusSpellcastingAbility is True
+    assert flame_blade.effects[0].damage.damageType == DamageType.FIRE
+    assert flame_blade.effects[0].attack == SpellAttackType.MELEE_SPELL_ATTACK
+    assert flame_blade.effects[0].scaling is not None
+    assert flame_blade.effects[0].scaling[0].additionalDice is not None
+    assert flame_blade.effects[0].scaling[0].additionalDice.dice == "1d6"
 
     assert flaming_sphere is not None and flaming_sphere.effects is not None
     assert flaming_sphere.effects[0].damage is not None
@@ -635,6 +679,14 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert invisibility.effects[0].conditions[0].condition == ConditionType.INVISIBLE
     assert invisibility.effects[0].scaling is not None
     assert invisibility.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
+
+    assert lesser_restoration is not None and lesser_restoration.effects is not None
+    assert [effect.conditionRemovals for effect in lesser_restoration.effects] == [
+        [ConditionType.BLINDED],
+        [ConditionType.DEAFENED],
+        [ConditionType.PARALYZED],
+        [ConditionType.POISONED],
+    ]
 
     assert melfs_acid_arrow is not None and melfs_acid_arrow.effects is not None
     assert [effect.actionLabel for effect in melfs_acid_arrow.effects] == ["Hit", "Later"]
@@ -719,6 +771,20 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert spiritual_weapon.effects[0].scaling is not None
     assert spiritual_weapon.effects[0].scaling[0].additionalDice is not None
     assert spiritual_weapon.effects[0].scaling[0].additionalDice.dice == "1d8"
+
+    assert suggestion is not None and suggestion.effects is not None
+    assert suggestion.effects[0].conditions is not None
+    assert suggestion.effects[0].conditions[0].condition == ConditionType.CHARMED
+    assert suggestion.effects[0].savingThrow is not None
+    assert suggestion.effects[0].savingThrow.ability == AbilityType.WISDOM
+
+    assert zone_of_truth is not None and zone_of_truth.effects is not None
+    assert zone_of_truth.targeting.area.shape == SpellAreaShape.RADIUS
+    assert zone_of_truth.targeting.area.radiusFeet == 15
+    assert zone_of_truth.effects[0].conditions is not None
+    assert zone_of_truth.effects[0].conditions[0].condition == ConditionType.ZONE_OF_TRUTH
+    assert zone_of_truth.effects[0].savingThrow is not None
+    assert zone_of_truth.effects[0].savingThrow.ability == AbilityType.CHARISMA
 
 
 def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
@@ -864,9 +930,11 @@ def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
 
 
 def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None:
+    banishment = spell_entry(SpellId.BANISHMENT)
     blight = spell_entry(SpellId.BLIGHT)
     blade_barrier = spell_entry(SpellId.BLADE_BARRIER)
     chain_lightning = spell_entry(SpellId.CHAIN_LIGHTNING)
+    charm_monster = spell_entry(SpellId.CHARM_MONSTER)
     circle_of_death = spell_entry(SpellId.CIRCLE_OF_DEATH)
     cone_of_cold = spell_entry(SpellId.CONE_OF_COLD)
     destructive_wave = spell_entry(SpellId.DESTRUCTIVE_WAVE)
@@ -894,6 +962,14 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     wall_of_fire = spell_entry(SpellId.WALL_OF_FIRE)
     wall_of_thorns = spell_entry(SpellId.WALL_OF_THORNS)
 
+    assert banishment is not None and banishment.effects is not None
+    assert banishment.effects[0].conditions is not None
+    assert [condition.condition for condition in banishment.effects[0].conditions] == [ConditionType.BANISHED, ConditionType.INCAPACITATED]
+    assert banishment.effects[0].savingThrow is not None
+    assert banishment.effects[0].savingThrow.ability == AbilityType.CHARISMA
+    assert banishment.effects[0].scaling is not None
+    assert banishment.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
+
     assert blight is not None and blight.effects is not None
     assert blight.effects[0].damage is not None
     assert blight.effects[0].damage.dice.dice == "8d8"
@@ -905,6 +981,14 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert blight.effects[0].scaling is not None
     assert blight.effects[0].scaling[0].additionalDice is not None
     assert blight.effects[0].scaling[0].additionalDice.dice == "1d8"
+
+    assert charm_monster is not None and charm_monster.effects is not None
+    assert charm_monster.effects[0].conditions is not None
+    assert charm_monster.effects[0].conditions[0].condition == ConditionType.CHARMED
+    assert charm_monster.effects[0].savingThrow is not None
+    assert charm_monster.effects[0].savingThrow.ability == AbilityType.WISDOM
+    assert charm_monster.effects[0].scaling is not None
+    assert charm_monster.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
 
     assert blade_barrier is not None and blade_barrier.effects is not None
     assert blade_barrier.targeting.area.shape == SpellAreaShape.LINE
@@ -1463,11 +1547,12 @@ def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics()
     assert thunderous_smite.effects[1].conditions[0].condition == ConditionType.PRONE
 
     assert wrathful_smite is not None and wrathful_smite.effects is not None
+    assert len(wrathful_smite.effects) == 1
     assert wrathful_smite.effects[0].damage is not None
     assert wrathful_smite.effects[0].damage.damageType == DamageType.NECROTIC
-    assert wrathful_smite.effects[1].conditions is not None
-    assert wrathful_smite.effects[1].conditions[0].condition == ConditionType.FRIGHTENED
-    assert wrathful_smite.effects[1].conditions[0].saveEnds is True
+    assert wrathful_smite.effects[0].conditions is not None
+    assert wrathful_smite.effects[0].conditions[0].condition == ConditionType.FRIGHTENED
+    assert wrathful_smite.effects[0].conditions[0].saveEnds is True
 
 
 def test_catalog_spell_effect_lists_are_cloned() -> None:

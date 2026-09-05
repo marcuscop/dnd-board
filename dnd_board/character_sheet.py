@@ -801,6 +801,7 @@ class SpellDuration:
 
 class ConditionType(Enum):
     BANE = auto()
+    BANISHED = auto()
     BLINDED = auto()
     BLESSED = auto()
     CHARMED = auto()
@@ -821,6 +822,7 @@ class ConditionType(Enum):
     HALF_COVER = auto()
     HASTED = auto()
     HEAVILY_OBSCURED = auto()
+    HEROISM = auto()
     INCAPACITATED = auto()
     INVISIBLE = auto()
     LONGSTRIDER = auto()
@@ -852,6 +854,7 @@ class ConditionType(Enum):
     SYNAPTIC_STATIC = auto()
     THREE_QUARTERS_COVER = auto()
     UNCONSCIOUS = auto()
+    ZONE_OF_TRUTH = auto()
 
 
 class ConditionApplicationMode(Enum):
@@ -1049,6 +1052,7 @@ class SpellMaxHitPointReduction:
 class SpellConditionEffect:
     condition: ConditionType
     duration: ConditionDuration = ConditionDuration.MANUAL
+    savingThrow: AbilityType | None = None
     saveEnds: bool = False
     removalTrigger: ConditionRemovalTrigger | None = None
     removalAdvantage: bool = False
@@ -1095,6 +1099,7 @@ class SpellEffect:
     damageComponents: list[SpellDamageEffect] | None = None
     healing: SpellHealingEffect | None = None
     sourceHealing: SpellSourceHealingEffect | None = None
+    maxHitPointIncrease: SpellEffectDice | None = None
     maxHitPointReduction: SpellMaxHitPointReduction | None = None
     temporaryHitPoints: SpellEffectDice | None = None
     conditions: list[SpellConditionEffect] | None = None
@@ -1576,6 +1581,7 @@ class RollPayload:
     damageSaveForcedFailureCreatureTypes: list[CreatureType] | None = None
     targetCreatureTypes: list[CreatureType] | None = None
     sourceHealing: SpellSourceHealingEffect | None = None
+    maxHitPointIncrease: SpellEffectDice | None = None
     maxHitPointReduction: SpellMaxHitPointReduction | None = None
     conditionEffects: list[ConditionEffect] | None = None
     conditionRemovals: list[ConditionType] | None = None
@@ -1928,7 +1934,7 @@ def build_spell_damage_roll_payload(
         targetCreatureTypes=effect.targetCreatureTypes,
         sourceHealing=effect.sourceHealing,
         maxHitPointReduction=effect.maxHitPointReduction,
-        conditionEffects=spell_damage_condition_effects(effect),
+        conditionEffects=spell_damage_condition_effects(effect, sheet, spell),
         restType=effect.restType,
     )
 
@@ -2017,7 +2023,59 @@ def build_spell_healing_roll_payload(
         total=sum(dice) + modifier,
         createdAt=created_at,
         conditionRemovals=effect.conditionRemovals,
+        maxHitPointIncrease=effect.maxHitPointIncrease,
         restType=effect.restType,
+    )
+
+
+def build_spell_temporary_hit_points_roll_payload(
+    sheet: CharacterSheet,
+    roller: str,
+    spell: SpellEntry,
+    effect_index: int = 0,
+    spell_slot_level: int | None = None,
+) -> RollPayload:
+    effect = spell_temporary_hit_points_effect_at(spell, effect_index)
+    if effect is None or effect.temporaryHitPoints is None:
+        raise ValueError("Spell temporary hit points effect not found")
+
+    dice_count = scaled_spell_effect_dice_count(effect.temporaryHitPoints.diceCount, effect.scaling, sheet, spell.level, spell_slot_level)
+    dice_type = effect.temporaryHitPoints.diceType
+    dice = [random.randint(1, dice_type.value) for _ in range(dice_count)]
+    modifier_breakdown = []
+    static_bonus = effect.temporaryHitPoints.staticBonus
+    if static_bonus:
+        modifier_breakdown.append(RollModifierBreakdown(source="Spell", value=static_bonus))
+    if effect.temporaryHitPoints.bonusAbility is not None:
+        ability_score = getattr(sheet.abilityScores, enum_key(effect.temporaryHitPoints.bonusAbility))
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(effect.temporaryHitPoints.bonusAbility), value=ability_modifier(ability_score)))
+    if effect.temporaryHitPoints.bonusSpellcastingAbility:
+        casting_ability = spell_casting_ability(sheet, spell)
+        ability_score = getattr(sheet.abilityScores, enum_key(casting_ability))
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(casting_ability), value=ability_modifier(ability_score)))
+    scaled_static_bonus = scaled_spell_effect_static_bonus(effect.temporaryHitPoints.staticBonus, effect.scaling, spell.level, spell_slot_level)
+    if scaled_static_bonus != effect.temporaryHitPoints.staticBonus:
+        modifier_breakdown.append(RollModifierBreakdown(source="Spell Slot", value=scaled_static_bonus - effect.temporaryHitPoints.staticBonus))
+    modifier = sum(part.value for part in modifier_breakdown)
+    created_at = time_ns()
+    return RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=roller,
+        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=f"temporary-hit-points-{effect_index}"),
+        sourceLabel=enum_label(spell.name),
+        resolution=RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS,
+        label=effect.actionLabel or "Temporary Hit Points",
+        iconUrl=None,
+        dice=dice,
+        diceType=dice_type,
+        die=dice_formula(dice_count, dice_type),
+        modifier=modifier,
+        modifierBreakdown=modifier_breakdown,
+        total=sum(dice) + modifier,
+        createdAt=created_at,
+        conditionEffects=spell_damage_condition_effects(effect, sheet, spell),
     )
 
 
@@ -2083,6 +2141,15 @@ def spell_healing_effect_at(spell: SpellEntry, effect_index: int) -> SpellEffect
     return healing_effects[effect_index]
 
 
+def spell_temporary_hit_points_effect_at(spell: SpellEntry, effect_index: int) -> SpellEffect | None:
+    if effect_index < 0 or spell.effects is None:
+        return None
+    temporary_hit_points_effects = [effect for effect in spell.effects if effect.kind == SpellEffectKind.TEMPORARY_HIT_POINTS and effect.temporaryHitPoints is not None]
+    if effect_index >= len(temporary_hit_points_effects):
+        return None
+    return temporary_hit_points_effects[effect_index]
+
+
 def spell_condition_effect_at(spell: SpellEntry, effect_index: int) -> SpellEffect | None:
     if effect_index < 0 or spell.effects is None:
         return None
@@ -2118,20 +2185,29 @@ def spell_condition_action_id(effect_index: int) -> str:
     return f"condition-{effect_index}"
 
 
-def spell_damage_condition_effects(effect: SpellEffect) -> list[ConditionEffect] | None:
+def spell_damage_condition_effects(effect: SpellEffect, sheet: CharacterSheet, spell: SpellEntry) -> list[ConditionEffect] | None:
     if not effect.conditions:
         return None
-    return [
-        ConditionEffect(
-            condition=condition.condition,
-            mode=ConditionApplicationMode.DIRECT,
-            duration=condition.duration,
-            removalTrigger=condition.removalTrigger,
-            removalAdvantage=condition.removalAdvantage,
-            description=effect.description,
+    condition_effects = []
+    for condition in effect.conditions:
+        saving_throw = condition.savingThrow or (effect.savingThrow.ability if effect.savingThrow is not None else None)
+        save_dc = spell_save_dc(sheet, spell) if saving_throw is not None else None
+        condition_effects.append(
+            ConditionEffect(
+                condition=condition.condition,
+                mode=ConditionApplicationMode.TARGET_SAVE if saving_throw is not None else ConditionApplicationMode.DIRECT,
+                savingThrow=saving_throw,
+                saveDcAbility=spell_casting_ability(sheet, spell) if saving_throw is not None else None,
+                saveDc=save_dc,
+                duration=condition.duration,
+                removalTrigger=condition.removalTrigger,
+                removalSavingThrow=saving_throw if condition.removalTrigger is not None else None,
+                removalSaveDc=save_dc if condition.removalTrigger is not None else None,
+                removalAdvantage=condition.removalAdvantage,
+                description=effect.description,
+            )
         )
-        for condition in effect.conditions
-    ]
+    return condition_effects
 
 
 def first_spell_damage_type(spell: SpellEntry) -> DamageType | None:
@@ -2793,6 +2869,9 @@ def resolve_condition_effects(roll: RollPayload, target: CharacterSheet) -> list
     outcomes: list[str] = []
     for effect in roll.conditionEffects or []:
         if effect.mode == ConditionApplicationMode.DIRECT and effect.condition is not None:
+            if condition_immunity_blocks(target, effect.condition):
+                outcomes.append(f"{target.name} resists {enum_label(effect.condition)}")
+                continue
             if effect.condition == ConditionType.POISONED and ConditionType.PROTECTION_FROM_POISON in target.conditions:
                 outcomes.append(f"{target.name} resists {enum_label(effect.condition)} due to {enum_label(ConditionType.PROTECTION_FROM_POISON)}")
                 continue
@@ -2800,6 +2879,10 @@ def resolve_condition_effects(roll: RollPayload, target: CharacterSheet) -> list
         elif effect.mode == ConditionApplicationMode.MANUAL and effect.condition is not None:
             outcomes.append(f"{enum_label(effect.condition)} requires manual resolution")
     return outcomes
+
+
+def condition_immunity_blocks(target: CharacterSheet, condition: ConditionType) -> bool:
+    return condition == ConditionType.FRIGHTENED and ConditionType.HEROISM in target.conditions
 
 
 def damage_after_defenses(damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0) -> int:

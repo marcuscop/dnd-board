@@ -83,6 +83,7 @@ export type Asset = {
 export type AbilityType = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
 export type ConditionType =
   | "bane"
+  | "banished"
   | "blinded"
   | "blessed"
   | "charmed"
@@ -103,6 +104,7 @@ export type ConditionType =
   | "halfCover"
   | "hasted"
   | "heavilyObscured"
+  | "heroism"
   | "incapacitated"
   | "invisible"
   | "longstrider"
@@ -133,7 +135,8 @@ export type ConditionType =
   | "stunned"
   | "synapticStatic"
   | "threeQuartersCover"
-  | "unconscious";
+  | "unconscious"
+  | "zoneOfTruth";
 export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
 export type ConditionRemovalTrigger = "afterTakingDamage";
@@ -300,6 +303,8 @@ export type SpellConditionEffect = {
   conditionLabel: string;
   duration: ConditionDuration;
   durationLabel: string;
+  savingThrow?: AbilityType;
+  savingThrowLabel?: string;
   saveEnds: boolean;
   removalTrigger?: ConditionRemovalTrigger;
   removalTriggerLabel?: string;
@@ -352,6 +357,7 @@ export type SpellEffect = {
   damageComponents?: SpellDamageEffect[];
   healing?: SpellHealingEffect;
   sourceHealing?: SpellSourceHealingEffect;
+  maxHitPointIncrease?: SpellEffectDice;
   maxHitPointReduction?: SpellMaxHitPointReduction;
   temporaryHitPoints?: SpellEffectDice;
   conditions?: SpellConditionEffect[];
@@ -771,6 +777,7 @@ export type RollPayload = {
   targetCreatureTypes?: CreatureType[];
   targetCreatureTypesLabel?: string[];
   sourceHealing?: SpellSourceHealingEffect;
+  maxHitPointIncrease?: SpellEffectDice;
   maxHitPointReduction?: SpellMaxHitPointReduction;
   conditionEffects?: ConditionEffect[];
   conditionRemovals?: ConditionType[];

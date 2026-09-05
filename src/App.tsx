@@ -31,6 +31,7 @@ const ABILITY_SCORE_OPTIONS: { value: AbilityType; label: string }[] = [
 ];
 const CONDITION_OPTIONS: ConditionType[] = [
   "bane",
+  "banished",
   "blinded",
   "blessed",
   "charmed",
@@ -50,6 +51,7 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "halfCover",
   "hasted",
   "heavilyObscured",
+  "heroism",
   "incapacitated",
   "invisible",
   "longstrider",
@@ -80,7 +82,8 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "stunned",
   "synapticStatic",
   "threeQuartersCover",
-  "unconscious"
+  "unconscious",
+  "zoneOfTruth"
 ];
 type DamageDefenseType = "resistance" | "vulnerability" | "immunity";
 const DAMAGE_TYPE_OPTIONS: DamageType[] = [
@@ -813,6 +816,22 @@ export function App() {
     [loadSheets, playerKey]
   );
 
+  const rollSpellTemporaryHitPoints = useCallback(
+    async (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => {
+      const slotQuery = spellSlotLevel === undefined ? "" : `&spellSlotLevel=${encodeURIComponent(spellSlotLevel)}`;
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/temporary-hit-points?playerKey=${encodeURIComponent(playerKey)}&effectIndex=${encodeURIComponent(effectIndex)}${slotQuery}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      await loadSheets();
+    },
+    [loadSheets, playerKey]
+  );
+
   const rollSpellEffect = useCallback(
     async (sheet: CharacterSheet, spellId: string, effectIndex: number) => {
       const response = await fetch(
@@ -1043,6 +1062,7 @@ export function App() {
         onRollSpellAttack={rollSpellAttack}
         onRollSpellDamage={rollSpellDamage}
         onRollSpellHealing={rollSpellHealing}
+        onRollSpellTemporaryHitPoints={rollSpellTemporaryHitPoints}
         onRollSpellEffect={rollSpellEffect}
         onRollAdHocDice={rollAdHocDice}
         onClearSheetRolls={clearSheetRolls}
@@ -1241,6 +1261,7 @@ type SheetViewProps = {
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
+  onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onRollAdHocDice: (dice: DiceType, count: number) => Promise<RollPayload | null>;
   onRestSheets: (rest: "short" | "long") => void;
@@ -1259,7 +1280,7 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollSpellHealing, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollSpellHealing, onRollSpellTemporaryHitPoints, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -1360,6 +1381,7 @@ function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreate
           onRollSpellAttack={onRollSpellAttack}
           onRollSpellDamage={onRollSpellDamage}
           onRollSpellHealing={onRollSpellHealing}
+          onRollSpellTemporaryHitPoints={onRollSpellTemporaryHitPoints}
           onRollSpellEffect={onRollSpellEffect}
           onUpdateProgressionChoice={onUpdateProgressionChoice}
           onUpdateCondition={onUpdateCondition}
@@ -3048,6 +3070,7 @@ function FullSheet({
   onRollSpellAttack,
   onRollSpellDamage,
   onRollSpellHealing,
+  onRollSpellTemporaryHitPoints,
   onRollSpellEffect,
   onUpdateProgressionChoice,
   onUpdateCondition,
@@ -3075,6 +3098,7 @@ function FullSheet({
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
+  onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateCondition: (sheet: CharacterSheet, condition: ConditionType, active: boolean) => void;
@@ -3209,6 +3233,7 @@ function FullSheet({
         onRollSpellAttack={onRollSpellAttack}
         onRollSpellDamage={onRollSpellDamage}
         onRollSpellHealing={onRollSpellHealing}
+        onRollSpellTemporaryHitPoints={onRollSpellTemporaryHitPoints}
         onRollSpellEffect={onRollSpellEffect}
         onUpdateResource={onUpdateResource}
       />
@@ -3331,6 +3356,7 @@ function SheetSpellList({
   onRollSpellAttack,
   onRollSpellDamage,
   onRollSpellHealing,
+  onRollSpellTemporaryHitPoints,
   onRollSpellEffect,
   onUpdateResource,
   pendingRolls,
@@ -3344,6 +3370,7 @@ function SheetSpellList({
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
+  onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   pendingRolls: RollPayload[];
@@ -3364,9 +3391,11 @@ function SheetSpellList({
           const matchingResolvedRolls = resolvedRolls.filter((entry) => rollMatchesSource(entry.roll, SheetSectionType.SPELLS, spell.id));
           const damageEffects = spellDamageEffects(spell);
           const healingEffects = spellHealingEffects(spell);
+          const temporaryHitPointEffects = spellTemporaryHitPointEffects(spell);
           const conditionEffects = spellConditionEffects(spell);
           const slotLevelsByDamageEffect = new Map(damageEffects.map((effectIndex) => [effectIndex, spellDamageSlotLevels(sheet, spell, effectIndex)]));
           const slotLevelsByHealingEffect = new Map(healingEffects.map((effectIndex) => [effectIndex, spellHealingSlotLevels(sheet, spell, effectIndex)]));
+          const slotLevelsByTemporaryHitPointEffect = new Map(temporaryHitPointEffects.map((effectIndex) => [effectIndex, spellTemporaryHitPointSlotLevels(sheet, spell, effectIndex)]));
           const tags = [
             spell.sourceLabel,
             spell.level === 0 ? "Cantrip" : `Level ${spell.level}`,
@@ -3395,9 +3424,9 @@ function SheetSpellList({
                 />
               )}
               {spell.description && <p>{spell.description}</p>}
-              {(spellHasAttackRoll(spell) || damageEffects.length > 0 || healingEffects.length > 0 || conditionEffects.length > 0 || matchingRolls.length > 0 || matchingResolvedRolls.length > 0) && (
+              {(spellHasAttackRoll(spell) || damageEffects.length > 0 || healingEffects.length > 0 || temporaryHitPointEffects.length > 0 || conditionEffects.length > 0 || matchingRolls.length > 0 || matchingResolvedRolls.length > 0) && (
                 <div className="inline-roll-area">
-                  {(spellHasAttackRoll(spell) || damageEffects.length > 0 || healingEffects.length > 0 || conditionEffects.length > 0) && (
+                  {(spellHasAttackRoll(spell) || damageEffects.length > 0 || healingEffects.length > 0 || temporaryHitPointEffects.length > 0 || conditionEffects.length > 0) && (
                     <div className="roll-action-buttons">
                       {spellHasAttackRoll(spell) && (
                         <button disabled={!canRoll} onClick={() => onRollSpellAttack(sheet, spell.id)}>
@@ -3465,6 +3494,32 @@ function SheetSpellList({
                             )}
                             <button disabled={!canRoll} onClick={() => onRollSpellHealing(sheet, spell.id, effectIndex, selectedSlotLevel)}>
                               {spellHealingButtonLabel(healingEffect)}
+                            </button>
+                          </span>
+                        );
+                      })}
+                      {temporaryHitPointEffects.map((effectIndex) => {
+                        const slotLevels = slotLevelsByTemporaryHitPointEffect.get(effectIndex) ?? [undefined];
+                        const slotControlKey = `${spell.source}:${spell.id}:temporary-hit-points:${effectIndex}`;
+                        const selectedSlotLevel = selectedSpellSlots[slotControlKey] ?? slotLevels[0];
+                        const temporaryHitPointEffect = spellTemporaryHitPointEffectAt(spell, effectIndex);
+                        return (
+                          <span className="spell-roll-control" key={`temporary-hit-points-${effectIndex}`}>
+                            {slotLevels.length > 1 && (
+                              <select
+                                disabled={!canRoll}
+                                value={selectedSlotLevel}
+                                onChange={(event) => setSelectedSpellSlots((current) => ({ ...current, [slotControlKey]: Number(event.target.value) }))}
+                              >
+                                {slotLevels.map((slotLevel) => (
+                                  <option key={slotLevel} value={slotLevel}>
+                                    L{slotLevel}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            <button disabled={!canRoll} onClick={() => onRollSpellTemporaryHitPoints(sheet, spell.id, effectIndex, selectedSlotLevel)}>
+                              {spellTemporaryHitPointButtonLabel(temporaryHitPointEffect)}
                             </button>
                           </span>
                         );
@@ -3996,6 +4051,20 @@ function spellHealingButtonLabel(effect: ReturnType<typeof spellHealingEffectAt>
   return effect?.actionLabel ? `Heal ${effect.actionLabel}` : "Heal";
 }
 
+function spellTemporaryHitPointEffects(spell: CharacterSheet["spells"][number]) {
+  return (spell.effects ?? [])
+    .filter((effect) => effect.kind === "temporaryHitPoints" && effect.temporaryHitPoints)
+    .map((_effect, index) => index);
+}
+
+function spellTemporaryHitPointEffectAt(spell: CharacterSheet["spells"][number], temporaryHitPointEffectIndex: number) {
+  return (spell.effects ?? []).filter((effect) => effect.kind === "temporaryHitPoints" && effect.temporaryHitPoints)[temporaryHitPointEffectIndex];
+}
+
+function spellTemporaryHitPointButtonLabel(effect: ReturnType<typeof spellTemporaryHitPointEffectAt>) {
+  return effect?.actionLabel ? `Temp HP ${effect.actionLabel}` : "Temp HP";
+}
+
 function spellConditionEffects(spell: CharacterSheet["spells"][number]) {
   return (spell.effects ?? [])
     .filter((effect) => effect.kind === "condition" && (effect.conditions ?? []).length > 0)
@@ -4021,6 +4090,14 @@ function spellDamageSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spe
 function spellHealingSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], healingEffectIndex: number) {
   const healingEffect = spellHealingEffectAt(spell, healingEffectIndex);
   if (!healingEffect?.scaling?.some((scaling) => scaling.scalingType === "spellSlotLevel")) {
+    return [undefined];
+  }
+  return spellSlotLevelsForSpell(sheet, spell.level);
+}
+
+function spellTemporaryHitPointSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], temporaryHitPointEffectIndex: number) {
+  const temporaryHitPointEffect = spellTemporaryHitPointEffectAt(spell, temporaryHitPointEffectIndex);
+  if (!temporaryHitPointEffect?.scaling?.some((scaling) => scaling.scalingType === "spellSlotLevel")) {
     return [undefined];
   }
   return spellSlotLevelsForSpell(sheet, spell.level);
@@ -4055,7 +4132,7 @@ function cardResolvedRolls(sheet: CharacterSheet, rollHistory: RollLogEntry[], c
     .filter(
       (entry) =>
         entry.resolution &&
-        entry.roll.resolution === RollResolutionMode.HEAL_SELF &&
+        (entry.roll.resolution === RollResolutionMode.HEAL_SELF || entry.roll.resolution === RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS) &&
         entry.roll.tokenId === sheet.tokenId &&
         entry.resolution.targetSheetId === sheet.id &&
         !clearedCardRollIds.has(entry.id)

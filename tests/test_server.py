@@ -2118,6 +2118,147 @@ def test_heal_removes_blinded_deafened_and_poisoned_from_resolved_target(tmp_pat
     assert target["conditions"] == ["prone"]
 
 
+def test_aid_increases_current_and_max_hit_points_until_long_rest(tmp_path, monkeypatch) -> None:
+    aid = spell_entry(SpellId.AID)
+    assert aid is not None
+    write_party_campaign(
+        tmp_path,
+        "aid-max-hp-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=18, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=3)], spells=[aid]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("aid-max-hp-test")
+    room.hit_points["player-2"] = 23
+
+    healing_response = client.post("/api/rooms/aid-max-hp-test/sheet/player-1/spells/aid/rolls/healing?playerKey=player-1")
+    healing_roll = healing_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/aid-max-hp-test/rolls/{healing_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target = client.get("/api/rooms/aid-max-hp-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    saved_data = json.loads((tmp_path / "aid-max-hp-test" / "saves" / "aid-max-hp-test.json").read_text(encoding="utf-8"))
+    rest_response = client.post("/api/rooms/aid-max-hp-test/sheet/rest?playerKey=dm&rest=long")
+    rested_target = next(sheet for sheet in rest_response.json()["sheets"] if sheet["id"] == "player-2")
+
+    assert healing_response.status_code == 200
+    assert healing_roll["total"] == 5
+    assert healing_roll["maxHitPointIncrease"]["staticBonus"] == 5
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetHp"] == {"current": 28, "max": 45, "temporary": 0}
+    assert "Target's Hit Point maximum increases by 5" in resolution.json()["resolution"]["outcome"]
+    assert target["hp"] == {"current": 28, "max": 45, "temporary": 0}
+    assert saved_data["maxHitPointIncreases"]["player-2"] == [{"amount": 5, "sourceSpellId": "aid", "sourceName": "Aid"}]
+    assert rest_response.status_code == 200
+    assert rested_target["hp"] == {"current": 28, "max": 40, "temporary": 0}
+
+
+def test_heroism_applies_temp_hp_and_blocks_frightened_condition(tmp_path, monkeypatch) -> None:
+    heroism = spell_entry(SpellId.HEROISM)
+    fear = spell_entry(SpellId.FEAR)
+    assert heroism is not None and fear is not None
+    write_party_campaign(
+        tmp_path,
+        "heroism-fear-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Bard",
+            maxHp=24,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=16),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.BARD, level=3)], spells=[heroism, fear]),
+        ),
+        PartyMemberConfig(
+            id="player-3",
+            name="Fear Caster",
+            maxHp=24,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=16),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.BARD, level=3)], spells=[fear]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=8, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    client = TestClient(server.app)
+
+    temp_response = client.post("/api/rooms/heroism-fear-test/sheet/player-1/spells/heroism/rolls/temporary-hit-points?playerKey=player-1")
+    temp_roll = temp_response.json()["roll"]
+    temp_resolution = client.post(f"/api/rooms/heroism-fear-test/rolls/{temp_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    heroism_response = client.post("/api/rooms/heroism-fear-test/sheet/player-1/spells/heroism/rolls/effect?playerKey=player-1")
+    heroism_roll = heroism_response.json()["roll"]
+    heroism_resolution = client.post(f"/api/rooms/heroism-fear-test/rolls/{heroism_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    fear_response = client.post("/api/rooms/heroism-fear-test/sheet/player-3/spells/fear/rolls/effect?playerKey=player-3")
+    fear_roll = fear_response.json()["roll"]
+    fear_resolution = client.post(f"/api/rooms/heroism-fear-test/rolls/{fear_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target = client.get("/api/rooms/heroism-fear-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert temp_response.status_code == 200
+    assert temp_roll["resolution"] == "applyTemporaryHitPoints"
+    assert temp_roll["total"] == 3
+    assert temp_resolution.json()["resolution"]["targetHp"] == {"current": 40, "max": 40, "temporary": 3}
+    assert heroism_response.status_code == 200
+    assert heroism_resolution.status_code == 200
+    assert fear_response.status_code == 200
+    assert fear_resolution.status_code == 200
+    assert "Target resists Frightened" in fear_resolution.json()["resolution"]["outcome"]
+    assert target["conditions"] == ["heroism"]
+
+
+def test_lesser_restoration_has_separate_condition_removal_rolls(tmp_path, monkeypatch) -> None:
+    lesser_restoration = spell_entry(SpellId.LESSER_RESTORATION)
+    assert lesser_restoration is not None
+    write_party_campaign(
+        tmp_path,
+        "lesser-restoration-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=18, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=3)], spells=[lesser_restoration]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)],
+                conditions=[ConditionType.BLINDED, ConditionType.DEAFENED, ConditionType.PARALYZED, ConditionType.POISONED, ConditionType.PRONE],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    healing_response = client.post("/api/rooms/lesser-restoration-test/sheet/player-1/spells/lesserRestoration/rolls/healing?playerKey=player-1&effectIndex=2")
+    healing_roll = healing_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/lesser-restoration-test/rolls/{healing_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target = client.get("/api/rooms/lesser-restoration-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert healing_response.status_code == 200
+    assert healing_roll["conditionRemovals"] == ["paralyzed"]
+    assert resolution.status_code == 200
+    assert "removes Paralyzed" in resolution.json()["resolution"]["outcome"]
+    assert target["conditions"] == ["blinded", "deafened", "poisoned", "prone"]
+
+
 def test_harm_failed_save_reduces_max_hit_points_until_long_rest(tmp_path, monkeypatch) -> None:
     harm = spell_entry(SpellId.HARM)
     assert harm is not None
