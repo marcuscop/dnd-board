@@ -4,6 +4,7 @@ import json
 import random
 from io import BytesIO
 from dataclasses import asdict, dataclass, replace
+from enum import Enum
 from pathlib import Path
 from time import time_ns
 from typing import Any
@@ -24,6 +25,7 @@ from dnd_board.character_sheet import (
     ConditionDuration,
     ConditionRemovalTrigger,
     ConditionType,
+    DamageType,
     DiceType,
     EquipmentSlot,
     HitPoints,
@@ -56,6 +58,7 @@ from dnd_board.character_sheet import (
     build_spell_attack_roll_payload,
     build_spell_condition_roll_payload,
     build_spell_damage_roll_payload,
+    build_spell_healing_roll_payload,
     build_saving_throw_roll_payload,
     build_roll_action_payload,
     ability_modifier,
@@ -63,6 +66,7 @@ from dnd_board.character_sheet import (
     enum_value,
     enum_key,
     enum_label,
+    effective_damage_resistance_list,
     party_manifest_from_dict,
     positive_int,
     resolve_roll_against_target as resolve_dnd_roll_against_target,
@@ -192,6 +196,12 @@ class ConditionRemovalSave:
     savingThrow: AbilityType
     saveDc: int
     advantage: bool = False
+
+
+class DamageDefenseType(Enum):
+    RESISTANCE = "resistance"
+    VULNERABILITY = "vulnerability"
+    IMMUNITY = "immunity"
 
 
 @dataclass
@@ -361,6 +371,11 @@ async def roll_sheet_spell_attack(room_id: str, sheet_id: str, spell_id: str, pl
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/damage")
 async def roll_sheet_spell_damage(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, instanceIndex: int | None = None) -> dict[str, Any]:
     return await create_spell_damage_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, instanceIndex)
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/healing")
+async def roll_sheet_spell_healing(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None) -> dict[str, Any]:
+    return await create_spell_healing_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/effect")
@@ -647,6 +662,38 @@ async def update_sheet_condition(room_id: str, sheet_id: str, condition: str, pl
         room.condition_durations.setdefault(updated_sheet_id, {}).pop(condition_type, None)
         room.condition_removals.setdefault(updated_sheet_id, {}).pop(condition_type, None)
     updated = get_visible_sheet(room, player, updated_sheet_id)
+    return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else None}
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/defenses/{defense}/{damage_type}")
+async def update_sheet_damage_defense(room_id: str, sheet_id: str, defense: str, damage_type: str, playerKey: str, active: bool) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    sanitized_sheet_id = sanitize_asset_id(sheet_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-sheet-defense", name="Sheet Defense", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    if not is_dm(player):
+        raise HTTPException(status_code=403, detail="Only the DM can update damage defenses")
+
+    sheet = get_visible_sheet(room, player, sanitized_sheet_id)
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+
+    defense_type = enum_value(DamageDefenseType, defense)
+    if defense_type is None:
+        raise HTTPException(status_code=400, detail="Invalid damage defense")
+    parsed_damage_type = enum_value(DamageType, damage_type)
+    if parsed_damage_type is None:
+        raise HTTPException(status_code=400, detail="Invalid damage type")
+
+    updated_member = update_party_member_config(
+        room.id,
+        sanitized_sheet_id,
+        lambda member: set_member_damage_defense(member, defense_type, parsed_damage_type, active),
+    )
+    if updated_member is None:
+        raise HTTPException(status_code=404, detail="Sheet is not backed by a party member")
+
+    updated = get_visible_sheet(room, player, updated_member.id)
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else None}
 
 
@@ -1214,6 +1261,7 @@ def token_to_sheet(
     if room is not None:
         sheet.hp.temporary = room.temporary_hit_points.get(token.id, sheet.hp.temporary)
         sheet.conditions = room.condition_overrides.get(token.id, sheet.conditions)
+        sheet.damageResistances = effective_damage_resistance_list(sheet)
     return sheet
 
 
@@ -1246,6 +1294,17 @@ async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str,
     validate_spell_slot_level(sheet, spell, spell_slot_level)
     try:
         payload = build_spell_damage_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level, instance_index)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return await store_roll(room, payload)
+
+
+async def create_spell_healing_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    spell = find_spell(sheet, spell_id)
+    validate_spell_slot_level(sheet, spell, spell_slot_level)
+    try:
+        payload = build_spell_healing_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return await store_roll(room, payload)
@@ -1406,7 +1465,7 @@ async def store_roll(room: Room, payload: RollPayload) -> dict[str, Any]:
 
 
 def roll_resolves_immediately(roll: RollPayload) -> bool:
-    return roll.resolution == RollResolutionMode.HEAL_SELF
+    return roll.resolution == RollResolutionMode.HEAL_SELF and roll.source.section != SheetSectionType.SPELLS
 
 
 def append_roll_log_entry(room: Room, entry: RollLogEntry) -> RollLogEntry:
@@ -1563,6 +1622,12 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
     if roll.resolution in {RollResolutionMode.APPLY_DAMAGE, RollResolutionMode.HEAL_SELF, RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS}:
         room.hit_points[target.tokenId] = resolution.targetHp.current
         room.temporary_hit_points[target.tokenId] = resolution.targetHp.temporary
+    if roll.restType is not None:
+        reset_sheet_resources(room, target, roll.restType)
+        reset_sheet_conditions(room, target, roll.restType)
+        reset_sheet_temporary_hit_points(room, target, roll.restType)
+        resolution.targetConditions = room.condition_overrides.get(target.tokenId, resolution.targetConditions)
+        resolution.outcome = f"{resolution.outcome}; {target.name} gains the benefits of a {enum_label(roll.restType)}"
     apply_resolved_conditions(room, target.id, resolution.targetConditions, roll)
     return resolution
 
@@ -1598,6 +1663,7 @@ def resolve_damage_save_for_roll(roll: RollPayload, target: CharacterSheet) -> t
         or roll.damageSaveOutcome == SpellSaveOutcome.NONE
     ):
         return None, None, roll
+    disadvantage = damage_save_disadvantage_applies(roll, target)
     response_roll = response_ability_roll(
         sheet=target,
         ability=roll.damageSavingThrow,
@@ -1605,23 +1671,29 @@ def resolve_damage_save_for_roll(roll: RollPayload, target: CharacterSheet) -> t
         label=f"{enum_label(roll.damageSavingThrow)} Save",
         source_label=roll.label,
         modifier=save_modifier(target, roll.damageSavingThrow),
+        disadvantage=disadvantage,
     )
+    disadvantage_label = " with Disadvantage" if disadvantage else ""
     if response_roll.total < roll.damageSaveDc:
-        return f"{target.name} fails DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save", response_roll, roll
+        return f"{target.name} fails DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{disadvantage_label}", response_roll, roll
     if roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE:
         reduced_total = roll.total // 2
         return (
-            f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save for half damage",
+            f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{disadvantage_label} for half damage",
             response_roll,
             replace(roll, total=reduced_total),
         )
     if roll.damageSaveOutcome == SpellSaveOutcome.NEGATES:
         return (
-            f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save and takes no damage",
+            f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{disadvantage_label} and takes no damage",
             response_roll,
             replace(roll, total=0, conditionEffects=None),
         )
-    return f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save", response_roll, roll
+    return f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{disadvantage_label}", response_roll, roll
+
+
+def damage_save_disadvantage_applies(roll: RollPayload, target: CharacterSheet) -> bool:
+    return bool(roll.damageSaveDisadvantageCreatureTypes and set(roll.damageSaveDisadvantageCreatureTypes).intersection(target.creatureTypes))
 
 
 def resolve_damage_triggered_condition_saves(
@@ -1677,12 +1749,13 @@ def damage_was_taken(before: HitPoints, after: HitPoints) -> bool:
 
 def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> list[tuple[str, ConditionType | None, RollPayload]]:
     outcomes: list[tuple[str, ConditionType | None, RollPayload]] = []
-    grouped_effects: dict[tuple[AbilityType, int], list[ConditionEffect]] = {}
+    grouped_effects: dict[tuple[AbilityType, int, bool], list[ConditionEffect]] = {}
     for effect in roll.conditionEffects or []:
         if effect.mode != ConditionApplicationMode.TARGET_SAVE or effect.savingThrow is None or effect.saveDc is None:
             continue
-        grouped_effects.setdefault((effect.savingThrow, effect.saveDc), []).append(effect)
-    for (saving_throw, save_dc), effects in grouped_effects.items():
+        advantage = poison_protection_save_advantage(target, effect.savingThrow, [effect])
+        grouped_effects.setdefault((effect.savingThrow, effect.saveDc, advantage), []).append(effect)
+    for (saving_throw, save_dc, advantage), effects in grouped_effects.items():
         response_roll = response_ability_roll(
             sheet=target,
             ability=saving_throw,
@@ -1690,16 +1763,18 @@ def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> li
             label=f"{enum_label(saving_throw)} Save",
             source_label=roll.label,
             modifier=save_modifier(target, saving_throw),
+            advantage=advantage,
         )
+        advantage_label = " with Advantage" if advantage else ""
         conditions = [effect.condition for effect in effects if effect.condition is not None]
         if response_roll.total < save_dc:
             if not conditions:
-                outcomes.append((f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save", None, response_roll))
+                outcomes.append((f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label}", None, response_roll))
             else:
                 condition_label = text_list_label([enum_label(condition) for condition in conditions])
                 outcomes.extend(
                     (
-                        f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save and gains {condition_label}",
+                        f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label} and gains {condition_label}",
                         condition,
                         response_roll,
                     )
@@ -1707,8 +1782,16 @@ def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> li
                 )
         else:
             effect_label = text_list_label([enum_label(condition) for condition in conditions]) if conditions else "effect"
-            outcomes.append((f"{target.name} passes DC {save_dc} {enum_label(saving_throw)} save against {effect_label}", None, response_roll))
+            outcomes.append((f"{target.name} passes DC {save_dc} {enum_label(saving_throw)} save{advantage_label} against {effect_label}", None, response_roll))
     return outcomes
+
+
+def poison_protection_save_advantage(target: CharacterSheet, saving_throw: AbilityType, effects: list[ConditionEffect]) -> bool:
+    return (
+        ConditionType.PROTECTION_FROM_POISON in target.conditions
+        and saving_throw == AbilityType.CONSTITUTION
+        and any(effect.condition == ConditionType.POISONED for effect in effects)
+    )
 
 
 def text_list_label(values: list[str]) -> str:
@@ -1801,11 +1884,12 @@ def response_ability_roll(
     source_label: str,
     modifier: int,
     advantage: bool = False,
+    disadvantage: bool = False,
 ) -> RollPayload:
     dice = [random.randint(1, 20)]
-    if advantage:
+    if advantage or disadvantage:
         dice.append(random.randint(1, 20))
-    die_roll = max(dice)
+    die_roll = min(dice) if disadvantage and not advantage else max(dice)
     created_at = time_ns()
     modifier_breakdown = [RollModifierBreakdown(source=label, value=modifier)] if modifier else []
     modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.SAVING_THROW))
@@ -1822,7 +1906,7 @@ def response_ability_roll(
         iconUrl=None,
         dice=dice,
         diceType=DiceType.D20,
-        die="2d20kh1" if advantage else enum_key(DiceType.D20),
+        die="2d20kl1" if disadvantage and not advantage else "2d20kh1" if advantage else enum_key(DiceType.D20),
         modifier=total_modifier,
         modifierBreakdown=modifier_breakdown,
         total=die_roll + total_modifier,
@@ -1855,7 +1939,7 @@ def apply_response_roll_conditions(
     for _outcome, condition in outcomes:
         if condition is not None and condition not in next_conditions:
             next_conditions.append(condition)
-    return next_conditions
+    return normalized_conditions(next_conditions)
 
 
 def apply_resolved_conditions(room: Room, sheet_id: str, conditions: list[ConditionType], roll: RollPayload) -> None:
@@ -2225,16 +2309,43 @@ def set_member_condition(member: PartyMemberConfig, condition: ConditionType, ac
 
 def updated_conditions(conditions: list[ConditionType], condition: ConditionType, active: bool) -> list[ConditionType]:
     if active and condition not in conditions:
-        return [*conditions, condition]
+        return normalized_conditions([*conditions, condition])
     if not active:
         return [candidate for candidate in conditions if candidate != condition]
-    return list(conditions)
+    return normalized_conditions(list(conditions))
+
+
+def normalized_conditions(conditions: list[ConditionType]) -> list[ConditionType]:
+    next_conditions = list(conditions)
+    if ConditionType.PROTECTION_FROM_POISON in next_conditions and ConditionType.POISONED in next_conditions:
+        next_conditions = [condition for condition in next_conditions if condition != ConditionType.POISONED]
+    return next_conditions
 
 
 def set_member_conditions(member: PartyMemberConfig, conditions: list[ConditionType]) -> None:
     if member.sheet is None:
         member.sheet = PartyMemberSheet()
     member.sheet.conditions = conditions or None
+
+
+def set_member_damage_defense(member: PartyMemberConfig, defense: DamageDefenseType, damage_type: DamageType, active: bool) -> None:
+    if member.sheet is None:
+        member.sheet = PartyMemberSheet()
+    if defense == DamageDefenseType.RESISTANCE:
+        member.sheet.damageResistances = updated_damage_defense_list(member.sheet.damageResistances or [], damage_type, active)
+        return
+    if defense == DamageDefenseType.VULNERABILITY:
+        member.sheet.damageVulnerabilities = updated_damage_defense_list(member.sheet.damageVulnerabilities or [], damage_type, active)
+        return
+    member.sheet.damageImmunities = updated_damage_defense_list(member.sheet.damageImmunities or [], damage_type, active)
+
+
+def updated_damage_defense_list(defenses: list[DamageType], damage_type: DamageType, active: bool) -> list[DamageType] | None:
+    if active and damage_type not in defenses:
+        return [*defenses, damage_type]
+    if not active:
+        return [defense for defense in defenses if defense != damage_type] or None
+    return list(defenses) or None
 
 
 def pending_choice_summary(sheet: CharacterSheet) -> str:

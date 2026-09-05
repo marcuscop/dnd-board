@@ -4,6 +4,7 @@ from dnd_board.character_sheet import (
     ConditionType,
     ConditionRemovalTrigger,
     DamageType,
+    CreatureType,
     DiceType,
     RollModifierEffectOperation,
     RollModifierEffectTarget,
@@ -20,6 +21,7 @@ from dnd_board.character_sheet import (
     SpellScalingType,
     SpellSchool,
     SpellSource,
+    RestType,
     TimeEconomy,
     typed_json_from_value,
     typed_json_to_value,
@@ -364,6 +366,7 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
     assert divine_smite.effects[1].damage.dice.dice == "1d8"
     assert divine_smite.effects[1].damage.damageType == DamageType.RADIANT
     assert divine_smite.effects[1].trigger == SpellEffectTrigger.SPECIAL
+    assert divine_smite.effects[1].targetCreatureTypes == [CreatureType.FIEND, CreatureType.UNDEAD]
     assert divine_smite.effects[1].actionLabel == "Fiend/Undead Bonus"
 
     assert eldritch_blast is not None and eldritch_blast.effects is not None
@@ -576,6 +579,137 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
     assert witch_bolt.effects[0].scaling[0].additionalDice.dice == "1d12"
     assert web.effects[1].damage is not None
     assert web.effects[1].damage.dice.dice == "2d4"
+
+
+def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
+    blindness_deafness = spell_entry(SpellId.BLINDNESS_DEAFNESS)
+    cloud_of_daggers = spell_entry(SpellId.CLOUD_OF_DAGGERS)
+    flaming_sphere = spell_entry(SpellId.FLAMING_SPHERE)
+    heat_metal = spell_entry(SpellId.HEAT_METAL)
+    melfs_acid_arrow = spell_entry(SpellId.MELF_S_ACID_ARROW)
+    mind_spike = spell_entry(SpellId.MIND_SPIKE)
+    moonbeam = spell_entry(SpellId.MOONBEAM)
+    prayer_of_healing = spell_entry(SpellId.PRAYER_OF_HEALING)
+    protection_from_poison = spell_entry(SpellId.PROTECTION_FROM_POISON)
+    scorching_ray = spell_entry(SpellId.SCORCHING_RAY)
+    searing_orb = spell_entry(SpellId.SEARING_ORB)
+    shatter = spell_entry(SpellId.SHATTER)
+    spike_growth = spell_entry(SpellId.SPIKE_GROWTH)
+    spiritual_weapon = spell_entry(SpellId.SPIRITUAL_WEAPON)
+
+    assert blindness_deafness is not None and blindness_deafness.effects is not None
+    assert [effect.conditions[0].condition for effect in blindness_deafness.effects if effect.conditions] == [ConditionType.BLINDED, ConditionType.DEAFENED]
+    assert all(effect.savingThrow is not None and effect.savingThrow.ability == AbilityType.CONSTITUTION for effect in blindness_deafness.effects)
+    assert all(effect.savingThrow is not None and effect.savingThrow.repeat == SpellEffectTrigger.END_OF_TURN for effect in blindness_deafness.effects)
+    assert all(effect.scaling is not None and effect.scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL for effect in blindness_deafness.effects)
+
+    assert cloud_of_daggers is not None and cloud_of_daggers.effects is not None
+    assert cloud_of_daggers.effects[0].damage is not None
+    assert cloud_of_daggers.effects[0].damage.dice.dice == "4d4"
+    assert cloud_of_daggers.effects[0].damage.damageType == DamageType.SLASHING
+    assert cloud_of_daggers.effects[0].scaling is not None
+    assert cloud_of_daggers.effects[0].scaling[0].additionalDice is not None
+    assert cloud_of_daggers.effects[0].scaling[0].additionalDice.dice == "2d4"
+
+    assert flaming_sphere is not None and flaming_sphere.effects is not None
+    assert flaming_sphere.effects[0].damage is not None
+    assert flaming_sphere.effects[0].damage.dice.dice == "2d6"
+    assert flaming_sphere.effects[0].damage.damageType == DamageType.FIRE
+    assert flaming_sphere.effects[0].savingThrow is not None
+    assert flaming_sphere.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert flaming_sphere.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert heat_metal is not None and heat_metal.effects is not None
+    assert heat_metal.effects[0].damage is not None
+    assert heat_metal.effects[0].damage.dice.dice == "2d8"
+    assert heat_metal.effects[0].damage.damageType == DamageType.FIRE
+    assert heat_metal.effects[0].scaling is not None
+    assert heat_metal.effects[0].scaling[0].additionalDice is not None
+    assert heat_metal.effects[0].scaling[0].additionalDice.dice == "1d8"
+
+    assert melfs_acid_arrow is not None and melfs_acid_arrow.effects is not None
+    assert [effect.actionLabel for effect in melfs_acid_arrow.effects] == ["Hit", "Later"]
+    assert melfs_acid_arrow.effects[0].damage is not None
+    assert melfs_acid_arrow.effects[0].damage.dice.dice == "4d4"
+    assert melfs_acid_arrow.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+    assert melfs_acid_arrow.effects[1].damage is not None
+    assert melfs_acid_arrow.effects[1].damage.dice.dice == "2d4"
+    assert all(effect.damage is not None and effect.damage.damageType == DamageType.ACID for effect in melfs_acid_arrow.effects)
+
+    assert mind_spike is not None and mind_spike.effects is not None
+    assert mind_spike.effects[0].damage is not None
+    assert mind_spike.effects[0].damage.dice.dice == "3d8"
+    assert mind_spike.effects[0].damage.damageType == DamageType.PSYCHIC
+    assert mind_spike.effects[0].savingThrow is not None
+    assert mind_spike.effects[0].savingThrow.ability == AbilityType.WISDOM
+    assert mind_spike.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert moonbeam is not None and moonbeam.effects is not None
+    assert moonbeam.effects[0].damage is not None
+    assert moonbeam.effects[0].damage.dice.dice == "2d10"
+    assert moonbeam.effects[0].damage.damageType == DamageType.RADIANT
+    assert moonbeam.effects[0].savingThrow is not None
+    assert moonbeam.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert moonbeam.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert prayer_of_healing is not None and prayer_of_healing.effects is not None
+    assert prayer_of_healing.effects[0].healing is not None
+    assert prayer_of_healing.effects[0].healing.dice.dice == "2d8"
+    assert prayer_of_healing.effects[0].restType == RestType.SHORT_REST
+    assert prayer_of_healing.effects[0].scaling is not None
+    assert prayer_of_healing.effects[0].scaling[0].additionalDice is not None
+    assert prayer_of_healing.effects[0].scaling[0].additionalDice.dice == "1d8"
+
+    assert protection_from_poison is not None and protection_from_poison.effects is not None
+    assert protection_from_poison.effects[0].conditions is not None
+    assert protection_from_poison.effects[0].conditions[0].condition == ConditionType.PROTECTION_FROM_POISON
+    assert searing_orb is not None and searing_orb.effects is not None
+    assert searing_orb.targeting.area.shape == SpellAreaShape.RADIUS
+    assert searing_orb.targeting.area.radiusFeet == 10
+    assert searing_orb.effects[0].damage is not None
+    assert searing_orb.effects[0].damage.dice.dice == "3d4"
+    assert searing_orb.effects[0].damage.damageType == DamageType.RADIANT
+    assert searing_orb.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+    assert searing_orb.effects[0].scaling is not None
+    assert searing_orb.effects[0].scaling[0].additionalDice is not None
+    assert searing_orb.effects[0].scaling[0].additionalDice.dice == "1d4"
+    assert searing_orb.effects[1].conditions is not None
+    assert searing_orb.effects[1].conditions[0].condition == ConditionType.BLINDED
+    assert searing_orb.effects[1].savingThrow is not None
+    assert searing_orb.effects[1].savingThrow.ability == AbilityType.CONSTITUTION
+
+    assert scorching_ray is not None and scorching_ray.effects is not None
+    assert scorching_ray.effects[0].damage is not None
+    assert scorching_ray.effects[0].damage.dice.dice == "2d6"
+    assert scorching_ray.effects[0].damage.damageType == DamageType.FIRE
+    assert scorching_ray.effects[0].instances == 3
+    assert scorching_ray.effects[0].scaling is not None
+    assert scorching_ray.effects[0].scaling[0].additionalInstances == 1
+
+    assert shatter is not None and shatter.effects is not None
+    assert shatter.effects[0].damage is not None
+    assert shatter.effects[0].damage.dice.dice == "3d8"
+    assert shatter.effects[0].damage.damageType == DamageType.THUNDER
+    assert shatter.effects[0].savingThrow is not None
+    assert shatter.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert shatter.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert shatter.effects[0].savingThrow.disadvantageCreatureTypes == [CreatureType.CONSTRUCT]
+    assert "Constructs have Disadvantage" in shatter.effects[0].description
+
+    assert spike_growth is not None and spike_growth.effects is not None
+    assert spike_growth.effects[0].damage is not None
+    assert spike_growth.effects[0].damage.dice.dice == "2d4"
+    assert spike_growth.effects[0].damage.damageType == DamageType.PIERCING
+
+    assert spiritual_weapon is not None and spiritual_weapon.effects is not None
+    assert spiritual_weapon.effects[0].damage is not None
+    assert spiritual_weapon.effects[0].damage.dice.dice == "1d8"
+    assert spiritual_weapon.effects[0].damage.dice.bonusSpellcastingAbility is True
+    assert spiritual_weapon.effects[0].damage.damageType == DamageType.FORCE
+    assert spiritual_weapon.effects[0].attack == SpellAttackType.MELEE_SPELL_ATTACK
+    assert spiritual_weapon.effects[0].scaling is not None
+    assert spiritual_weapon.effects[0].scaling[0].additionalDice is not None
+    assert spiritual_weapon.effects[0].scaling[0].additionalDice.dice == "1d8"
 
 
 def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics() -> None:

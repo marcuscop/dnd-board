@@ -29,6 +29,7 @@ from dnd_board.character_sheet import (
     ConditionDuration,
     ConditionEffect,
     ConditionType,
+    CreatureType,
     DamageType,
     DiceType,
     EquipmentItem,
@@ -1381,6 +1382,16 @@ def test_spell_damage_saves_can_negate_and_damage_can_apply_conditions(tmp_path,
             abilityScores=AbilityScores(strength=10, dexterity=20, constitution=12, intelligence=10, wisdom=10, charisma=10),
             sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)], savingThrowProficiencies=[AbilityType.DEXTERITY]),
         ),
+        PartyMemberConfig(
+            id="player-3",
+            name="Protected Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=20, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                conditions=[ConditionType.PROTECTION_FROM_POISON],
+            ),
+        ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 20 if maximum == 20 else 5)
@@ -1412,6 +1423,102 @@ def test_spell_damage_saves_can_negate_and_damage_can_apply_conditions(tmp_path,
     assert ray_resolution.status_code == 200
     assert target_after_ray["hp"] == {"current": 15, "max": 30, "temporary": 0}
     assert "poisoned" in target_after_ray["conditions"]
+
+    protected_ray_damage = client.post("/api/rooms/spell-save-condition-test/sheet/player-1/spells/rayOfSickness/rolls/damage?playerKey=player-1&spellSlotLevel=2")
+    protected_ray_roll = protected_ray_damage.json()["roll"]
+    protected_ray_resolution = client.post(f"/api/rooms/spell-save-condition-test/rolls/{protected_ray_roll['id']}/resolve?playerKey=dm&targetSheetId=player-3")
+    protected_target_after_ray = client.get("/api/rooms/spell-save-condition-test/sheet/player-3?playerKey=player-3").json()["sheet"]
+    protected_ray_resolution_body = protected_ray_resolution.json()["resolution"]
+
+    assert protected_ray_resolution.status_code == 200
+    assert protected_target_after_ray["conditions"] == ["protectionFromPoison"]
+    assert "resists Poisoned due to Protection From Poison" in protected_ray_resolution_body["outcome"]
+    assert "gains Poisoned" not in protected_ray_resolution_body["outcome"]
+
+
+def test_prayer_of_healing_grants_short_rest_to_resolved_target(tmp_path, monkeypatch) -> None:
+    prayer = spell_entry(SpellId.PRAYER_OF_HEALING)
+    assert prayer is not None
+    write_party_campaign(
+        tmp_path,
+        "prayer-rest-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=16, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=5)], spells=[prayer]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                conditions=[ConditionType.PRONE],
+                resources=[ResourceTracker("short", "Short", 0, 2, RestType.SHORT_REST, TimeEconomy.SPECIAL, "short")],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("prayer-rest-test")
+    room.hit_points["player-2"] = 5
+    room.condition_durations["player-2"] = {ConditionType.PRONE: ConditionDuration.UNTIL_SHORT_REST}
+
+    healing_response = client.post("/api/rooms/prayer-rest-test/sheet/player-1/spells/prayerOfHealing/rolls/healing?playerKey=player-1")
+    healing_roll = healing_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/prayer-rest-test/rolls/{healing_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target = client.get("/api/rooms/prayer-rest-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert healing_response.status_code == 200
+    assert healing_roll["restType"] == "shortRest"
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetHp"] == {"current": 16, "max": 30, "temporary": 0}
+    assert "gains the benefits of a Short Rest" in resolution.json()["resolution"]["outcome"]
+    assert target["resources"][0]["currentUses"] == 2
+    assert target["conditions"] == []
+
+
+def test_shatter_rolls_disadvantage_for_construct_targets(tmp_path, monkeypatch) -> None:
+    shatter = wizard_spell_entry(SpellId.SHATTER)
+    assert shatter is not None
+    write_party_campaign(
+        tmp_path,
+        "shatter-construct-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[shatter]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Construct",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)], creatureTypes=[CreatureType.CONSTRUCT]),
+        ),
+    )
+    rolls = iter([18, 2])
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls) if maximum == 20 else 4)
+    client = TestClient(server.app)
+
+    damage_response = client.post("/api/rooms/shatter-construct-test/sheet/player-1/spells/shatter/rolls/damage?playerKey=player-1")
+    damage_roll = damage_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/shatter-construct-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    body = resolution.json()["resolution"]
+
+    assert damage_response.status_code == 200
+    assert damage_roll["damageSaveDisadvantageCreatureTypes"] == ["construct"]
+    assert resolution.status_code == 200
+    assert body["responseRolls"][0]["die"] == "2d20kl1"
+    assert body["responseRolls"][0]["dice"] == [18, 2]
+    assert "Constitution save with Disadvantage" in body["outcome"]
 
 
 def test_player_can_roll_ability_check_and_saving_throw(tmp_path, monkeypatch) -> None:
@@ -1567,6 +1674,60 @@ def test_player_can_update_generated_sheet_conditions_without_manifest(tmp_path,
     assert applied.status_code == 200
     assert applied.json()["sheet"]["conditions"] == ["prone"]
     assert sheet["conditions"] == ["prone"]
+
+
+def test_dm_can_update_sheet_damage_defenses(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "defense-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Defense Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    denied = client.post("/api/rooms/defense-test/sheet/player-1/defenses/resistance/fire?playerKey=player-1&active=true")
+    applied = client.post("/api/rooms/defense-test/sheet/player-1/defenses/resistance/fire?playerKey=dm&active=true")
+    cleared = client.post("/api/rooms/defense-test/sheet/player-1/defenses/resistance/fire?playerKey=dm&active=false")
+
+    assert denied.status_code == 403
+    assert applied.status_code == 200
+    assert applied.json()["sheet"]["damageResistances"] == ["fire"]
+    assert applied.json()["sheet"]["damageResistancesLabel"] == ["Fire"]
+    assert cleared.status_code == 200
+    assert cleared.json()["sheet"]["damageResistances"] == []
+
+
+def test_damage_defense_update_does_not_persist_condition_based_resistance(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "temporary-defense-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Protected Fighter",
+            maxHp=12,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                conditions=[ConditionType.PROTECTION_FROM_POISON],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    applied = client.post("/api/rooms/temporary-defense-test/sheet/player-1/defenses/resistance/fire?playerKey=dm&active=true")
+    cleared_condition = client.post("/api/rooms/temporary-defense-test/sheet/player-1/conditions/protectionFromPoison?playerKey=dm&active=false")
+
+    assert applied.status_code == 200
+    assert applied.json()["sheet"]["damageResistances"] == ["fire", "poison"]
+    assert cleared_condition.status_code == 200
+    assert cleared_condition.json()["sheet"]["damageResistances"] == ["fire"]
 
 
 def test_sheet_conditions_are_loaded_from_party_manifest(tmp_path, monkeypatch) -> None:
@@ -2948,6 +3109,54 @@ def test_condition_roll_resolution_survives_sheet_poll_without_manifest(tmp_path
     assert resolution.status_code == 200
     assert resolution.json()["resolution"]["targetConditions"] == ["prone"]
     assert sheet["conditions"] == ["prone"]
+
+
+def test_protection_from_poison_grants_advantage_against_poisoned_condition(tmp_path, monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([2, 19])
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    room = server.get_or_create_room("poison-protection-save-test")
+    room.condition_overrides["player-2"] = [ConditionType.PROTECTION_FROM_POISON]
+    poison_roll = RollPayload(
+        id="test-poison-roll",
+        sheetId="player-1",
+        tokenId="player-1",
+        roller="player-1",
+        source=RollSource(section=SheetSectionType.SPELLS, sourceId="test-poison", actionId="test-poison"),
+        sourceLabel="Test Poison",
+        resolution=RollResolutionMode.NONE,
+        label="Test Poison",
+        iconUrl=None,
+        dice=[],
+        diceType=DiceType.D20,
+        die="",
+        modifier=0,
+        modifierBreakdown=[],
+        total=0,
+        createdAt=1,
+        conditionEffects=[
+            ConditionEffect(
+                condition=ConditionType.POISONED,
+                mode=ConditionApplicationMode.TARGET_SAVE,
+                savingThrow=AbilityType.CONSTITUTION,
+                saveDc=15,
+            )
+        ],
+    )
+    room.pending_rolls[server.roll_queue_key(poison_roll)] = poison_roll
+
+    resolution = client.post("/api/rooms/poison-protection-save-test/rolls/test-poison-roll/resolve?playerKey=dm&targetSheetId=player-2")
+    body = resolution.json()["resolution"]
+    sheet = client.get("/api/rooms/poison-protection-save-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert resolution.status_code == 200
+    assert body["responseRolls"][0]["die"] == "2d20kh1"
+    assert body["responseRolls"][0]["dice"] == [2, 19]
+    assert body["targetConditions"] == ["protectionFromPoison"]
+    assert "Constitution save with Advantage" in body["outcome"]
+    assert sheet["damageResistances"] == ["poison"]
+    assert sheet["damageResistancesLabel"] == ["Poison"]
 
 
 def test_pushing_attack_triggers_visible_strength_save_without_condition(tmp_path, monkeypatch) -> None:

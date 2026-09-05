@@ -101,6 +101,7 @@ export type ConditionType =
   | "petrified"
   | "poisoned"
   | "prone"
+  | "protectionFromPoison"
   | "resistanceAcid"
   | "resistanceBludgeoning"
   | "resistanceCold"
@@ -161,6 +162,21 @@ export type DamageType =
   | "radiant"
   | "slashing"
   | "thunder";
+export type CreatureType =
+  | "aberration"
+  | "beast"
+  | "celestial"
+  | "construct"
+  | "dragon"
+  | "elemental"
+  | "fey"
+  | "fiend"
+  | "giant"
+  | "humanoid"
+  | "monstrosity"
+  | "ooze"
+  | "plant"
+  | "undead";
 export type DiceType = "d4" | "d6" | "d8" | "d10" | "d12" | "d20";
 export type TimeEconomy = "action" | "bonusAction" | "reaction" | "movement" | "passive" | "special";
 export type RestType = "none" | "shortRest" | "longRest";
@@ -277,6 +293,8 @@ export type SpellSavingThrow = {
   outcomeLabel: string;
   repeat?: SpellEffectTrigger;
   repeatLabel?: string;
+  disadvantageCreatureTypes?: CreatureType[];
+  disadvantageCreatureTypesLabel?: string[];
 };
 export type SpellScaling = {
   scalingType: SpellScalingType;
@@ -296,6 +314,8 @@ export type SpellEffect = {
   targetLabel: string;
   attack: SpellAttackType;
   attackLabel: string;
+  targetCreatureTypes?: CreatureType[];
+  targetCreatureTypesLabel?: string[];
   savingThrow?: SpellSavingThrow;
   damage?: SpellDamageEffect;
   healing?: SpellHealingEffect;
@@ -303,6 +323,8 @@ export type SpellEffect = {
   conditions?: SpellConditionEffect[];
   rollModifier?: SpellRollModifierEffect;
   scaling?: SpellScaling[];
+  restType?: RestType;
+  restTypeLabel?: string;
   instances: number;
   instanceLabel: string;
   actionLabel: string;
@@ -624,6 +646,8 @@ export type CharacterSheet = {
   }[];
   proficiencies: string[];
   conditions: ConditionType[];
+  creatureTypes: CreatureType[];
+  creatureTypesLabel: string[];
   damageResistances: DamageType[];
   damageResistancesLabel: string[];
   damageVulnerabilities: DamageType[];
@@ -687,7 +711,13 @@ export type RollPayload = {
   damageSaveDc?: number;
   damageSaveOutcome?: SpellSaveOutcome;
   damageSaveOutcomeLabel?: string;
+  damageSaveDisadvantageCreatureTypes?: CreatureType[];
+  damageSaveDisadvantageCreatureTypesLabel?: string[];
+  targetCreatureTypes?: CreatureType[];
+  targetCreatureTypesLabel?: string[];
   conditionEffects?: ConditionEffect[];
+  restType?: RestType;
+  restTypeLabel?: string;
   resourceSpent?: {
     resourceId: string;
     resourceName: string;

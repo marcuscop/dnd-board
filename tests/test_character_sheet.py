@@ -13,6 +13,7 @@ from dnd_board.character_sheet import (
     ConditionEffect,
     ConditionRemovalTrigger,
     ConditionType,
+    CreatureType,
     DamageType,
     DiceType,
     ArmorCategory,
@@ -42,6 +43,7 @@ from dnd_board.character_sheet import (
     SpellId,
     SpellLineArea,
     SpellRangeType,
+    RestType,
     SpellSaveOutcome,
     SpellScalingType,
     SpellTargeting,
@@ -55,11 +57,14 @@ from dnd_board.character_sheet import (
     build_spell_attack_roll_payload,
     build_spell_condition_roll_payload,
     build_spell_damage_roll_payload,
+    build_spell_healing_roll_payload,
     resolve_roll_against_target,
     RollSource,
     armor_item_class,
     clamped_ability_score,
     enum_value,
+    enum_key,
+    effective_damage_resistances,
     generated_ability_scores,
     generated_max_hp,
     optional_text,
@@ -263,6 +268,49 @@ def test_active_damage_resistance_conditions_reduce_matching_damage_by_d4(monkey
     assert roll.total == 8
     assert resolution.targetHp.current == 15
     assert resolution.outcome == "deals 5 damage after Resistance Fire reduces damage by 3"
+
+
+def test_protection_from_poison_adds_true_poison_resistance_and_clears_poisoned(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 8)
+    attacker = basic_sheet()
+    target = replace(basic_sheet(), conditions=[ConditionType.PROTECTION_FROM_POISON, ConditionType.POISONED])
+    action = replace(attacker.attacks[0], damageDiceCount=1, damageDiceType=DiceType.D8, damageType=DamageType.POISON, damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED)
+    protection_roll = RollAction(
+        id=SpellId.PROTECTION_FROM_POISON,
+        name=SpellId.PROTECTION_FROM_POISON,
+        diceCount=0,
+        diceType=DiceType.D4,
+        conditionEffects=[ConditionEffect(ConditionType.PROTECTION_FROM_POISON, ConditionApplicationMode.DIRECT)],
+    )
+
+    damage_roll = build_damage_roll_payload(attacker, "player-1", action)
+    damage_resolution = resolve_roll_against_target(damage_roll, target)
+    condition_resolution = resolve_roll_against_target(
+        build_roll_action_payload(attacker, "player-1", RollSource(SheetSectionType.SPELLS, enum_key(SpellId.PROTECTION_FROM_POISON), "effect-0"), protection_roll),
+        replace(basic_sheet(), conditions=[ConditionType.POISONED]),
+    )
+
+    assert effective_damage_resistances(target) == {DamageType.POISON}
+    assert damage_resolution.targetHp.current == 16
+    assert damage_resolution.outcome == "deals 4 damage after Poison resistance"
+    assert condition_resolution.targetConditions == [ConditionType.PROTECTION_FROM_POISON]
+
+
+def test_creature_type_limited_damage_only_applies_to_matching_targets(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 5)
+    divine_smite = spell_entry(SpellId.DIVINE_SMITE)
+    assert divine_smite is not None
+    roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=1)
+    humanoid = basic_sheet()
+    undead = replace(basic_sheet(), creatureTypes=[CreatureType.UNDEAD])
+
+    humanoid_resolution = resolve_roll_against_target(roll, humanoid)
+    undead_resolution = resolve_roll_against_target(roll, undead)
+
+    assert humanoid_resolution.targetHp.current == humanoid.hp.current
+    assert humanoid_resolution.outcome == "has no effect; target is not Fiend or Undead"
+    assert undead_resolution.targetHp.current == undead.hp.current - 5
+    assert undead_resolution.outcome == "deals 5 damage"
 
 
 def test_shared_parsing_and_armor_helpers_cover_edge_cases() -> None:
@@ -518,7 +566,10 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     inflict_wounds = cleric_spell_entry(SpellId.INFLICT_WOUNDS)
     divine_smite = spell_entry(SpellId.DIVINE_SMITE)
     magic_missile = wizard_spell_entry(SpellId.MAGIC_MISSILE)
+    prayer_of_healing = spell_entry(SpellId.PRAYER_OF_HEALING)
     ray_of_sickness = wizard_spell_entry(SpellId.RAY_OF_SICKNESS)
+    searing_orb = spell_entry(SpellId.SEARING_ORB)
+    shatter = wizard_spell_entry(SpellId.SHATTER)
     thunderwave = wizard_spell_entry(SpellId.THUNDERWAVE)
     assert acid_splash is not None
     assert guiding_bolt is not None
@@ -526,7 +577,10 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert inflict_wounds is not None
     assert divine_smite is not None
     assert magic_missile is not None
+    assert prayer_of_healing is not None
     assert ray_of_sickness is not None
+    assert searing_orb is not None
+    assert shatter is not None
     assert thunderwave is not None
     ice_knife = wizard_spell_entry(SpellId.ICE_KNIFE)
     assert ice_knife is not None
@@ -540,7 +594,10 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     ice_target_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=0)
     ice_blast_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=1, spell_slot_level=2)
     missile_roll = build_spell_damage_roll_payload(spell_sheet(5, [magic_missile]), "player-1", magic_missile, spell_slot_level=3, instance_index=4)
+    prayer_roll = build_spell_healing_roll_payload(spell_sheet(5, [prayer_of_healing]), "player-1", prayer_of_healing, spell_slot_level=4)
     ray_roll = build_spell_damage_roll_payload(spell_sheet(5, [ray_of_sickness]), "player-1", ray_of_sickness, spell_slot_level=3)
+    searing_orb_roll = build_spell_damage_roll_payload(spell_sheet(5, [searing_orb]), "player-1", searing_orb, spell_slot_level=4)
+    shatter_roll = build_spell_damage_roll_payload(spell_sheet(5, [shatter]), "player-1", shatter)
     thunderwave_roll = build_spell_damage_roll_payload(spell_sheet(5, [thunderwave]), "player-1", thunderwave, spell_slot_level=2)
 
     assert acid_roll.die == "3d6"
@@ -580,6 +637,7 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert divine_smite_bonus_roll.die == "1d8"
     assert divine_smite_bonus_roll.total == 3
     assert divine_smite_bonus_roll.damageType == DamageType.RADIANT
+    assert divine_smite_bonus_roll.targetCreatureTypes == [CreatureType.FIEND, CreatureType.UNDEAD]
 
     assert ice_target_roll.label == "Target Damage"
     assert ice_target_roll.die == "1d10"
@@ -599,6 +657,14 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert [(part.source, part.value) for part in missile_roll.modifierBreakdown] == [("Spell", 1)]
     assert magic_missile.effects is not None
     assert scaled_spell_effect_instance_count(magic_missile.effects[0], spell_sheet(5, [magic_missile]), magic_missile.level, 3) == 5
+
+    assert prayer_roll.die == "4d8"
+    assert prayer_roll.total == 15
+    assert prayer_roll.resolution == RollResolutionMode.HEAL_SELF
+    assert prayer_roll.restType == RestType.SHORT_REST
+
+    assert shatter_roll.damageSavingThrow == AbilityType.CONSTITUTION
+    assert shatter_roll.damageSaveDisadvantageCreatureTypes == [CreatureType.CONSTRUCT]
     with pytest.raises(ValueError, match="Spell damage instance not found"):
         build_spell_damage_roll_payload(spell_sheet(5, [magic_missile]), "player-1", magic_missile, spell_slot_level=3, instance_index=5)
 
@@ -608,6 +674,12 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert ray_roll.conditionEffects is not None
     assert ray_roll.conditionEffects[0].condition == ConditionType.POISONED
     assert ray_roll.conditionEffects[0].mode == ConditionApplicationMode.DIRECT
+
+    assert searing_orb_roll.die == "5d4"
+    assert searing_orb_roll.total == 15
+    assert searing_orb_roll.damageType == DamageType.RADIANT
+    assert searing_orb_roll.damageSavingThrow is None
+    assert searing_orb_roll.conditionEffects is None
 
     assert thunderwave_roll.die == "3d8"
     assert thunderwave_roll.total == 9
@@ -620,14 +692,17 @@ def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None
     tasha = wizard_spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
     command = spell_entry(SpellId.COMMAND)
     bless = spell_entry(SpellId.BLESS)
+    searing_orb = spell_entry(SpellId.SEARING_ORB)
     assert tasha is not None
     assert command is not None
     assert bless is not None
+    assert searing_orb is not None
 
     sheet = spell_sheet(5, [tasha])
     effect_roll = build_spell_condition_roll_payload(sheet, "player-1", tasha)
     command_roll = build_spell_condition_roll_payload(spell_sheet(5, [command]), "player-1", command, effect_index=3)
     bless_roll = build_spell_condition_roll_payload(spell_sheet(5, [bless]), "player-1", bless)
+    searing_orb_roll = build_spell_condition_roll_payload(spell_sheet(5, [searing_orb]), "player-1", searing_orb)
 
     assert effect_roll.source.section == SheetSectionType.SPELLS
     assert effect_roll.source.sourceId == "tashaSHideousLaughter"
@@ -652,6 +727,12 @@ def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None
     assert [effect.condition for effect in bless_roll.conditionEffects] == [ConditionType.BLESSED]
     assert {effect.mode for effect in bless_roll.conditionEffects} == {ConditionApplicationMode.DIRECT}
     assert {effect.savingThrow for effect in bless_roll.conditionEffects} == {None}
+    assert searing_orb_roll.label == "Blind Effect"
+    assert searing_orb_roll.conditionEffects is not None
+    assert searing_orb_roll.conditionEffects[0].condition == ConditionType.BLINDED
+    assert searing_orb_roll.conditionEffects[0].mode == ConditionApplicationMode.TARGET_SAVE
+    assert searing_orb_roll.conditionEffects[0].savingThrow == AbilityType.CONSTITUTION
+    assert searing_orb_roll.conditionEffects[0].saveDc == 14
 
     assert spell_condition_effect_at(tasha, -1) is None
     assert spell_condition_effect_at(replace(tasha, effects=None), 0) is None

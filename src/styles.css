@@ -535,6 +535,41 @@ canvas.is-dragging,
   color: #1b1207;
 }
 
+.damage-defense-list {
+  display: grid;
+  gap: 10px;
+}
+
+.damage-defense-row {
+  display: grid;
+  gap: 5px;
+}
+
+.damage-defense-row > span {
+  color: #d8b778;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.damage-defense-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 6px;
+}
+
+.damage-defense-toggle-grid button {
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 7px;
+  font-size: 0.78rem;
+}
+
+.damage-defense-toggle-grid button.active {
+  background: #d89c46;
+  color: #1b1207;
+}
+
 .level-stepper {
   display: inline-grid;
   grid-template-columns: 32px auto 32px;
