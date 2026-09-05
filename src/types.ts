@@ -13,7 +13,8 @@ export enum RollResolutionMode {
 
 export enum RollLogEntryType {
   ROLL_CREATED = "rollCreated",
-  ROLL_RESOLVED = "rollResolved"
+  ROLL_RESOLVED = "rollResolved",
+  ROLL_BLOCKED = "rollBlocked"
 }
 
 export enum RollModifierType {
@@ -116,6 +117,8 @@ export type ConditionType =
   | "resistanceSlashing"
   | "resistanceThunder"
   | "restrained"
+  | "shielded"
+  | "slowed"
   | "stunned"
   | "unconscious";
 export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
@@ -234,6 +237,7 @@ export type SpellEffectKind = "damage" | "healing" | "temporaryHitPoints" | "con
 export type SpellEffectTrigger = "onCast" | "onHit" | "onFailedSave" | "onSuccessfulSave" | "startOfTurn" | "endOfTurn" | "entersArea" | "repeatSave" | "special";
 export type SpellEffectTarget = "self" | "target" | "area" | "creaturesChosen" | "object" | "special";
 export type SpellSaveOutcome = "none" | "negates" | "halfDamage" | "partial" | "special";
+export type SpellLinkedHealingAmount = "halfDamageDealt";
 export type SpellScalingType = "none" | "cantripLevel" | "spellSlotLevel" | "casterLevel" | "special";
 export type SpellTargeting = {
   rangeType: SpellRangeType;
@@ -265,6 +269,10 @@ export type SpellDamageEffect = {
 };
 export type SpellHealingEffect = {
   dice: SpellEffectDice;
+};
+export type SpellSourceHealingEffect = {
+  amount: SpellLinkedHealingAmount;
+  amountLabel: string;
 };
 export type SpellConditionEffect = {
   condition: ConditionType;
@@ -319,6 +327,7 @@ export type SpellEffect = {
   savingThrow?: SpellSavingThrow;
   damage?: SpellDamageEffect;
   healing?: SpellHealingEffect;
+  sourceHealing?: SpellSourceHealingEffect;
   temporaryHitPoints?: SpellEffectDice;
   conditions?: SpellConditionEffect[];
   rollModifier?: SpellRollModifierEffect;
@@ -715,6 +724,7 @@ export type RollPayload = {
   damageSaveDisadvantageCreatureTypesLabel?: string[];
   targetCreatureTypes?: CreatureType[];
   targetCreatureTypesLabel?: string[];
+  sourceHealing?: SpellSourceHealingEffect;
   conditionEffects?: ConditionEffect[];
   restType?: RestType;
   restTypeLabel?: string;
@@ -771,5 +781,7 @@ export type ServerMessage =
   | { type: "board_updated"; board: Board }
   | { type: "roll_created"; roll: RollPayload; logEntry: RollLogEntry }
   | { type: "roll_resolved"; rollId: string; tokenId: string; preserveRoll?: boolean; resolution: RollResolution; logEntry: RollLogEntry }
+  | { type: "roll_blocked"; logEntry: RollLogEntry }
+  | { type: "roll_logged"; logEntry: RollLogEntry }
   | { type: "token_lock_denied"; tokenId: string; lockedBy?: string }
   | { type: "player_count"; count: number };

@@ -47,9 +47,12 @@ from dnd_board.character_sheet import (
     SheetSectionType,
     SkillType,
     SpellAttackType,
+    SpellComponent,
     SpellEntry,
+    SpellLinkedHealingAmount,
     SpellSaveOutcome,
     SpellSource,
+    TimeEconomy,
     TokenKind,
     build_attack_roll_payload,
     build_ability_check_roll_payload,
@@ -59,10 +62,12 @@ from dnd_board.character_sheet import (
     build_spell_condition_roll_payload,
     build_spell_damage_roll_payload,
     build_spell_healing_roll_payload,
+    spell_damage_effect_at,
     build_saving_throw_roll_payload,
     build_roll_action_payload,
     ability_modifier,
     active_roll_modifier_breakdown,
+    condition_armor_class_bonus,
     enum_value,
     enum_key,
     enum_label,
@@ -73,6 +78,7 @@ from dnd_board.character_sheet import (
     roll_payload_to_dict,
     roll_log_entry_to_dict,
     roll_resolution_to_dict,
+    sanitize_identifier,
     sheet_to_dict,
     typed_json_from_value,
 )
@@ -219,6 +225,9 @@ class Room:
     condition_overrides: dict[str, list[ConditionType]]
     condition_durations: dict[str, dict[ConditionType, ConditionDuration]]
     condition_removals: dict[str, dict[ConditionType, ConditionRemovalSave]]
+    damage_resistances: dict[str, list[DamageType]]
+    damage_vulnerabilities: dict[str, list[DamageType]]
+    damage_immunities: dict[str, list[DamageType]]
     resource_uses: dict[str, dict[str, int]]
     equipment_slots: dict[str, dict[str, EquipmentSlot]]
 
@@ -349,6 +358,9 @@ async def create_room_character(room_id: str, playerKey: str, payload: dict[str,
     room.condition_overrides.pop(member.id, None)
     room.condition_removals.pop(member.id, None)
     room.condition_durations.pop(member.id, None)
+    room.damage_resistances.pop(member.id, None)
+    room.damage_vulnerabilities.pop(member.id, None)
+    room.damage_immunities.pop(member.id, None)
     await broadcast_room_state(room)
     return sheet_state_message(room, player)
 
@@ -472,6 +484,9 @@ async def update_sheet_level(room_id: str, sheet_id: str, playerKey: str, delta:
     room.condition_overrides.pop(updated_member.id, None)
     room.condition_durations.pop(updated_member.id, None)
     room.condition_removals.pop(updated_member.id, None)
+    room.damage_resistances.pop(updated_member.id, None)
+    room.damage_vulnerabilities.pop(updated_member.id, None)
+    room.damage_immunities.pop(updated_member.id, None)
     sheet = get_visible_sheet(room, player, updated_member.id)
     return {"roomId": room.id, "sheet": sheet_to_dict(sheet) if sheet else None}
 
@@ -690,10 +705,12 @@ async def update_sheet_damage_defense(room_id: str, sheet_id: str, defense: str,
         sanitized_sheet_id,
         lambda member: set_member_damage_defense(member, defense_type, parsed_damage_type, active),
     )
-    if updated_member is None:
-        raise HTTPException(status_code=404, detail="Sheet is not backed by a party member")
 
-    updated = get_visible_sheet(room, player, updated_member.id)
+    updated_sheet_id = updated_member.id if updated_member is not None else sheet.tokenId
+    if updated_member is None:
+        set_room_damage_defense(room, updated_sheet_id, defense_type, parsed_damage_type, active)
+
+    updated = get_visible_sheet(room, player, updated_sheet_id)
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else None}
 
 
@@ -1072,6 +1089,9 @@ async def delete_token(room: Room, player: Player, token_id: str) -> None:
     room.temporary_hit_points.pop(token_id, None)
     room.condition_overrides.pop(token_id, None)
     room.condition_durations.pop(token_id, None)
+    room.damage_resistances.pop(token_id, None)
+    room.damage_vulnerabilities.pop(token_id, None)
+    room.damage_immunities.pop(token_id, None)
     await broadcast(room, {"type": "token_deleted", "tokenId": token_id})
 
 
@@ -1108,6 +1128,9 @@ def get_or_create_room(room_id: str) -> Room:
         condition_overrides={},
         condition_durations={},
         condition_removals={},
+        damage_resistances={},
+        damage_vulnerabilities={},
+        damage_immunities={},
         resource_uses=load_saved_resource_uses(room_id),
         equipment_slots={},
     )
@@ -1261,13 +1284,18 @@ def token_to_sheet(
     if room is not None:
         sheet.hp.temporary = room.temporary_hit_points.get(token.id, sheet.hp.temporary)
         sheet.conditions = room.condition_overrides.get(token.id, sheet.conditions)
+        sheet.damageResistances = merged_damage_defenses(sheet.damageResistances, room.damage_resistances.get(token.id, []))
+        sheet.damageVulnerabilities = merged_damage_defenses(sheet.damageVulnerabilities, room.damage_vulnerabilities.get(token.id, []))
+        sheet.damageImmunities = merged_damage_defenses(sheet.damageImmunities, room.damage_immunities.get(token.id, []))
         sheet.damageResistances = effective_damage_resistance_list(sheet)
+    sheet.armorClass += condition_armor_class_bonus(sheet.conditions)
     return sheet
 
 
 async def create_attack_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     action = find_attack(sheet, attack_id)
+    await assert_roll_activation_allowed(room, sheet, player, action.activation, action.name, "Attack Roll")
     payload = build_attack_roll_payload(sheet, player.player_key, action)
     return await store_roll(room, payload)
 
@@ -1275,6 +1303,7 @@ async def create_attack_roll(room_id: str, sheet_id: str, player_key: str, attac
 async def create_damage_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     action = find_attack(sheet, attack_id)
+    await assert_roll_activation_allowed(room, sheet, player, action.activation, action.name, "Damage Roll")
     payload = build_damage_roll_payload(sheet, player.player_key, action)
     return await store_roll(room, payload)
 
@@ -1284,6 +1313,8 @@ async def create_spell_attack_roll(room_id: str, sheet_id: str, player_key: str,
     spell = find_spell(sheet, spell_id)
     if not any(effect.attack != SpellAttackType.NONE for effect in spell.effects or []):
         raise HTTPException(status_code=404, detail="Spell attack not found")
+    await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "Spell Attack")
+    await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
     payload = build_spell_attack_roll_payload(sheet, player.player_key, spell)
     return await store_roll(room, payload)
 
@@ -1292,6 +1323,9 @@ async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str,
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     spell = find_spell(sheet, spell_id)
     validate_spell_slot_level(sheet, spell, spell_slot_level)
+    await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "Spell Damage")
+    if spell_damage_roll_requires_cast_check(spell, effect_index):
+        await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
     try:
         payload = build_spell_damage_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level, instance_index)
     except ValueError as error:
@@ -1303,6 +1337,8 @@ async def create_spell_healing_roll(room_id: str, sheet_id: str, player_key: str
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     spell = find_spell(sheet, spell_id)
     validate_spell_slot_level(sheet, spell, spell_slot_level)
+    await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "Spell Healing")
+    await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
     try:
         payload = build_spell_healing_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level)
     except ValueError as error:
@@ -1313,6 +1349,8 @@ async def create_spell_healing_roll(room_id: str, sheet_id: str, player_key: str
 async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     spell = find_spell(sheet, spell_id)
+    await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "Spell Effect")
+    await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
     try:
         payload = build_spell_condition_roll_payload(sheet, player.player_key, spell, effect_index)
     except ValueError as error:
@@ -1354,6 +1392,7 @@ async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, res
     if action is None:
         raise HTTPException(status_code=404, detail="Roll action not found")
 
+    await assert_roll_activation_allowed(room, sheet, player, action.activation or resource.activation, resource.name, enum_label(action.name))
     source = RollSource(section=SheetSectionType.RESOURCES, sourceId=resource.id, actionId=enum_key(action.id))
     payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=resource.name)
     if action.consumesResource is not None:
@@ -1374,6 +1413,7 @@ async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, abil
     if action is None:
         raise HTTPException(status_code=404, detail="Roll action not found")
 
+    await assert_roll_activation_allowed(room, sheet, player, action.activation or ability.activation, ability.source, enum_label(action.name))
     source = RollSource(section=SheetSectionType.ABILITIES, sourceId=ability.id, actionId=enum_key(action.id))
     payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=ability.source)
     if action.consumesResource is not None:
@@ -1409,6 +1449,37 @@ def find_spell(sheet: CharacterSheet, spell_id: str) -> SpellEntry:
     if spell is None:
         raise HTTPException(status_code=404, detail="Spell not found")
     return spell
+
+
+async def assert_roll_activation_allowed(
+    room: Room,
+    sheet: CharacterSheet,
+    player: Player,
+    activation: TimeEconomy | None,
+    source_label: str,
+    roll_label: str,
+) -> None:
+    if activation == TimeEconomy.REACTION and ConditionType.SLOWED in sheet.conditions:
+        await log_blocked_roll(room, sheet, player, source_label, roll_label, f"{enum_label(ConditionType.SLOWED)} prevents Reactions")
+        raise HTTPException(status_code=400, detail="Slowed creatures cannot take Reactions")
+
+
+async def assert_slowed_somatic_spell_cast_allowed(room: Room, sheet: CharacterSheet, player: Player, spell: SpellEntry) -> None:
+    if ConditionType.SLOWED not in sheet.conditions or SpellComponent.SOMATIC not in spell.components:
+        return
+    check = random.randint(1, 4)
+    spell_label = enum_label(spell.name)
+    if check == 1:
+        await log_blocked_roll(room, sheet, player, spell_label, "Spell Cast", f"{enum_label(ConditionType.SLOWED)} somatic delay fails on 1d4 ({check})")
+        raise HTTPException(status_code=400, detail="Slowed somatic spell failed")
+    await log_roll_note(room, sheet, player, spell_label, f"Slowed somatic check succeeds on 1d4 ({check}); spell continues", DiceType.D4, [check])
+
+
+def spell_damage_roll_requires_cast_check(spell: SpellEntry, effect_index: int) -> bool:
+    effect = spell_damage_effect_at(spell, effect_index)
+    if effect is None:
+        return False
+    return effect.attack == SpellAttackType.NONE
 
 
 def validate_spell_slot_level(sheet: CharacterSheet, spell: SpellEntry, spell_slot_level: int | None) -> None:
@@ -1466,6 +1537,63 @@ async def store_roll(room: Room, payload: RollPayload) -> dict[str, Any]:
 
 def roll_resolves_immediately(roll: RollPayload) -> bool:
     return roll.resolution == RollResolutionMode.HEAL_SELF and roll.source.section != SheetSectionType.SPELLS
+
+
+async def log_blocked_roll(room: Room, sheet: CharacterSheet, player: Player, source_label: str, roll_label: str, reason: str) -> RollLogEntry:
+    return await log_roll_note(
+        room,
+        sheet,
+        player,
+        source_label,
+        f"{roll_label} blocked: {reason}",
+        DiceType.D20,
+        [],
+        entry_type=RollLogEntryType.ROLL_BLOCKED,
+        message_type="roll_blocked",
+    )
+
+
+async def log_roll_note(
+    room: Room,
+    sheet: CharacterSheet,
+    player: Player,
+    source_label: str,
+    label: str,
+    dice_type: DiceType,
+    dice: list[int],
+    entry_type: RollLogEntryType = RollLogEntryType.ROLL_CREATED,
+    message_type: str = "roll_logged",
+) -> RollLogEntry:
+    created_at = time_ns()
+    payload = RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=player.player_key,
+        source=RollSource(section=SheetSectionType.ABILITIES, sourceId=sanitize_identifier(source_label), actionId="log"),
+        sourceLabel=source_label,
+        resolution=RollResolutionMode.NONE,
+        label=label,
+        iconUrl=None,
+        dice=dice,
+        diceType=dice_type,
+        die=enum_key(dice_type),
+        modifier=0,
+        modifierBreakdown=[],
+        total=sum(dice),
+        createdAt=created_at,
+    )
+    log_entry = append_roll_log_entry(
+        room,
+        RollLogEntry(
+            id=f"log-{payload.id}",
+            entryType=entry_type,
+            createdAt=payload.createdAt,
+            roll=payload,
+        ),
+    )
+    await broadcast(room, {"type": message_type, "logEntry": roll_log_entry_to_dict(log_entry)})
+    return log_entry
 
 
 def append_roll_log_entry(room: Room, entry: RollLogEntry) -> RollLogEntry:
@@ -1622,6 +1750,9 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
     if roll.resolution in {RollResolutionMode.APPLY_DAMAGE, RollResolutionMode.HEAL_SELF, RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS}:
         room.hit_points[target.tokenId] = resolution.targetHp.current
         room.temporary_hit_points[target.tokenId] = resolution.targetHp.temporary
+    source_healing_outcome = apply_source_healing_effect(room, roll, source, target, resolution)
+    if source_healing_outcome:
+        resolution.outcome = f"{resolution.outcome}; {source_healing_outcome}"
     if roll.restType is not None:
         reset_sheet_resources(room, target, roll.restType)
         reset_sheet_conditions(room, target, roll.restType)
@@ -1630,6 +1761,36 @@ def resolve_roll_against_target(room: Room, roll: RollPayload, target: Character
         resolution.outcome = f"{resolution.outcome}; {target.name} gains the benefits of a {enum_label(roll.restType)}"
     apply_resolved_conditions(room, target.id, resolution.targetConditions, roll)
     return resolution
+
+
+def apply_source_healing_effect(
+    room: Room,
+    roll: RollPayload,
+    source: CharacterSheet | None,
+    target: CharacterSheet,
+    resolution: RollResolution,
+) -> str | None:
+    if roll.sourceHealing is None or source is None or roll.resolution != RollResolutionMode.APPLY_DAMAGE:
+        return None
+    damage_dealt = hit_point_damage_taken(target.hp, resolution.targetHp)
+    if damage_dealt <= 0:
+        return None
+    if roll.sourceHealing.amount == SpellLinkedHealingAmount.HALF_DAMAGE_DEALT:
+        healing = damage_dealt // 2
+    else:
+        return None
+    if healing <= 0:
+        return None
+    next_hp = min(source.hp.max, source.hp.current + healing)
+    actual_healing = next_hp - source.hp.current
+    if actual_healing <= 0:
+        return None
+    room.hit_points[source.tokenId] = next_hp
+    return f"{source.name} heals {actual_healing} hit points"
+
+
+def hit_point_damage_taken(before: HitPoints, after: HitPoints) -> int:
+    return max(0, before.current - after.current) + max(0, before.temporary - after.temporary)
 
 
 def dedupe_response_rolls(response_rolls: list[RollPayload]) -> list[RollPayload]:
@@ -2063,6 +2224,9 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.condition_overrides = {}
     room.condition_durations = {}
     room.condition_removals = {}
+    room.damage_resistances = {}
+    room.damage_vulnerabilities = {}
+    room.damage_immunities = {}
     room.resource_uses = load_saved_resource_uses(room.id)
     room.equipment_slots = {}
     await broadcast_room_state(room)
@@ -2340,12 +2504,37 @@ def set_member_damage_defense(member: PartyMemberConfig, defense: DamageDefenseT
     member.sheet.damageImmunities = updated_damage_defense_list(member.sheet.damageImmunities or [], damage_type, active)
 
 
+def set_room_damage_defense(room: Room, sheet_id: str, defense: DamageDefenseType, damage_type: DamageType, active: bool) -> None:
+    damage_defenses = room_damage_defenses(room, defense)
+    updated = updated_damage_defense_list(damage_defenses.get(sheet_id, []), damage_type, active)
+    if updated is None:
+        damage_defenses.pop(sheet_id, None)
+    else:
+        damage_defenses[sheet_id] = updated
+
+
+def room_damage_defenses(room: Room, defense: DamageDefenseType) -> dict[str, list[DamageType]]:
+    if defense == DamageDefenseType.RESISTANCE:
+        return room.damage_resistances
+    if defense == DamageDefenseType.VULNERABILITY:
+        return room.damage_vulnerabilities
+    return room.damage_immunities
+
+
 def updated_damage_defense_list(defenses: list[DamageType], damage_type: DamageType, active: bool) -> list[DamageType] | None:
     if active and damage_type not in defenses:
         return [*defenses, damage_type]
     if not active:
         return [defense for defense in defenses if defense != damage_type] or None
     return list(defenses) or None
+
+
+def merged_damage_defenses(sheet_defenses: list[DamageType], room_defenses: list[DamageType]) -> list[DamageType]:
+    merged = list(sheet_defenses)
+    for defense in room_defenses:
+        if defense not in merged:
+            merged.append(defense)
+    return merged
 
 
 def pending_choice_summary(sheet: CharacterSheet) -> str:

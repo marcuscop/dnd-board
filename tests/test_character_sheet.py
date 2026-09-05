@@ -42,6 +42,7 @@ from dnd_board.character_sheet import (
     SpellDurationUnit,
     SpellId,
     SpellLineArea,
+    SpellLinkedHealingAmount,
     SpellRangeType,
     RestType,
     SpellSaveOutcome,
@@ -88,6 +89,7 @@ from dnd_board.character_sheet import (
     typed_json_to_value,
     value_matches_type,
     build_ability_check_roll_payload,
+    condition_armor_class_bonus,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.spells import cleric_spell_entry, spell_damage_effect, spell_entry, spell_scaling, wizard_spell_entry
@@ -247,6 +249,9 @@ def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch
     save_roll = build_saving_throw_roll_payload(sheet, "player-1", AbilityType.STRENGTH)
     baned_attack_roll = build_attack_roll_payload(baned_sheet, "player-1", baned_sheet.attacks[0])
     baned_save_roll = build_saving_throw_roll_payload(baned_sheet, "player-1", AbilityType.STRENGTH)
+    slowed_sheet = replace(basic_sheet(), conditions=[ConditionType.SLOWED])
+    slowed_dexterity_save_roll = build_saving_throw_roll_payload(slowed_sheet, "player-1", AbilityType.DEXTERITY)
+    slowed_strength_save_roll = build_saving_throw_roll_payload(slowed_sheet, "player-1", AbilityType.STRENGTH)
 
     assert ("Blessed", 2) in [(part.source, part.value) for part in attack_roll.modifierBreakdown]
     assert ("Guidance", 2) not in [(part.source, part.value) for part in attack_roll.modifierBreakdown]
@@ -254,6 +259,10 @@ def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch
     assert ("Blessed", 2) in [(part.source, part.value) for part in save_roll.modifierBreakdown]
     assert ("Bane", -2) in [(part.source, part.value) for part in baned_attack_roll.modifierBreakdown]
     assert ("Bane", -2) in [(part.source, part.value) for part in baned_save_roll.modifierBreakdown]
+    assert ("Slowed", -2) in [(part.source, part.value) for part in slowed_dexterity_save_roll.modifierBreakdown]
+    assert ("Slowed", -2) not in [(part.source, part.value) for part in slowed_strength_save_roll.modifierBreakdown]
+    assert condition_armor_class_bonus([ConditionType.SHIELDED]) == 5
+    assert condition_armor_class_bonus([ConditionType.SHIELDED, ConditionType.SLOWED]) == 3
 
 
 def test_active_damage_resistance_conditions_reduce_matching_damage_by_d4(monkeypatch) -> None:
@@ -561,50 +570,90 @@ def test_burning_hands_spell_damage_scales_by_spell_slot(monkeypatch) -> None:
 def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypatch) -> None:
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 3)
     acid_splash = wizard_spell_entry(SpellId.ACID_SPLASH)
+    call_lightning = spell_entry(SpellId.CALL_LIGHTNING)
+    cone_of_cold = wizard_spell_entry(SpellId.CONE_OF_COLD)
+    conjure_barrage = spell_entry(SpellId.CONJURE_BARRAGE)
     guiding_bolt = cleric_spell_entry(SpellId.GUIDING_BOLT)
     eldritch_blast = spell_entry(SpellId.ELDRITCH_BLAST)
     inflict_wounds = cleric_spell_entry(SpellId.INFLICT_WOUNDS)
+    lightning_bolt = wizard_spell_entry(SpellId.LIGHTNING_BOLT)
     divine_smite = spell_entry(SpellId.DIVINE_SMITE)
     magic_missile = wizard_spell_entry(SpellId.MAGIC_MISSILE)
+    mass_healing_word = spell_entry(SpellId.MASS_HEALING_WORD)
     prayer_of_healing = spell_entry(SpellId.PRAYER_OF_HEALING)
     ray_of_sickness = wizard_spell_entry(SpellId.RAY_OF_SICKNESS)
     searing_orb = spell_entry(SpellId.SEARING_ORB)
     shatter = wizard_spell_entry(SpellId.SHATTER)
     thunderwave = wizard_spell_entry(SpellId.THUNDERWAVE)
+    vampiric_touch = wizard_spell_entry(SpellId.VAMPIRIC_TOUCH)
+    wind_wall = spell_entry(SpellId.WIND_WALL)
     assert acid_splash is not None
+    assert call_lightning is not None
+    assert cone_of_cold is not None
+    assert conjure_barrage is not None
     assert guiding_bolt is not None
     assert eldritch_blast is not None
     assert inflict_wounds is not None
+    assert lightning_bolt is not None
     assert divine_smite is not None
     assert magic_missile is not None
+    assert mass_healing_word is not None
     assert prayer_of_healing is not None
     assert ray_of_sickness is not None
     assert searing_orb is not None
     assert shatter is not None
     assert thunderwave is not None
+    assert vampiric_touch is not None
+    assert wind_wall is not None
     ice_knife = wizard_spell_entry(SpellId.ICE_KNIFE)
     assert ice_knife is not None
 
     acid_roll = build_spell_damage_roll_payload(spell_sheet(11, [acid_splash]), "player-1", acid_splash)
+    call_lightning_roll = build_spell_damage_roll_payload(spell_sheet(5, [call_lightning]), "player-1", call_lightning, spell_slot_level=4)
+    cone_of_cold_roll = build_spell_damage_roll_payload(spell_sheet(9, [cone_of_cold]), "player-1", cone_of_cold, spell_slot_level=6)
+    conjure_barrage_roll = build_spell_damage_roll_payload(spell_sheet(5, [conjure_barrage]), "player-1", conjure_barrage, spell_slot_level=4)
     guiding_roll = build_spell_damage_roll_payload(spell_sheet(5, [guiding_bolt]), "player-1", guiding_bolt, spell_slot_level=3)
     eldritch_roll = build_spell_damage_roll_payload(spell_sheet(11, [eldritch_blast]), "player-1", eldritch_blast, instance_index=2)
     inflict_roll = build_spell_damage_roll_payload(spell_sheet(5, [inflict_wounds]), "player-1", inflict_wounds, spell_slot_level=2)
+    lightning_roll = build_spell_damage_roll_payload(spell_sheet(5, [lightning_bolt]), "player-1", lightning_bolt, spell_slot_level=4)
     divine_smite_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=0, spell_slot_level=3)
     divine_smite_bonus_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=1)
     ice_target_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=0)
     ice_blast_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=1, spell_slot_level=2)
     missile_roll = build_spell_damage_roll_payload(spell_sheet(5, [magic_missile]), "player-1", magic_missile, spell_slot_level=3, instance_index=4)
+    mass_healing_roll = build_spell_healing_roll_payload(spell_sheet(5, [mass_healing_word]), "player-1", mass_healing_word, spell_slot_level=4)
     prayer_roll = build_spell_healing_roll_payload(spell_sheet(5, [prayer_of_healing]), "player-1", prayer_of_healing, spell_slot_level=4)
     ray_roll = build_spell_damage_roll_payload(spell_sheet(5, [ray_of_sickness]), "player-1", ray_of_sickness, spell_slot_level=3)
     searing_orb_roll = build_spell_damage_roll_payload(spell_sheet(5, [searing_orb]), "player-1", searing_orb, spell_slot_level=4)
     shatter_roll = build_spell_damage_roll_payload(spell_sheet(5, [shatter]), "player-1", shatter)
     thunderwave_roll = build_spell_damage_roll_payload(spell_sheet(5, [thunderwave]), "player-1", thunderwave, spell_slot_level=2)
+    vampiric_roll = build_spell_damage_roll_payload(spell_sheet(5, [vampiric_touch]), "player-1", vampiric_touch, spell_slot_level=4)
+    wind_wall_roll = build_spell_damage_roll_payload(spell_sheet(5, [wind_wall]), "player-1", wind_wall)
 
     assert acid_roll.die == "3d6"
     assert acid_roll.total == 9
     assert acid_roll.damageType == DamageType.ACID
     assert acid_roll.damageSavingThrow == AbilityType.DEXTERITY
     assert acid_roll.damageSaveOutcome == SpellSaveOutcome.NEGATES
+
+    assert call_lightning_roll.label == "Bolt Damage"
+    assert call_lightning_roll.die == "4d10"
+    assert call_lightning_roll.total == 12
+    assert call_lightning_roll.damageType == DamageType.LIGHTNING
+    assert call_lightning_roll.damageSavingThrow == AbilityType.DEXTERITY
+    assert call_lightning_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert cone_of_cold_roll.die == "9d8"
+    assert cone_of_cold_roll.total == 27
+    assert cone_of_cold_roll.damageType == DamageType.COLD
+    assert cone_of_cold_roll.damageSavingThrow == AbilityType.CONSTITUTION
+    assert cone_of_cold_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert conjure_barrage_roll.die == "6d8"
+    assert conjure_barrage_roll.total == 18
+    assert conjure_barrage_roll.damageType == DamageType.FORCE
+    assert conjure_barrage_roll.damageSavingThrow == AbilityType.DEXTERITY
+    assert conjure_barrage_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
 
     assert guiding_roll.die == "6d6"
     assert guiding_roll.total == 18
@@ -628,6 +677,12 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert inflict_roll.damageType == DamageType.NECROTIC
     assert inflict_roll.damageSavingThrow == AbilityType.CONSTITUTION
     assert inflict_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert lightning_roll.die == "9d6"
+    assert lightning_roll.total == 27
+    assert lightning_roll.damageType == DamageType.LIGHTNING
+    assert lightning_roll.damageSavingThrow == AbilityType.DEXTERITY
+    assert lightning_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
 
     assert divine_smite_roll.label == "Smite Damage"
     assert divine_smite_roll.die == "4d8"
@@ -658,6 +713,10 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert magic_missile.effects is not None
     assert scaled_spell_effect_instance_count(magic_missile.effects[0], spell_sheet(5, [magic_missile]), magic_missile.level, 3) == 5
 
+    assert mass_healing_roll.die == "3d4"
+    assert mass_healing_roll.total == 12
+    assert mass_healing_roll.resolution == RollResolutionMode.HEAL_SELF
+
     assert prayer_roll.die == "4d8"
     assert prayer_roll.total == 15
     assert prayer_roll.resolution == RollResolutionMode.HEAL_SELF
@@ -686,23 +745,46 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert thunderwave_roll.damageType == DamageType.THUNDER
     assert thunderwave_roll.damageSavingThrow == AbilityType.CONSTITUTION
     assert thunderwave_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
+    assert vampiric_roll.label == "Touch Damage"
+    assert vampiric_roll.die == "4d6"
+    assert vampiric_roll.total == 12
+    assert vampiric_roll.damageType == DamageType.NECROTIC
+    assert vampiric_roll.sourceHealing is not None
+    assert vampiric_roll.sourceHealing.amount == SpellLinkedHealingAmount.HALF_DAMAGE_DEALT
+    assert wind_wall_roll.die == "4d8"
+    assert wind_wall_roll.total == 12
+    assert wind_wall_roll.damageType == DamageType.BLUDGEONING
+    assert wind_wall_roll.damageSavingThrow == AbilityType.STRENGTH
+    assert wind_wall_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
 
 
 def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None:
     tasha = wizard_spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
     command = spell_entry(SpellId.COMMAND)
     bless = spell_entry(SpellId.BLESS)
+    blinding_smite = spell_entry(SpellId.BLINDING_SMITE)
+    fear = spell_entry(SpellId.FEAR)
+    hypnotic_pattern = spell_entry(SpellId.HYPNOTIC_PATTERN)
     searing_orb = spell_entry(SpellId.SEARING_ORB)
+    stinking_cloud = spell_entry(SpellId.STINKING_CLOUD)
     assert tasha is not None
     assert command is not None
     assert bless is not None
+    assert blinding_smite is not None
+    assert fear is not None
+    assert hypnotic_pattern is not None
     assert searing_orb is not None
+    assert stinking_cloud is not None
 
     sheet = spell_sheet(5, [tasha])
     effect_roll = build_spell_condition_roll_payload(sheet, "player-1", tasha)
     command_roll = build_spell_condition_roll_payload(spell_sheet(5, [command]), "player-1", command, effect_index=3)
     bless_roll = build_spell_condition_roll_payload(spell_sheet(5, [bless]), "player-1", bless)
+    blinding_roll = build_spell_condition_roll_payload(spell_sheet(5, [blinding_smite]), "player-1", blinding_smite)
+    fear_roll = build_spell_condition_roll_payload(spell_sheet(5, [fear]), "player-1", fear)
+    hypnotic_roll = build_spell_condition_roll_payload(spell_sheet(5, [hypnotic_pattern]), "player-1", hypnotic_pattern)
     searing_orb_roll = build_spell_condition_roll_payload(spell_sheet(5, [searing_orb]), "player-1", searing_orb)
+    stinking_cloud_roll = build_spell_condition_roll_payload(spell_sheet(5, [stinking_cloud]), "player-1", stinking_cloud)
 
     assert effect_roll.source.section == SheetSectionType.SPELLS
     assert effect_roll.source.sourceId == "tashaSHideousLaughter"
@@ -727,12 +809,32 @@ def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None
     assert [effect.condition for effect in bless_roll.conditionEffects] == [ConditionType.BLESSED]
     assert {effect.mode for effect in bless_roll.conditionEffects} == {ConditionApplicationMode.DIRECT}
     assert {effect.savingThrow for effect in bless_roll.conditionEffects} == {None}
+    assert blinding_roll.label == "Blind Effect"
+    assert blinding_roll.conditionEffects is not None
+    assert blinding_roll.conditionEffects[0].condition == ConditionType.BLINDED
+    assert blinding_roll.conditionEffects[0].savingThrow == AbilityType.CONSTITUTION
+    assert blinding_roll.conditionEffects[0].saveDc == 14
+    assert fear_roll.label == "Fear Effect"
+    assert fear_roll.conditionEffects is not None
+    assert fear_roll.conditionEffects[0].condition == ConditionType.FRIGHTENED
+    assert fear_roll.conditionEffects[0].savingThrow == AbilityType.WISDOM
+    assert hypnotic_roll.label == "Pattern Effect"
+    assert hypnotic_roll.conditionEffects is not None
+    assert [effect.condition for effect in hypnotic_roll.conditionEffects] == [ConditionType.CHARMED, ConditionType.INCAPACITATED]
+    assert {effect.savingThrow for effect in hypnotic_roll.conditionEffects} == {AbilityType.WISDOM}
+    assert {effect.removalTrigger for effect in hypnotic_roll.conditionEffects} == {ConditionRemovalTrigger.AFTER_TAKING_DAMAGE}
     assert searing_orb_roll.label == "Blind Effect"
     assert searing_orb_roll.conditionEffects is not None
     assert searing_orb_roll.conditionEffects[0].condition == ConditionType.BLINDED
     assert searing_orb_roll.conditionEffects[0].mode == ConditionApplicationMode.TARGET_SAVE
     assert searing_orb_roll.conditionEffects[0].savingThrow == AbilityType.CONSTITUTION
     assert searing_orb_roll.conditionEffects[0].saveDc == 14
+    assert stinking_cloud_roll.label == "Nauseate Effect"
+    assert stinking_cloud_roll.conditionEffects is not None
+    assert stinking_cloud_roll.conditionEffects[0].condition == ConditionType.POISONED
+    assert stinking_cloud_roll.conditionEffects[0].mode == ConditionApplicationMode.TARGET_SAVE
+    assert stinking_cloud_roll.conditionEffects[0].savingThrow == AbilityType.CONSTITUTION
+    assert stinking_cloud_roll.conditionEffects[0].saveDc == 14
 
     assert spell_condition_effect_at(tasha, -1) is None
     assert spell_condition_effect_at(replace(tasha, effects=None), 0) is None

@@ -43,6 +43,7 @@ from dnd_board.character_sheet import (
     ResourceTracker,
     RollPayload,
     RollAction,
+    RollLogEntryType,
     RollResolutionMode,
     RollSource,
     RestType,
@@ -1436,6 +1437,176 @@ def test_spell_damage_saves_can_negate_and_damage_can_apply_conditions(tmp_path,
     assert "gains Poisoned" not in protected_ray_resolution_body["outcome"]
 
 
+def test_slow_applies_condition_penalties_and_blocks_reactions(tmp_path, monkeypatch) -> None:
+    slow = wizard_spell_entry(SpellId.SLOW)
+    assert slow is not None
+    write_party_campaign(
+        tmp_path,
+        "slow-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[slow]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Guard",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=10, dexterity=14, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                savingThrowProficiencies=[AbilityType.DEXTERITY],
+                resources=[
+                    ResourceTracker(
+                        "reactionDice",
+                        "Reaction Dice",
+                        1,
+                        1,
+                        RestType.LONG_REST,
+                        TimeEconomy.REACTION,
+                        "A reaction roll.",
+                        rollActions=[RollAction(BattleMasterManeuverType.PARRY, BattleMasterManeuverType.PARRY, 1, DiceType.D8)],
+                    )
+                ],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1 if maximum == 20 else 4)
+    client = TestClient(server.app)
+
+    effect_response = client.post("/api/rooms/slow-test/sheet/player-1/spells/slow/rolls/effect?playerKey=player-1")
+    effect_roll = effect_response.json()["roll"]
+    applied = client.post(f"/api/rooms/slow-test/rolls/{effect_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target = client.get("/api/rooms/slow-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    dexterity_save = client.post("/api/rooms/slow-test/sheet/player-2/rolls/saving-throw?playerKey=player-2&ability=dexterity")
+    reaction_roll = client.post("/api/rooms/slow-test/sheet/player-2/resources/reactionDice/rolls/parry?playerKey=player-2")
+
+    assert effect_response.status_code == 200
+    assert effect_roll["conditionEffects"][0]["condition"] == "slowed"
+    assert effect_roll["conditionEffects"][0]["savingThrow"] == "wisdom"
+    assert applied.status_code == 200
+    assert target["conditions"] == ["slowed"]
+    assert target["armorClass"] == 12
+    assert ("Slowed", -2) in [(part["source"], part["value"]) for part in dexterity_save.json()["roll"]["modifierBreakdown"]]
+    assert reaction_roll.status_code == 400
+    assert reaction_roll.json()["detail"] == "Slowed creatures cannot take Reactions"
+    blocked_entry = server.rooms["slow-test"].roll_history[-1]
+    assert blocked_entry.entryType == RollLogEntryType.ROLL_BLOCKED
+    assert blocked_entry.roll.sourceLabel == "Reaction Dice"
+    assert blocked_entry.roll.label == "Parry blocked: Slowed prevents Reactions"
+
+
+def test_shield_applies_temporary_armor_class_condition(tmp_path, monkeypatch) -> None:
+    shield = wizard_spell_entry(SpellId.SHIELD)
+    assert shield is not None
+    write_party_campaign(
+        tmp_path,
+        "shield-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=4)], spells=[shield]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    before = client.get("/api/rooms/shield-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    effect_response = client.post("/api/rooms/shield-test/sheet/player-1/spells/shield/rolls/effect?playerKey=player-1")
+    effect_roll = effect_response.json()["roll"]
+    applied = client.post(f"/api/rooms/shield-test/rolls/{effect_roll['id']}/resolve?playerKey=dm&targetSheetId=player-1")
+    after = client.get("/api/rooms/shield-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+
+    assert effect_response.status_code == 200
+    assert effect_roll["conditionEffects"][0]["condition"] == "shielded"
+    assert applied.status_code == 200
+    assert after["conditions"] == ["shielded"]
+    assert after["armorClass"] == before["armorClass"] + 5
+
+
+def test_slowed_somatic_spell_check_applies_once_to_attack_spells_and_to_cast_damage_spells(tmp_path, monkeypatch) -> None:
+    chromatic_orb = wizard_spell_entry(SpellId.CHROMATIC_ORB)
+    thunderwave = wizard_spell_entry(SpellId.THUNDERWAVE)
+    assert chromatic_orb is not None
+    assert thunderwave is not None
+    write_party_campaign(
+        tmp_path,
+        "slow-somatic-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=4)],
+                spells=[chromatic_orb, thunderwave],
+                conditions=[ConditionType.SLOWED],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    somatic_checks = iter([2, 4])
+
+    def fixed_roll(minimum: int, maximum: int) -> int:
+        if maximum == 4:
+            return next(somatic_checks)
+        if maximum == 20:
+            return 10
+        return 6
+
+    monkeypatch.setattr(server.random, "randint", fixed_roll)
+    client = TestClient(server.app)
+
+    attack_response = client.post("/api/rooms/slow-somatic-test/sheet/player-1/spells/chromaticOrb/rolls/attack?playerKey=player-1")
+    damage_response = client.post("/api/rooms/slow-somatic-test/sheet/player-1/spells/chromaticOrb/rolls/damage?playerKey=player-1")
+    thunderwave_response = client.post("/api/rooms/slow-somatic-test/sheet/player-1/spells/thunderwave/rolls/damage?playerKey=player-1")
+
+    history_labels = [entry.roll.label for entry in server.rooms["slow-somatic-test"].roll_history]
+    assert attack_response.status_code == 200
+    assert damage_response.status_code == 200
+    assert thunderwave_response.status_code == 200
+    assert "Slowed somatic check succeeds on 1d4 (2); spell continues" in history_labels
+    assert "Slowed somatic check succeeds on 1d4 (4); spell continues" in history_labels
+    assert sum(1 for label in history_labels if label.startswith("Slowed somatic check succeeds")) == 2
+
+
+def test_slowed_somatic_spell_failure_logs_and_blocks_spell(tmp_path, monkeypatch) -> None:
+    thunderwave = wizard_spell_entry(SpellId.THUNDERWAVE)
+    assert thunderwave is not None
+    write_party_campaign(
+        tmp_path,
+        "slow-somatic-fail-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=4)],
+                spells=[thunderwave],
+                conditions=[ConditionType.SLOWED],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    client = TestClient(server.app)
+
+    response = client.post("/api/rooms/slow-somatic-fail-test/sheet/player-1/spells/thunderwave/rolls/damage?playerKey=player-1")
+    blocked_entry = server.rooms["slow-somatic-fail-test"].roll_history[-1]
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Slowed somatic spell failed"
+    assert blocked_entry.entryType == RollLogEntryType.ROLL_BLOCKED
+    assert blocked_entry.roll.sourceLabel == "Thunderwave"
+    assert blocked_entry.roll.label == "Spell Cast blocked: Slowed somatic delay fails on 1d4 (1)"
+
+
 def test_prayer_of_healing_grants_short_rest_to_resolved_target(tmp_path, monkeypatch) -> None:
     prayer = spell_entry(SpellId.PRAYER_OF_HEALING)
     assert prayer is not None
@@ -1519,6 +1690,47 @@ def test_shatter_rolls_disadvantage_for_construct_targets(tmp_path, monkeypatch)
     assert body["responseRolls"][0]["die"] == "2d20kl1"
     assert body["responseRolls"][0]["dice"] == [18, 2]
     assert "Constitution save with Disadvantage" in body["outcome"]
+
+
+def test_vampiric_touch_heals_source_for_half_final_damage(tmp_path, monkeypatch) -> None:
+    vampiric_touch = wizard_spell_entry(SpellId.VAMPIRIC_TOUCH)
+    assert vampiric_touch is not None
+    write_party_campaign(
+        tmp_path,
+        "vampiric-touch-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[vampiric_touch]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 4)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("vampiric-touch-test")
+    room.hit_points["player-1"] = 10
+
+    damage_response = client.post("/api/rooms/vampiric-touch-test/sheet/player-1/spells/vampiricTouch/rolls/damage?playerKey=player-1")
+    damage_roll = damage_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/vampiric-touch-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    caster = client.get("/api/rooms/vampiric-touch-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    target = client.get("/api/rooms/vampiric-touch-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert damage_response.status_code == 200
+    assert damage_roll["sourceHealing"]["amount"] == "halfDamageDealt"
+    assert resolution.status_code == 200
+    assert target["hp"] == {"current": 18, "max": 30, "temporary": 0}
+    assert caster["hp"] == {"current": 16, "max": 30, "temporary": 0}
+    assert "Wizard heals 6 hit points" in resolution.json()["resolution"]["outcome"]
 
 
 def test_player_can_roll_ability_check_and_saving_throw(tmp_path, monkeypatch) -> None:
@@ -1674,6 +1886,24 @@ def test_player_can_update_generated_sheet_conditions_without_manifest(tmp_path,
     assert applied.status_code == 200
     assert applied.json()["sheet"]["conditions"] == ["prone"]
     assert sheet["conditions"] == ["prone"]
+
+
+def test_dm_can_update_generated_sheet_damage_defenses_without_manifest(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    denied = client.post("/api/rooms/generated-defense-test/sheet/player-1/defenses/resistance/fire?playerKey=player-1&active=true")
+    applied = client.post("/api/rooms/generated-defense-test/sheet/player-1/defenses/resistance/fire?playerKey=dm&active=true")
+    sheet = client.get("/api/rooms/generated-defense-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    cleared = client.post("/api/rooms/generated-defense-test/sheet/player-1/defenses/resistance/fire?playerKey=dm&active=false")
+
+    assert denied.status_code == 403
+    assert applied.status_code == 200
+    assert applied.json()["sheet"]["damageResistances"] == ["fire"]
+    assert applied.json()["sheet"]["damageResistancesLabel"] == ["Fire"]
+    assert sheet["damageResistances"] == ["fire"]
+    assert cleared.status_code == 200
+    assert cleared.json()["sheet"]["damageResistances"] == []
 
 
 def test_dm_can_update_sheet_damage_defenses(tmp_path, monkeypatch) -> None:

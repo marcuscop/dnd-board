@@ -188,6 +188,10 @@
                     {
                       "$type": "ConditionType",
                       "value": "POISONED"
+                    },
+                    {
+                      "$type": "ConditionType",
+                      "value": "SLOWED"
                     }
                   ]
                 },
@@ -4906,6 +4910,549 @@
                           }
                         }
                       }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "VAMPIRIC_TOUCH"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "VAMPIRIC_TOUCH"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 3
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "NECROMANCY"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "SELF"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Sorcerer, Warlock, Wizard. Casting time: Action. Range: Self. Components: Verbal, Somatic. Duration: Up to 1 minute."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "effects": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellEffect",
+                              "fields": {
+                                "kind": {
+                                  "$type": "SpellEffectKind",
+                                  "value": "DAMAGE"
+                                },
+                                "trigger": {
+                                  "$type": "SpellEffectTrigger",
+                                  "value": "ON_HIT"
+                                },
+                                "target": {
+                                  "$type": "SpellEffectTarget",
+                                  "value": "TARGET"
+                                },
+                                "attack": {
+                                  "$type": "SpellAttackType",
+                                  "value": "MELEE_SPELL_ATTACK"
+                                },
+                                "damage": {
+                                  "$type": "SpellDamageEffect",
+                                  "fields": {
+                                    "dice": {
+                                      "$type": "SpellEffectDice",
+                                      "fields": {
+                                        "diceCount": {
+                                          "$type": "int",
+                                          "value": 3
+                                        },
+                                        "diceType": {
+                                          "$type": "DiceType",
+                                          "value": "D6"
+                                        },
+                                        "staticBonus": {
+                                          "$type": "int",
+                                          "value": 0
+                                        },
+                                        "bonusSpellcastingAbility": {
+                                          "$type": "bool",
+                                          "value": false
+                                        }
+                                      }
+                                    },
+                                    "damageType": {
+                                      "$type": "DamageType",
+                                      "value": "NECROTIC"
+                                    }
+                                  }
+                                },
+                                "sourceHealing": {
+                                  "$type": "SpellSourceHealingEffect",
+                                  "fields": {
+                                    "amount": {
+                                      "$type": "SpellLinkedHealingAmount",
+                                      "value": "HALF_DAMAGE_DEALT"
+                                    }
+                                  }
+                                },
+                                "scaling": {
+                                  "$type": "list",
+                                  "items": [
+                                    {
+                                      "$type": "SpellScaling",
+                                      "fields": {
+                                        "scalingType": {
+                                          "$type": "SpellScalingType",
+                                          "value": "SPELL_SLOT_LEVEL"
+                                        },
+                                        "additionalDice": {
+                                          "$type": "SpellEffectDice",
+                                          "fields": {
+                                            "diceCount": {
+                                              "$type": "int",
+                                              "value": 1
+                                            },
+                                            "diceType": {
+                                              "$type": "DiceType",
+                                              "value": "D6"
+                                            },
+                                            "staticBonus": {
+                                              "$type": "int",
+                                              "value": 0
+                                            },
+                                            "bonusSpellcastingAbility": {
+                                              "$type": "bool",
+                                              "value": false
+                                            }
+                                          }
+                                        },
+                                        "additionalStaticBonus": {
+                                          "$type": "int",
+                                          "value": 0
+                                        },
+                                        "additionalInstances": {
+                                          "$type": "int",
+                                          "value": 0
+                                        },
+                                        "interval": {
+                                          "$type": "int",
+                                          "value": 1
+                                        },
+                                        "description": {
+                                          "$type": "str",
+                                          "value": "Damage increases by 1d6 for each spell slot level above 3."
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                "instances": {
+                                  "$type": "int",
+                                  "value": 1
+                                },
+                                "instanceLabel": {
+                                  "$type": "str",
+                                  "value": ""
+                                },
+                                "actionLabel": {
+                                  "$type": "str",
+                                  "value": "Touch"
+                                },
+                                "description": {
+                                  "$type": "str",
+                                  "value": "On a hit, the target takes this damage, and you regain Hit Points equal to half the Necrotic damage dealt."
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "status": {
+                          "$type": "SpellStatus",
+                          "fields": {
+                            "source": {
+                              "$type": "SpellSource",
+                              "value": "WIZARD"
+                            },
+                            "castingAbility": {
+                              "$type": "AbilityType",
+                              "value": "INTELLIGENCE"
+                            },
+                            "reset": {
+                              "$type": "RestType",
+                              "value": "NONE"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "SLOW"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "SLOW"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 3
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "TRANSMUTATION"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 120
+                            },
+                            "area": {
+                              "$type": "SpellCubeArea",
+                              "fields": {
+                                "sizeFeet": {
+                                  "$type": "int",
+                                  "value": 40
+                                },
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "CUBE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "MINUTE"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Bard, Sorcerer, Wizard. Casting time: Action. Range: 120 ft, 40 ft cube. Components: Verbal, Somatic, Material. Duration: Up to 1 minute."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "effects": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellEffect",
+                              "fields": {
+                                "kind": {
+                                  "$type": "SpellEffectKind",
+                                  "value": "CONDITION"
+                                },
+                                "trigger": {
+                                  "$type": "SpellEffectTrigger",
+                                  "value": "ON_FAILED_SAVE"
+                                },
+                                "target": {
+                                  "$type": "SpellEffectTarget",
+                                  "value": "AREA"
+                                },
+                                "attack": {
+                                  "$type": "SpellAttackType",
+                                  "value": "NONE"
+                                },
+                                "savingThrow": {
+                                  "$type": "SpellSavingThrow",
+                                  "fields": {
+                                    "ability": {
+                                      "$type": "AbilityType",
+                                      "value": "WISDOM"
+                                    },
+                                    "outcome": {
+                                      "$type": "SpellSaveOutcome",
+                                      "value": "NEGATES"
+                                    },
+                                    "repeat": {
+                                      "$type": "SpellEffectTrigger",
+                                      "value": "END_OF_TURN"
+                                    }
+                                  }
+                                },
+                                "conditions": {
+                                  "$type": "list",
+                                  "items": [
+                                    {
+                                      "$type": "SpellConditionEffect",
+                                      "fields": {
+                                        "condition": {
+                                          "$type": "ConditionType",
+                                          "value": "SLOWED"
+                                        },
+                                        "duration": {
+                                          "$type": "ConditionDuration",
+                                          "value": "MANUAL"
+                                        },
+                                        "saveEnds": {
+                                          "$type": "bool",
+                                          "value": false
+                                        },
+                                        "removalAdvantage": {
+                                          "$type": "bool",
+                                          "value": false
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                "instances": {
+                                  "$type": "int",
+                                  "value": 1
+                                },
+                                "instanceLabel": {
+                                  "$type": "str",
+                                  "value": ""
+                                },
+                                "actionLabel": {
+                                  "$type": "str",
+                                  "value": "Slow"
+                                },
+                                "description": {
+                                  "$type": "str",
+                                  "value": "On a failed Wisdom save, the target is Slowed: Speed is halved, AC and Dexterity saves take -2, and Reactions are blocked. Track action/Bonus Action limits, one-attack limit, somatic spell failure chance, and repeat saves manually."
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "status": {
+                          "$type": "SpellStatus",
+                          "fields": {
+                            "source": {
+                              "$type": "SpellSource",
+                              "value": "WIZARD"
+                            },
+                            "castingAbility": {
+                              "$type": "AbilityType",
+                              "value": "INTELLIGENCE"
+                            },
+                            "reset": {
+                              "$type": "RestType",
+                              "value": "NONE"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "SHIELD"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "SHIELD"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 1
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ABJURATION"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "REACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "SELF"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "ROUND"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Sorcerer, Wizard. Casting time: Reaction. Range: Self. Components: Verbal, Somatic. Duration: 1 round."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "status": {
+                          "$type": "SpellStatus",
+                          "fields": {
+                            "source": {
+                              "$type": "SpellSource",
+                              "value": "WIZARD"
+                            },
+                            "castingAbility": {
+                              "$type": "AbilityType",
+                              "value": "INTELLIGENCE"
+                            },
+                            "reset": {
+                              "$type": "RestType",
+                              "value": "NONE"
+                            }
+                          }
+                        }
+                      }
                     }
                   ]
                 },
@@ -7867,6 +8414,15 @@
                     {
                       "$type": "str",
                       "value": "strength:2"
+                    }
+                  ]
+                },
+                "conditions": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "ConditionType",
+                      "value": "SLOWED"
                     }
                   ]
                 },

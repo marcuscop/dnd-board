@@ -16,6 +16,7 @@ from dnd_board.character_sheet import (
     SpellEffectTarget,
     SpellEffectTrigger,
     SpellId,
+    SpellLinkedHealingAmount,
     SpellRangeType,
     SpellSaveOutcome,
     SpellScalingType,
@@ -712,6 +713,153 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert spiritual_weapon.effects[0].scaling[0].additionalDice.dice == "1d8"
 
 
+def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
+    aura_of_vitality = spell_entry(SpellId.AURA_OF_VITALITY)
+    blinding_smite = spell_entry(SpellId.BLINDING_SMITE)
+    call_lightning = spell_entry(SpellId.CALL_LIGHTNING)
+    conjure_barrage = spell_entry(SpellId.CONJURE_BARRAGE)
+    fear = spell_entry(SpellId.FEAR)
+    hypnotic_pattern = spell_entry(SpellId.HYPNOTIC_PATTERN)
+    lightning_bolt = spell_entry(SpellId.LIGHTNING_BOLT)
+    mass_healing_word = spell_entry(SpellId.MASS_HEALING_WORD)
+    spirit_guardians = spell_entry(SpellId.SPIRIT_GUARDIANS)
+    stinking_cloud = spell_entry(SpellId.STINKING_CLOUD)
+    vampiric_touch = spell_entry(SpellId.VAMPIRIC_TOUCH)
+    wind_wall = spell_entry(SpellId.WIND_WALL)
+
+    assert aura_of_vitality is not None and aura_of_vitality.effects is not None
+    assert aura_of_vitality.targeting.area.shape == SpellAreaShape.RADIUS
+    assert aura_of_vitality.targeting.area.radiusFeet == 30
+    assert aura_of_vitality.effects[0].healing is not None
+    assert aura_of_vitality.effects[0].healing.dice.dice == "2d6"
+
+    assert blinding_smite is not None and blinding_smite.effects is not None
+    assert blinding_smite.effects[0].damage is not None
+    assert blinding_smite.effects[0].damage.dice.dice == "3d8"
+    assert blinding_smite.effects[0].damage.damageType == DamageType.RADIANT
+    assert blinding_smite.effects[0].trigger == SpellEffectTrigger.ON_HIT
+    assert blinding_smite.effects[0].scaling is not None
+    assert blinding_smite.effects[0].scaling[0].additionalDice is not None
+    assert blinding_smite.effects[0].scaling[0].additionalDice.dice == "1d8"
+    assert blinding_smite.effects[1].conditions is not None
+    assert blinding_smite.effects[1].conditions[0].condition == ConditionType.BLINDED
+    assert blinding_smite.effects[1].savingThrow is not None
+    assert blinding_smite.effects[1].savingThrow.ability == AbilityType.CONSTITUTION
+    assert blinding_smite.effects[1].savingThrow.repeat == SpellEffectTrigger.END_OF_TURN
+
+    assert call_lightning is not None and call_lightning.effects is not None
+    assert call_lightning.targeting.area.shape == SpellAreaShape.RADIUS
+    assert call_lightning.targeting.area.radiusFeet == 5
+    assert call_lightning.effects[0].damage is not None
+    assert call_lightning.effects[0].damage.dice.dice == "3d10"
+    assert call_lightning.effects[0].damage.damageType == DamageType.LIGHTNING
+    assert call_lightning.effects[0].savingThrow is not None
+    assert call_lightning.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert call_lightning.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert call_lightning.effects[0].scaling is not None
+    assert call_lightning.effects[0].scaling[0].additionalDice is not None
+    assert call_lightning.effects[0].scaling[0].additionalDice.dice == "1d10"
+
+    assert conjure_barrage is not None and conjure_barrage.effects is not None
+    assert conjure_barrage.targeting.area.shape == SpellAreaShape.CONE
+    assert conjure_barrage.targeting.area.lengthFeet == 60
+    assert conjure_barrage.effects[0].damage is not None
+    assert conjure_barrage.effects[0].damage.dice.dice == "5d8"
+    assert conjure_barrage.effects[0].damage.damageType == DamageType.FORCE
+    assert conjure_barrage.effects[0].savingThrow is not None
+    assert conjure_barrage.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+
+    assert fear is not None and fear.effects is not None
+    assert fear.targeting.area.shape == SpellAreaShape.CONE
+    assert fear.effects[0].conditions is not None
+    assert fear.effects[0].conditions[0].condition == ConditionType.FRIGHTENED
+    assert fear.effects[0].savingThrow is not None
+    assert fear.effects[0].savingThrow.ability == AbilityType.WISDOM
+
+    assert hypnotic_pattern is not None and hypnotic_pattern.effects is not None
+    assert hypnotic_pattern.targeting.area.shape == SpellAreaShape.CUBE
+    assert hypnotic_pattern.effects[0].conditions is not None
+    assert [condition.condition for condition in hypnotic_pattern.effects[0].conditions] == [ConditionType.CHARMED, ConditionType.INCAPACITATED]
+    assert {condition.removalTrigger for condition in hypnotic_pattern.effects[0].conditions} == {ConditionRemovalTrigger.AFTER_TAKING_DAMAGE}
+    assert hypnotic_pattern.effects[0].savingThrow is not None
+    assert hypnotic_pattern.effects[0].savingThrow.ability == AbilityType.WISDOM
+
+    assert lightning_bolt is not None and lightning_bolt.effects is not None
+    assert lightning_bolt.targeting.area.shape == SpellAreaShape.LINE
+    assert lightning_bolt.targeting.area.lengthFeet == 100
+    assert lightning_bolt.targeting.area.widthFeet == 5
+    assert lightning_bolt.effects[0].damage is not None
+    assert lightning_bolt.effects[0].damage.dice.dice == "8d6"
+    assert lightning_bolt.effects[0].damage.damageType == DamageType.LIGHTNING
+    assert lightning_bolt.effects[0].savingThrow is not None
+    assert lightning_bolt.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert lightning_bolt.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert mass_healing_word is not None and mass_healing_word.effects is not None
+    assert mass_healing_word.effects[0].healing is not None
+    assert mass_healing_word.effects[0].healing.dice.dice == "2d4"
+    assert mass_healing_word.effects[0].healing.dice.bonusSpellcastingAbility is True
+    assert mass_healing_word.effects[0].scaling is not None
+    assert mass_healing_word.effects[0].scaling[0].additionalDice is not None
+    assert mass_healing_word.effects[0].scaling[0].additionalDice.dice == "1d4"
+
+    assert spirit_guardians is not None and spirit_guardians.effects is not None
+    assert spirit_guardians.targeting.area.shape == SpellAreaShape.RADIUS
+    assert spirit_guardians.targeting.area.radiusFeet == 15
+    assert [effect.damage.damageType for effect in spirit_guardians.effects if effect.damage] == [DamageType.RADIANT, DamageType.NECROTIC]
+    assert all(effect.damage is not None and effect.damage.dice.dice == "3d8" for effect in spirit_guardians.effects)
+    assert all(effect.savingThrow is not None and effect.savingThrow.ability == AbilityType.WISDOM for effect in spirit_guardians.effects)
+    assert all(effect.savingThrow is not None and effect.savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE for effect in spirit_guardians.effects)
+
+    assert stinking_cloud is not None and stinking_cloud.effects is not None
+    assert stinking_cloud.targeting.area.shape == SpellAreaShape.RADIUS
+    assert stinking_cloud.targeting.area.radiusFeet == 20
+    assert stinking_cloud.effects[0].conditions is not None
+    assert stinking_cloud.effects[0].conditions[0].condition == ConditionType.POISONED
+    assert stinking_cloud.effects[0].trigger == SpellEffectTrigger.START_OF_TURN
+    assert stinking_cloud.effects[0].savingThrow is not None
+    assert stinking_cloud.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+
+    assert vampiric_touch is not None and vampiric_touch.effects is not None
+    assert vampiric_touch.effects[0].damage is not None
+    assert vampiric_touch.effects[0].damage.dice.dice == "3d6"
+    assert vampiric_touch.effects[0].damage.damageType == DamageType.NECROTIC
+    assert vampiric_touch.effects[0].attack == SpellAttackType.MELEE_SPELL_ATTACK
+    assert vampiric_touch.effects[0].sourceHealing is not None
+    assert vampiric_touch.effects[0].sourceHealing.amount == SpellLinkedHealingAmount.HALF_DAMAGE_DEALT
+    assert vampiric_touch.effects[0].scaling is not None
+    assert vampiric_touch.effects[0].scaling[0].additionalDice is not None
+    assert vampiric_touch.effects[0].scaling[0].additionalDice.dice == "1d6"
+
+    assert wind_wall is not None and wind_wall.effects is not None
+    assert wind_wall.targeting.area.shape == SpellAreaShape.LINE
+    assert wind_wall.targeting.area.lengthFeet == 50
+    assert wind_wall.targeting.area.widthFeet == 1
+    assert wind_wall.effects[0].damage is not None
+    assert wind_wall.effects[0].damage.dice.dice == "4d8"
+    assert wind_wall.effects[0].damage.damageType == DamageType.BLUDGEONING
+    assert wind_wall.effects[0].savingThrow is not None
+    assert wind_wall.effects[0].savingThrow.ability == AbilityType.STRENGTH
+    assert wind_wall.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+
+def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None:
+    cone_of_cold = spell_entry(SpellId.CONE_OF_COLD)
+
+    assert cone_of_cold is not None and cone_of_cold.effects is not None
+    assert cone_of_cold.targeting.area.shape == SpellAreaShape.CONE
+    assert cone_of_cold.targeting.area.lengthFeet == 60
+    assert cone_of_cold.effects[0].damage is not None
+    assert cone_of_cold.effects[0].damage.dice.dice == "8d8"
+    assert cone_of_cold.effects[0].damage.damageType == DamageType.COLD
+    assert cone_of_cold.effects[0].savingThrow is not None
+    assert cone_of_cold.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert cone_of_cold.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert cone_of_cold.effects[0].scaling is not None
+    assert cone_of_cold.effects[0].scaling[0].additionalDice is not None
+    assert cone_of_cold.effects[0].scaling[0].additionalDice.dice == "1d8"
+
+
 def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics() -> None:
     produce_flame = spell_entry(SpellId.PRODUCE_FLAME)
     sorcerous_burst = spell_entry(SpellId.SORCEROUS_BURST)
@@ -803,6 +951,12 @@ def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics()
     assert bless.effects[0].rollModifier is not None
     assert bless.effects[0].rollModifier.operation == RollModifierEffectOperation.ADD
     assert set(bless.effects[0].rollModifier.targets) == {RollModifierEffectTarget.ATTACK_ROLL, RollModifierEffectTarget.SAVING_THROW}
+
+    shield = spell_entry(SpellId.SHIELD)
+    assert shield is not None and shield.effects is not None
+    assert shield.castingTime == TimeEconomy.REACTION
+    assert shield.effects[0].conditions is not None
+    assert shield.effects[0].conditions[0].condition == ConditionType.SHIELDED
 
     assert chromatic_orb is not None and chromatic_orb.effects is not None
     assert len(chromatic_orb.effects) == 6

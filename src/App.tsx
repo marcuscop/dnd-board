@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MutableRefObject } from "react";
-import { RollResolutionMode, SheetSectionType, TokenKind } from "./types";
+import { RollLogEntryType, RollResolutionMode, SheetSectionType, TokenKind } from "./types";
 import type { AbilityScores, AbilityType, Asset, Board, CharacterBuilderDraft, CharacterBuilderOptions, CharacterSheet, ConditionType, DamageType, EquipmentSlot, FogState, PlayerSummary, ProgressionChoice, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
 
 const DEFAULT_BOARD_WIDTH = 1200;
@@ -66,6 +66,8 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "resistanceSlashing",
   "resistanceThunder",
   "restrained",
+  "shielded",
+  "slowed",
   "stunned",
   "unconscious"
 ];
@@ -261,6 +263,16 @@ export function App() {
         );
         setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
         setSheets((current) => applyResolvedRollToSheetState(current, message.resolution));
+        return;
+      }
+
+      if (message.type === "roll_blocked") {
+        setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
+        return;
+      }
+
+      if (message.type === "roll_logged") {
+        setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
         return;
       }
 
@@ -2655,16 +2667,20 @@ function RollCard({
 function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: CharacterSheet | undefined }) {
   const roll = entry.roll;
   const actor = roller?.name ?? formatPlayerName(roll.roller);
+  const isBlocked = entry.entryType === RollLogEntryType.ROLL_BLOCKED;
+  const isLogOnly = roll.source.actionId === "log";
 
   return (
     <li className="roll-log-row">
       <time dateTime={logEntryDate(entry).toISOString()}>{formatLogTime(entry)}</time>
       <span>
         <strong>{roll.sourceLabel}</strong>
-        {entry.resolution
+        {isBlocked
+          ? ` ${actor}: ${roll.label}`
+          : entry.resolution
           ? ` ${actor}: ${roll.label} ${rollMathText(roll)}; ${entry.resolution.outcome} to ${entry.resolution.targetName}`
           : ` ${actor}: ${roll.label} `}
-        {!entry.resolution && <span className="roll-result-number">{rollMathText(roll)}</span>}
+        {!entry.resolution && !isBlocked && !isLogOnly && <span className="roll-result-number">{rollMathText(roll)}</span>}
         {roll.resourceSpent ? ` · ${roll.resourceSpent.resourceName} ${roll.resourceSpent.remainingUses}/${roll.resourceSpent.maxUses}` : ""}
       </span>
     </li>
@@ -3862,7 +3878,7 @@ function spellSlotLevelsForSpell(sheet: CharacterSheet, minimumLevel: number) {
       .map((resource) => resource.spellSlotLevel)
       .filter((slotLevel): slotLevel is number => slotLevel !== undefined && slotLevel >= minimumLevel)
   )].sort((left, right) => left - right);
-  return availableSlotLevels.length > 0 ? availableSlotLevels : [minimumLevel];
+  return availableSlotLevels;
 }
 
 function spellDamageInstanceCount(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], damageEffectIndex: number, spellSlotLevel?: number) {

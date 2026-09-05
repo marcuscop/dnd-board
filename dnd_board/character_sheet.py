@@ -24,6 +24,7 @@ class RollResolutionMode(Enum):
 class RollLogEntryType(Enum):
     ROLL_CREATED = auto()
     ROLL_RESOLVED = auto()
+    ROLL_BLOCKED = auto()
 
 
 class RollModifierType(Enum):
@@ -698,6 +699,10 @@ class SpellSaveOutcome(Enum):
     SPECIAL = auto()
 
 
+class SpellLinkedHealingAmount(Enum):
+    HALF_DAMAGE_DEALT = auto()
+
+
 class SpellScalingType(Enum):
     NONE = auto()
     CANTRIP_LEVEL = auto()
@@ -824,6 +829,8 @@ class ConditionType(Enum):
     RESISTANCE_SLASHING = auto()
     RESISTANCE_THUNDER = auto()
     RESTRAINED = auto()
+    SHIELDED = auto()
+    SLOWED = auto()
     STUNNED = auto()
     UNCONSCIOUS = auto()
 
@@ -992,6 +999,11 @@ class SpellHealingEffect:
 
 
 @dataclass(frozen=True)
+class SpellSourceHealingEffect:
+    amount: SpellLinkedHealingAmount
+
+
+@dataclass(frozen=True)
 class SpellConditionEffect:
     condition: ConditionType
     duration: ConditionDuration = ConditionDuration.MANUAL
@@ -1038,6 +1050,7 @@ class SpellEffect:
     savingThrow: SpellSavingThrow | None = None
     damage: SpellDamageEffect | None = None
     healing: SpellHealingEffect | None = None
+    sourceHealing: SpellSourceHealingEffect | None = None
     temporaryHitPoints: SpellEffectDice | None = None
     conditions: list[SpellConditionEffect] | None = None
     rollModifier: SpellRollModifierEffect | None = None
@@ -1497,6 +1510,7 @@ class RollPayload:
     damageSaveOutcome: SpellSaveOutcome | None = None
     damageSaveDisadvantageCreatureTypes: list[CreatureType] | None = None
     targetCreatureTypes: list[CreatureType] | None = None
+    sourceHealing: SpellSourceHealingEffect | None = None
     conditionEffects: list[ConditionEffect] | None = None
     restType: RestType | None = None
     resourceSpent: RollResourceSpend | None = None
@@ -1842,6 +1856,7 @@ def build_spell_damage_roll_payload(
         damageSaveOutcome=effect.savingThrow.outcome if effect.savingThrow is not None else None,
         damageSaveDisadvantageCreatureTypes=effect.savingThrow.disadvantageCreatureTypes if effect.savingThrow is not None else None,
         targetCreatureTypes=effect.targetCreatureTypes,
+        sourceHealing=effect.sourceHealing,
         conditionEffects=spell_damage_condition_effects(effect),
         restType=effect.restType,
     )
@@ -2125,6 +2140,8 @@ def build_saving_throw_roll_payload(sheet: CharacterSheet, roller: str, ability:
         modifier_breakdown = [RollModifierBreakdown(source=enum_label(ability), value=ability_modifier_value)]
         if save.proficient:
             modifier_breakdown.append(RollModifierBreakdown(source="Proficiency", value=sheet.proficiencyBonus))
+    if ability == AbilityType.DEXTERITY and ConditionType.SLOWED in sheet.conditions:
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(ConditionType.SLOWED), value=-2, description="Subtract 2 from Dexterity saving throws."))
     modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.SAVING_THROW))
     return build_d20_roll_payload(
         sheet=sheet,
@@ -2191,6 +2208,16 @@ def active_roll_modifier_breakdown(sheet: CharacterSheet, target: RollModifierEf
             value = -value
         modifiers.append(RollModifierBreakdown(source=enum_label(condition), value=value, description=effect.description))
     return modifiers
+
+
+CONDITION_ARMOR_CLASS_BONUSES: dict[ConditionType, int] = {
+    ConditionType.SHIELDED: 5,
+    ConditionType.SLOWED: -2,
+}
+
+
+def condition_armor_class_bonus(conditions: list[ConditionType]) -> int:
+    return sum(CONDITION_ARMOR_CLASS_BONUSES.get(condition, 0) for condition in conditions)
 
 
 def build_d20_roll_payload(
@@ -3010,12 +3037,14 @@ def typed_json_registry() -> dict[str, type[Any]]:
             SpellEntry,
             SpellId,
             SpellLineArea,
+            SpellLinkedHealingAmount,
             SpellNoArea,
             SpellRadiusArea,
             SpellRangeType,
             SpellRollModifierEffect,
             SpellSavingThrow,
             SpellSaveOutcome,
+            SpellSourceHealingEffect,
             SpellScaling,
             SpellScalingType,
             SpellSchool,
