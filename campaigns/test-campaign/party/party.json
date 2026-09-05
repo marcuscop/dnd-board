@@ -182,6 +182,15 @@
                     }
                   ]
                 },
+                "conditions": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "ConditionType",
+                      "value": "SEE_INVISIBILITY"
+                    }
+                  ]
+                },
                 "attacks": {
                   "$type": "list",
                   "items": [
@@ -890,19 +899,6 @@
                           "value": "Gain proficiency with Calligrapher's Supplies."
                         }
                       }
-                    }
-                  ]
-                },
-                "conditions": {
-                  "$type": "list",
-                  "items": [
-                    {
-                      "$type": "ConditionType",
-                      "value": "PROTECTION_FROM_POISON"
-                    },
-                    {
-                      "$type": "ConditionType",
-                      "value": "HEROISM"
                     }
                   ]
                 },
@@ -7213,6 +7209,392 @@
                         "status": {
                           "$type": "SpellStatus",
                           "fields": {
+                            "reset": {
+                              "$type": "RestType",
+                              "value": "NONE"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "INVISIBILITY"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "INVISIBILITY"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 2
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "ILLUSION"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "TOUCH"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "HOUR"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": true
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Bard, Sorcerer, Warlock, Wizard. Casting time: Action. Range: Touch. Components: Verbal, Somatic, Material. Duration: Up to 1 hour."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": true
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "effects": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellEffect",
+                              "fields": {
+                                "kind": {
+                                  "$type": "SpellEffectKind",
+                                  "value": "CONDITION"
+                                },
+                                "trigger": {
+                                  "$type": "SpellEffectTrigger",
+                                  "value": "ON_FAILED_SAVE"
+                                },
+                                "target": {
+                                  "$type": "SpellEffectTarget",
+                                  "value": "TARGET"
+                                },
+                                "attack": {
+                                  "$type": "SpellAttackType",
+                                  "value": "NONE"
+                                },
+                                "conditions": {
+                                  "$type": "list",
+                                  "items": [
+                                    {
+                                      "$type": "SpellConditionEffect",
+                                      "fields": {
+                                        "condition": {
+                                          "$type": "ConditionType",
+                                          "value": "INVISIBLE"
+                                        },
+                                        "duration": {
+                                          "$type": "ConditionDuration",
+                                          "value": "MANUAL"
+                                        },
+                                        "saveEnds": {
+                                          "$type": "bool",
+                                          "value": false
+                                        },
+                                        "removalAdvantage": {
+                                          "$type": "bool",
+                                          "value": false
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                "scaling": {
+                                  "$type": "list",
+                                  "items": [
+                                    {
+                                      "$type": "SpellScaling",
+                                      "fields": {
+                                        "scalingType": {
+                                          "$type": "SpellScalingType",
+                                          "value": "SPELL_SLOT_LEVEL"
+                                        },
+                                        "additionalStaticBonus": {
+                                          "$type": "int",
+                                          "value": 0
+                                        },
+                                        "additionalInstances": {
+                                          "$type": "int",
+                                          "value": 0
+                                        },
+                                        "interval": {
+                                          "$type": "int",
+                                          "value": 1
+                                        },
+                                        "description": {
+                                          "$type": "str",
+                                          "value": "Target one additional creature for each spell slot level above 2."
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                "instances": {
+                                  "$type": "int",
+                                  "value": 1
+                                },
+                                "instanceLabel": {
+                                  "$type": "str",
+                                  "value": ""
+                                },
+                                "actionLabel": {
+                                  "$type": "str",
+                                  "value": "Invisible"
+                                },
+                                "description": {
+                                  "$type": "str",
+                                  "value": "The target has the Invisible condition until the spell ends. Remove manually immediately after it makes an attack roll, deals damage, or casts a spell."
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "status": {
+                          "$type": "SpellStatus",
+                          "fields": {
+                            "source": {
+                              "$type": "SpellSource",
+                              "value": "WIZARD"
+                            },
+                            "castingAbility": {
+                              "$type": "AbilityType",
+                              "value": "INTELLIGENCE"
+                            },
+                            "reset": {
+                              "$type": "RestType",
+                              "value": "NONE"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "SEE_INVISIBILITY"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "SEE_INVISIBILITY"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 2
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "DIVINATION"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "SELF"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "area": {
+                              "$type": "SpellNoArea",
+                              "fields": {
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "NONE"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "HOUR"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 1
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Artificer, Bard, Sorcerer, Wizard. Casting time: Action. Range: Self. Components: Verbal, Somatic, Material. Duration: 1 hour."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "effects": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellEffect",
+                              "fields": {
+                                "kind": {
+                                  "$type": "SpellEffectKind",
+                                  "value": "CONDITION"
+                                },
+                                "trigger": {
+                                  "$type": "SpellEffectTrigger",
+                                  "value": "ON_CAST"
+                                },
+                                "target": {
+                                  "$type": "SpellEffectTarget",
+                                  "value": "SELF"
+                                },
+                                "attack": {
+                                  "$type": "SpellAttackType",
+                                  "value": "NONE"
+                                },
+                                "conditions": {
+                                  "$type": "list",
+                                  "items": [
+                                    {
+                                      "$type": "SpellConditionEffect",
+                                      "fields": {
+                                        "condition": {
+                                          "$type": "ConditionType",
+                                          "value": "SEE_INVISIBILITY"
+                                        },
+                                        "duration": {
+                                          "$type": "ConditionDuration",
+                                          "value": "MANUAL"
+                                        },
+                                        "saveEnds": {
+                                          "$type": "bool",
+                                          "value": false
+                                        },
+                                        "removalAdvantage": {
+                                          "$type": "bool",
+                                          "value": false
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                "instances": {
+                                  "$type": "int",
+                                  "value": 1
+                                },
+                                "instanceLabel": {
+                                  "$type": "str",
+                                  "value": ""
+                                },
+                                "actionLabel": {
+                                  "$type": "str",
+                                  "value": "Sight"
+                                },
+                                "description": {
+                                  "$type": "str",
+                                  "value": "Until the spell ends, you see Invisible creatures and objects as if they were visible, and you can see into the Ethereal Plane."
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "status": {
+                          "$type": "SpellStatus",
+                          "fields": {
+                            "source": {
+                              "$type": "SpellSource",
+                              "value": "WIZARD"
+                            },
+                            "castingAbility": {
+                              "$type": "AbilityType",
+                              "value": "INTELLIGENCE"
+                            },
                             "reset": {
                               "$type": "RestType",
                               "value": "NONE"

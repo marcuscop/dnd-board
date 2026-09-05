@@ -32,14 +32,18 @@ const ABILITY_SCORE_OPTIONS: { value: AbilityType; label: string }[] = [
 const CONDITION_OPTIONS: ConditionType[] = [
   "bane",
   "banished",
+  "barkskin",
   "blinded",
+  "bladeWard",
   "blessed",
+  "blurred",
   "charmed",
   "commandApproach",
   "commandDrop",
   "commandFlee",
   "commandGrovel",
   "commandHalt",
+  "darkvision",
   "dead",
   "deafened",
   "faerieFire",
@@ -59,9 +63,23 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "paralyzed",
   "petrified",
   "phantasmalKiller",
+  "passWithoutTrace",
   "poisoned",
   "prone",
   "protectionFromPoison",
+  "resistantAcid",
+  "resistantBludgeoning",
+  "resistantCold",
+  "resistantFire",
+  "resistantForce",
+  "resistantLightning",
+  "resistantNecrotic",
+  "resistantPiercing",
+  "resistantPoison",
+  "resistantPsychic",
+  "resistantRadiant",
+  "resistantSlashing",
+  "resistantThunder",
   "resistanceAcid",
   "resistanceBludgeoning",
   "resistanceCold",
@@ -83,6 +101,8 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "synapticStatic",
   "threeQuartersCover",
   "unconscious",
+  "seeInvisibility",
+  "wardingBond",
   "zoneOfTruth"
 ];
 type DamageDefenseType = "resistance" | "vulnerability" | "immunity";
@@ -2829,6 +2849,7 @@ function RollCard({
 
 function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: CharacterSheet | undefined }) {
   const roll = entry.roll;
+  const displayRoll = entry.resolution?.roll ?? roll;
   const actor = roller?.name ?? formatPlayerName(roll.roller);
   const isBlocked = entry.entryType === RollLogEntryType.ROLL_BLOCKED;
   const isLogOnly = roll.source.actionId === "log";
@@ -2844,7 +2865,7 @@ function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: CharacterS
         {isBlocked
           ? ` ${actor}: ${roll.label}`
           : entry.resolution
-          ? ` ${actor}: ${roll.label} ${rollMathText(roll)}${responseRollText}; ${entry.resolution.outcome} to ${entry.resolution.targetName}`
+          ? ` ${actor}: ${displayRoll.label} ${rollMathText(displayRoll)}${responseRollText}; ${entry.resolution.outcome} to ${entry.resolution.targetName}`
           : ` ${actor}: ${roll.label} `}
         {!entry.resolution && !isBlocked && !isLogOnly && <span className="roll-result-number">{rollMathText(roll)}</span>}
         {roll.resourceSpent ? ` · ${roll.resourceSpent.resourceName} ${roll.resourceSpent.remainingUses}/${roll.resourceSpent.maxUses}` : ""}
@@ -4266,18 +4287,29 @@ function formatSigned(value: number) {
 }
 
 function rollMathText(roll: RollPayload) {
+  const advantageText = rollAdvantageText(roll);
   if (roll.damageComponents?.length) {
     const components = roll.damageComponents
       .map((component) => `${component.damageTypeLabel ?? cleanName(component.damageType)} ${rollComponentMathText(component)}`)
       .join(" + ");
-    return `${components} = ${roll.total}`;
+    return `${components} = ${roll.total}${advantageText}`;
   }
   const dice = rollDieText(roll);
   const modifierParts = (roll.modifierBreakdown ?? []).filter((part) => part.value !== 0);
   const modifiers = modifierParts.length
     ? modifierParts.map((part) => `${part.value >= 0 ? "+" : "-"} ${part.source} (${Math.abs(part.value)})`).join(" ")
     : formatSigned(roll.modifier);
-  return `${dice} ${modifiers} = ${roll.total}`;
+  return `${dice} ${modifiers} = ${roll.total}${advantageText}`;
+}
+
+function rollAdvantageText(roll: RollPayload) {
+  const advantage = roll.advantageConditionsLabel ?? [];
+  const disadvantage = roll.disadvantageConditionsLabel ?? [];
+  const parts = [
+    advantage.length ? `Advantage: ${advantage.join(", ")}` : "",
+    disadvantage.length ? `Disadvantage: ${disadvantage.join(", ")}` : "",
+  ].filter(Boolean);
+  return parts.length ? ` (${parts.join("; ")})` : "";
 }
 
 function rollComponentMathText(component: NonNullable<RollPayload["damageComponents"]>[number]) {

@@ -592,8 +592,12 @@ def test_catalog_spell_effects_capture_representative_2024_mechanics() -> None:
 
 def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     aid = spell_entry(SpellId.AID)
+    barkskin = spell_entry(SpellId.BARKSKIN)
     blindness_deafness = spell_entry(SpellId.BLINDNESS_DEAFNESS)
+    blur = spell_entry(SpellId.BLUR)
     cloud_of_daggers = spell_entry(SpellId.CLOUD_OF_DAGGERS)
+    darkness = spell_entry(SpellId.DARKNESS)
+    darkvision = spell_entry(SpellId.DARKVISION)
     dragon_breath = spell_entry(SpellId.DRAGON_S_BREATH)
     flame_blade = spell_entry(SpellId.FLAME_BLADE)
     flaming_sphere = spell_entry(SpellId.FLAMING_SPHERE)
@@ -603,14 +607,18 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     melfs_acid_arrow = spell_entry(SpellId.MELF_S_ACID_ARROW)
     mind_spike = spell_entry(SpellId.MIND_SPIKE)
     moonbeam = spell_entry(SpellId.MOONBEAM)
+    pass_without_trace = spell_entry(SpellId.PASS_WITHOUT_TRACE)
     prayer_of_healing = spell_entry(SpellId.PRAYER_OF_HEALING)
     protection_from_poison = spell_entry(SpellId.PROTECTION_FROM_POISON)
     scorching_ray = spell_entry(SpellId.SCORCHING_RAY)
     searing_orb = spell_entry(SpellId.SEARING_ORB)
+    see_invisibility = spell_entry(SpellId.SEE_INVISIBILITY)
     shatter = spell_entry(SpellId.SHATTER)
+    shining_smite = spell_entry(SpellId.SHINING_SMITE)
     spike_growth = spell_entry(SpellId.SPIKE_GROWTH)
     spiritual_weapon = spell_entry(SpellId.SPIRITUAL_WEAPON)
     suggestion = spell_entry(SpellId.SUGGESTION)
+    warding_bond = spell_entry(SpellId.WARDING_BOND)
     zone_of_truth = spell_entry(SpellId.ZONE_OF_TRUTH)
 
     assert blindness_deafness is not None and blindness_deafness.effects is not None
@@ -627,6 +635,15 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert aid.effects[0].scaling is not None
     assert aid.effects[0].scaling[0].additionalStaticBonus == 5
 
+    assert barkskin is not None and barkskin.effects is not None
+    assert barkskin.effects[0].conditions is not None
+    assert barkskin.effects[0].conditions[0].condition == ConditionType.BARKSKIN
+
+    assert blur is not None and blur.effects is not None
+    assert blur.effects[0].conditions is not None
+    assert blur.effects[0].conditions[0].condition == ConditionType.BLURRED
+    assert blur.effects[0].target == SpellEffectTarget.SELF
+
     assert cloud_of_daggers is not None and cloud_of_daggers.effects is not None
     assert cloud_of_daggers.effects[0].damage is not None
     assert cloud_of_daggers.effects[0].damage.dice.dice == "4d4"
@@ -634,6 +651,15 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert cloud_of_daggers.effects[0].scaling is not None
     assert cloud_of_daggers.effects[0].scaling[0].additionalDice is not None
     assert cloud_of_daggers.effects[0].scaling[0].additionalDice.dice == "2d4"
+
+    assert darkness is not None and darkness.effects is not None
+    assert darkness.effects[0].conditions is not None
+    assert darkness.effects[0].conditions[0].condition == ConditionType.HEAVILY_OBSCURED
+    assert darkness.effects[0].target == SpellEffectTarget.AREA
+
+    assert darkvision is not None and darkvision.effects is not None
+    assert darkvision.effects[0].conditions is not None
+    assert darkvision.effects[0].conditions[0].condition == ConditionType.DARKVISION
 
     assert dragon_breath is not None and dragon_breath.effects is not None
     assert [effect.damage.damageType for effect in dragon_breath.effects if effect.damage is not None] == [
@@ -713,6 +739,11 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert moonbeam.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
     assert moonbeam.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
 
+    assert pass_without_trace is not None and pass_without_trace.effects is not None
+    assert pass_without_trace.effects[0].conditions is not None
+    assert pass_without_trace.effects[0].conditions[0].condition == ConditionType.PASS_WITHOUT_TRACE
+    assert pass_without_trace.effects[0].target == SpellEffectTarget.CREATURES_CHOSEN
+
     assert prayer_of_healing is not None and prayer_of_healing.effects is not None
     assert prayer_of_healing.effects[0].healing is not None
     assert prayer_of_healing.effects[0].healing.dice.dice == "2d8"
@@ -739,6 +770,11 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert searing_orb.effects[1].savingThrow is not None
     assert searing_orb.effects[1].savingThrow.ability == AbilityType.CONSTITUTION
 
+    assert see_invisibility is not None and see_invisibility.effects is not None
+    assert see_invisibility.effects[0].conditions is not None
+    assert see_invisibility.effects[0].conditions[0].condition == ConditionType.SEE_INVISIBILITY
+    assert see_invisibility.effects[0].target == SpellEffectTarget.SELF
+
     assert scorching_ray is not None and scorching_ray.effects is not None
     assert scorching_ray.effects[0].damage is not None
     assert scorching_ray.effects[0].damage.dice.dice == "2d6"
@@ -756,6 +792,17 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert shatter.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
     assert shatter.effects[0].savingThrow.disadvantageCreatureTypes == [CreatureType.CONSTRUCT]
     assert "Constructs have Disadvantage" in shatter.effects[0].description
+
+    assert shining_smite is not None and shining_smite.effects is not None
+    assert shining_smite.effects[0].damage is not None
+    assert shining_smite.effects[0].damage.dice.dice == "2d6"
+    assert shining_smite.effects[0].damage.damageType == DamageType.RADIANT
+    assert shining_smite.effects[0].trigger == SpellEffectTrigger.ON_HIT
+    assert shining_smite.effects[0].conditions is not None
+    assert shining_smite.effects[0].conditions[0].condition == ConditionType.FAERIE_FIRE
+    assert shining_smite.effects[0].scaling is not None
+    assert shining_smite.effects[0].scaling[0].additionalDice is not None
+    assert shining_smite.effects[0].scaling[0].additionalDice.dice == "1d6"
 
     assert spike_growth is not None and spike_growth.effects is not None
     assert spike_growth.effects[0].damage is not None
@@ -778,6 +825,10 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert suggestion.effects[0].savingThrow is not None
     assert suggestion.effects[0].savingThrow.ability == AbilityType.WISDOM
 
+    assert warding_bond is not None and warding_bond.effects is not None
+    assert warding_bond.effects[0].conditions is not None
+    assert warding_bond.effects[0].conditions[0].condition == ConditionType.WARDING_BOND
+
     assert zone_of_truth is not None and zone_of_truth.effects is not None
     assert zone_of_truth.targeting.area.shape == SpellAreaShape.RADIUS
     assert zone_of_truth.targeting.area.radiusFeet == 15
@@ -798,6 +849,7 @@ def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
     hypnotic_pattern = spell_entry(SpellId.HYPNOTIC_PATTERN)
     lightning_bolt = spell_entry(SpellId.LIGHTNING_BOLT)
     mass_healing_word = spell_entry(SpellId.MASS_HEALING_WORD)
+    protection_from_energy = spell_entry(SpellId.PROTECTION_FROM_ENERGY)
     spirit_guardians = spell_entry(SpellId.SPIRIT_GUARDIANS)
     stinking_cloud = spell_entry(SpellId.STINKING_CLOUD)
     vampiric_touch = spell_entry(SpellId.VAMPIRIC_TOUCH)
@@ -880,6 +932,16 @@ def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
     assert lightning_bolt.effects[0].savingThrow is not None
     assert lightning_bolt.effects[0].savingThrow.ability == AbilityType.DEXTERITY
     assert lightning_bolt.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert protection_from_energy is not None and protection_from_energy.effects is not None
+    assert [effect.actionLabel for effect in protection_from_energy.effects] == ["Acid", "Cold", "Fire", "Lightning", "Thunder"]
+    assert [effect.conditions[0].condition for effect in protection_from_energy.effects if effect.conditions is not None] == [
+        ConditionType.RESISTANT_ACID,
+        ConditionType.RESISTANT_COLD,
+        ConditionType.RESISTANT_FIRE,
+        ConditionType.RESISTANT_LIGHTNING,
+        ConditionType.RESISTANT_THUNDER,
+    ]
 
     assert mass_healing_word is not None and mass_healing_word.effects is not None
     assert mass_healing_word.effects[0].healing is not None
@@ -1222,12 +1284,12 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert fire_shield is not None and fire_shield.effects is not None
     assert [effect.actionLabel for effect in fire_shield.effects] == ["Warm Shield", "Warm Retaliation", "Chill Shield", "Chill Retaliation"]
     assert fire_shield.effects[0].conditions is not None
-    assert fire_shield.effects[0].conditions[0].condition == ConditionType.RESISTANCE_COLD
+    assert fire_shield.effects[0].conditions[0].condition == ConditionType.RESISTANT_COLD
     assert fire_shield.effects[1].damage is not None
     assert fire_shield.effects[1].damage.dice.dice == "2d8"
     assert fire_shield.effects[1].damage.damageType == DamageType.FIRE
     assert fire_shield.effects[2].conditions is not None
-    assert fire_shield.effects[2].conditions[0].condition == ConditionType.RESISTANCE_FIRE
+    assert fire_shield.effects[2].conditions[0].condition == ConditionType.RESISTANT_FIRE
     assert fire_shield.effects[3].damage is not None
     assert fire_shield.effects[3].damage.damageType == DamageType.COLD
 
@@ -1259,9 +1321,9 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert stoneskin is not None and stoneskin.effects is not None
     assert stoneskin.effects[0].conditions is not None
     assert [condition.condition for condition in stoneskin.effects[0].conditions] == [
-        ConditionType.RESISTANCE_BLUDGEONING,
-        ConditionType.RESISTANCE_PIERCING,
-        ConditionType.RESISTANCE_SLASHING,
+        ConditionType.RESISTANT_BLUDGEONING,
+        ConditionType.RESISTANT_PIERCING,
+        ConditionType.RESISTANT_SLASHING,
     ]
 
     assert vitriolic_sphere is not None and vitriolic_sphere.effects is not None
@@ -1306,6 +1368,7 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
 
 
 def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics() -> None:
+    blade_ward = spell_entry(SpellId.BLADE_WARD)
     produce_flame = spell_entry(SpellId.PRODUCE_FLAME)
     sorcerous_burst = spell_entry(SpellId.SORCEROUS_BURST)
     thorn_whip = spell_entry(SpellId.THORN_WHIP)
@@ -1332,6 +1395,11 @@ def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics()
     spellfire_flare = spell_entry(SpellId.SPELLFIRE_FLARE)
     thunderous_smite = spell_entry(SpellId.THUNDEROUS_SMITE)
     wrathful_smite = spell_entry(SpellId.WRATHFUL_SMITE)
+
+    assert blade_ward is not None and blade_ward.effects is not None
+    assert blade_ward.effects[0].conditions is not None
+    assert blade_ward.effects[0].conditions[0].condition == ConditionType.BLADE_WARD
+    assert blade_ward.effects[0].target == SpellEffectTarget.SELF
 
     assert produce_flame is not None and produce_flame.effects is not None
     assert produce_flame.effects[0].actionLabel == "Hurl"

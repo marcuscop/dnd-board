@@ -802,8 +802,11 @@ class SpellDuration:
 class ConditionType(Enum):
     BANE = auto()
     BANISHED = auto()
+    BARKSKIN = auto()
     BLINDED = auto()
+    BLADE_WARD = auto()
     BLESSED = auto()
+    BLURRED = auto()
     CHARMED = auto()
     COMMAND_APPROACH = auto()
     COMMAND_DROP = auto()
@@ -825,14 +828,29 @@ class ConditionType(Enum):
     HEROISM = auto()
     INCAPACITATED = auto()
     INVISIBLE = auto()
+    DARKVISION = auto()
     LONGSTRIDER = auto()
     MAGE_ARMOR = auto()
     PARALYZED = auto()
     PETRIFIED = auto()
     PHANTASMAL_KILLER = auto()
+    PASS_WITHOUT_TRACE = auto()
     POISONED = auto()
     PRONE = auto()
     PROTECTION_FROM_POISON = auto()
+    RESISTANT_ACID = auto()
+    RESISTANT_BLUDGEONING = auto()
+    RESISTANT_COLD = auto()
+    RESISTANT_FIRE = auto()
+    RESISTANT_FORCE = auto()
+    RESISTANT_LIGHTNING = auto()
+    RESISTANT_NECROTIC = auto()
+    RESISTANT_PIERCING = auto()
+    RESISTANT_POISON = auto()
+    RESISTANT_PSYCHIC = auto()
+    RESISTANT_RADIANT = auto()
+    RESISTANT_SLASHING = auto()
+    RESISTANT_THUNDER = auto()
     RESISTANCE_ACID = auto()
     RESISTANCE_BLUDGEONING = auto()
     RESISTANCE_COLD = auto()
@@ -854,6 +872,8 @@ class ConditionType(Enum):
     SYNAPTIC_STATIC = auto()
     THREE_QUARTERS_COVER = auto()
     UNCONSCIOUS = auto()
+    SEE_INVISIBILITY = auto()
+    WARDING_BOND = auto()
     ZONE_OF_TRUTH = auto()
 
 
@@ -1571,6 +1591,7 @@ class RollPayload:
     createdAt: int
     advantageConditions: list[ConditionType] | None = None
     disadvantageConditions: list[ConditionType] | None = None
+    sourceConditions: list[ConditionType] | None = None
     damageType: DamageType | None = None
     damageComponents: list[RollDamageComponent] | None = None
     damageSavingThrow: AbilityType | None = None
@@ -1802,6 +1823,7 @@ def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         createdAt=created_at,
         advantageConditions=advantage_conditions or None,
         disadvantageConditions=disadvantage_conditions or None,
+        sourceConditions=sheet.conditions or None,
         damageType=action.damageType,
     )
 
@@ -1878,6 +1900,7 @@ def build_spell_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: S
         createdAt=created_at,
         advantageConditions=advantage_conditions or None,
         disadvantageConditions=disadvantage_conditions or None,
+        sourceConditions=sheet.conditions or None,
         damageType=first_spell_damage_type(spell),
     )
 
@@ -2378,6 +2401,13 @@ ACTIVE_CONDITION_ROLL_MODIFIERS: dict[ConditionType, SpellRollModifierEffect] = 
         dice=SpellEffectDice(1, DiceType.D6),
         description="Subtract 1d6 from attack rolls, ability checks, and concentration saving throws.",
     ),
+    ConditionType.WARDING_BOND: SpellRollModifierEffect(
+        condition=ConditionType.WARDING_BOND,
+        operation=RollModifierEffectOperation.ADD,
+        targets=[RollModifierEffectTarget.SAVING_THROW],
+        staticBonus=1,
+        description="Add 1 to saving throws from Warding Bond.",
+    ),
 }
 
 
@@ -2395,6 +2425,23 @@ DAMAGE_RESISTANCE_CONDITIONS: dict[ConditionType, DamageType] = {
     ConditionType.RESISTANCE_RADIANT: DamageType.RADIANT,
     ConditionType.RESISTANCE_SLASHING: DamageType.SLASHING,
     ConditionType.RESISTANCE_THUNDER: DamageType.THUNDER,
+}
+
+
+TRUE_DAMAGE_RESISTANCE_CONDITIONS: dict[ConditionType, DamageType] = {
+    ConditionType.RESISTANT_ACID: DamageType.ACID,
+    ConditionType.RESISTANT_BLUDGEONING: DamageType.BLUDGEONING,
+    ConditionType.RESISTANT_COLD: DamageType.COLD,
+    ConditionType.RESISTANT_FIRE: DamageType.FIRE,
+    ConditionType.RESISTANT_FORCE: DamageType.FORCE,
+    ConditionType.RESISTANT_LIGHTNING: DamageType.LIGHTNING,
+    ConditionType.RESISTANT_NECROTIC: DamageType.NECROTIC,
+    ConditionType.RESISTANT_PIERCING: DamageType.PIERCING,
+    ConditionType.RESISTANT_POISON: DamageType.POISON,
+    ConditionType.RESISTANT_PSYCHIC: DamageType.PSYCHIC,
+    ConditionType.RESISTANT_RADIANT: DamageType.RADIANT,
+    ConditionType.RESISTANT_SLASHING: DamageType.SLASHING,
+    ConditionType.RESISTANT_THUNDER: DamageType.THUNDER,
 }
 
 
@@ -2466,6 +2513,7 @@ CONDITION_INCOMING_ATTACK_ADVANTAGES: dict[ConditionType, set[AbilityType] | Non
 }
 
 CONDITION_INCOMING_ATTACK_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.BLURRED: None,
     ConditionType.HEAVILY_OBSCURED: None,
     ConditionType.INVISIBLE: None,
 }
@@ -2538,6 +2586,7 @@ CONDITION_ARMOR_CLASS_BONUSES: dict[ConditionType, int] = {
     ConditionType.SHIELD_OF_FAITH: 2,
     ConditionType.SLOWED: -2,
     ConditionType.THREE_QUARTERS_COVER: 5,
+    ConditionType.WARDING_BOND: 1,
 }
 
 
@@ -2571,6 +2620,8 @@ def condition_adjusted_armor_class(sheet: CharacterSheet) -> int:
     if ConditionType.MAGE_ARMOR in sheet.conditions and not worn_armor(sheet.equipment):
         mage_armor_class = 13 + ability_modifier(sheet.abilityScores.dexterity) + equipped_shield_bonus(sheet.equipment) + bonus
         armor_class = max(armor_class, mage_armor_class)
+    if ConditionType.BARKSKIN in sheet.conditions:
+        armor_class = max(armor_class, 17)
     return armor_class
 
 
@@ -2805,7 +2856,13 @@ def attack_roll_with_target_condition_modifiers(roll: RollPayload, target: Chara
         return roll
     advantage_conditions = unique_conditions([*(roll.advantageConditions or []), *condition_incoming_attack_advantage_conditions(target)])
     disadvantage_conditions = unique_conditions([*(roll.disadvantageConditions or []), *condition_incoming_attack_disadvantage_conditions(target)])
-    if advantage_conditions == (roll.advantageConditions or []) and disadvantage_conditions == (roll.disadvantageConditions or []):
+    if ConditionType.SEE_INVISIBILITY in target.conditions:
+        advantage_conditions = [condition for condition in advantage_conditions if condition != ConditionType.INVISIBLE]
+    if roll.sourceConditions and ConditionType.SEE_INVISIBILITY in roll.sourceConditions:
+        disadvantage_conditions = [condition for condition in disadvantage_conditions if condition != ConditionType.INVISIBLE]
+    modifier_breakdown = [*roll.modifierBreakdown, *target_incoming_attack_modifier_breakdown(target)]
+    modifier = sum(part.value for part in modifier_breakdown)
+    if advantage_conditions == (roll.advantageConditions or []) and disadvantage_conditions == (roll.disadvantageConditions or []) and modifier_breakdown == roll.modifierBreakdown:
         return roll
     dice = list(roll.dice[:1] or [random.randint(1, 20)])
     has_advantage = bool(advantage_conditions) and not disadvantage_conditions
@@ -2817,10 +2874,25 @@ def attack_roll_with_target_condition_modifiers(roll: RollPayload, target: Chara
         roll,
         dice=dice,
         die="2d20kl1" if has_disadvantage else "2d20kh1" if has_advantage else enum_key(DiceType.D20),
-        total=die_roll + roll.modifier,
+        modifier=modifier,
+        modifierBreakdown=modifier_breakdown,
+        total=die_roll + modifier,
         advantageConditions=advantage_conditions or None,
         disadvantageConditions=disadvantage_conditions or None,
     )
+
+
+def target_incoming_attack_modifier_breakdown(target: CharacterSheet) -> list[RollModifierBreakdown]:
+    if ConditionType.BLADE_WARD not in target.conditions:
+        return []
+    penalty = random.randint(1, DiceType.D4.value)
+    return [
+        RollModifierBreakdown(
+            source=enum_label(ConditionType.BLADE_WARD),
+            value=-penalty,
+            description="Subtract 1d4 from attack rolls against the warded target.",
+        )
+    ]
 
 
 def unique_conditions(conditions: list[ConditionType]) -> list[ConditionType]:
@@ -2910,10 +2982,20 @@ def effective_damage_resistance_list(target: CharacterSheet) -> list[DamageType]
             resistances.add(damage_type)
             if damage_type not in ordered_resistances:
                 ordered_resistances.append(damage_type)
+    if ConditionType.WARDING_BOND in target.conditions:
+        for damage_type in DamageType:
+            resistances.add(damage_type)
+            if damage_type not in ordered_resistances:
+                ordered_resistances.append(damage_type)
     if ConditionType.PROTECTION_FROM_POISON in target.conditions:
         resistances.add(DamageType.POISON)
         if DamageType.POISON not in ordered_resistances:
             ordered_resistances.append(DamageType.POISON)
+    for condition, damage_type in TRUE_DAMAGE_RESISTANCE_CONDITIONS.items():
+        if condition in target.conditions:
+            resistances.add(damage_type)
+            if damage_type not in ordered_resistances:
+                ordered_resistances.append(damage_type)
     return [damage_type for damage_type in ordered_resistances if damage_type in resistances]
 
 

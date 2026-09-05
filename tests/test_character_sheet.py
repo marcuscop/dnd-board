@@ -297,19 +297,23 @@ def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch
 
 
 def test_conditions_modify_attack_roll_advantage_and_target_resolution(monkeypatch) -> None:
-    rolls = iter([5, 15, 15, 5, 15, 5, 15, 5])
+    rolls = iter([5, 15, 15, 5, 15, 5, 15, 5, 15, 5, 15, 5])
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(rolls))
     attacker = basic_sheet()
     invisible_attacker = replace(basic_sheet(), conditions=[ConditionType.INVISIBLE])
     blinded_attacker = replace(basic_sheet(), conditions=[ConditionType.BLINDED])
+    see_invisibility_attacker = replace(basic_sheet(), conditions=[ConditionType.SEE_INVISIBILITY])
     target = replace(basic_sheet(), armorClass=18)
     blinded_target = replace(target, conditions=[ConditionType.BLINDED])
     invisible_target = replace(target, conditions=[ConditionType.INVISIBLE])
+    see_invisibility_target = replace(target, conditions=[ConditionType.SEE_INVISIBILITY])
 
     invisible_roll = build_attack_roll_payload(invisible_attacker, "player-1", invisible_attacker.attacks[0])
     blinded_roll = build_attack_roll_payload(blinded_attacker, "player-1", blinded_attacker.attacks[0])
     target_advantage_resolution = resolve_roll_against_target(build_attack_roll_payload(attacker, "player-1", attacker.attacks[0]), blinded_target)
     target_disadvantage_resolution = resolve_roll_against_target(build_attack_roll_payload(attacker, "player-1", attacker.attacks[0]), invisible_target)
+    seen_invisible_attacker_resolution = resolve_roll_against_target(build_attack_roll_payload(invisible_attacker, "player-1", invisible_attacker.attacks[0]), see_invisibility_target)
+    see_invisibility_attacker_resolution = resolve_roll_against_target(build_attack_roll_payload(see_invisibility_attacker, "player-1", see_invisibility_attacker.attacks[0]), invisible_target)
 
     assert invisible_roll.die == "2d20kh1"
     assert invisible_roll.dice == [5, 15]
@@ -325,6 +329,14 @@ def test_conditions_modify_attack_roll_advantage_and_target_resolution(monkeypat
     assert target_disadvantage_resolution.roll.dice == [15, 5]
     assert target_disadvantage_resolution.roll.disadvantageConditions == [ConditionType.INVISIBLE]
     assert target_disadvantage_resolution.outcome == "misses"
+    assert seen_invisible_attacker_resolution.roll.die == "d20"
+    assert seen_invisible_attacker_resolution.roll.dice == [15]
+    assert seen_invisible_attacker_resolution.roll.advantageConditions is None
+    assert seen_invisible_attacker_resolution.outcome == "hits"
+    assert see_invisibility_attacker_resolution.roll.die == "d20"
+    assert see_invisibility_attacker_resolution.roll.dice == [15]
+    assert see_invisibility_attacker_resolution.roll.disadvantageConditions is None
+    assert see_invisibility_attacker_resolution.outcome == "hits"
 
 
 def test_conditions_apply_speed_resistance_and_save_effects(monkeypatch) -> None:
@@ -333,11 +345,13 @@ def test_conditions_apply_speed_resistance_and_save_effects(monkeypatch) -> None
     paralyzed = replace(basic_sheet(), conditions=[ConditionType.PARALYZED])
     petrified = replace(basic_sheet(), conditions=[ConditionType.PETRIFIED])
     poisoned = replace(basic_sheet(), conditions=[ConditionType.POISONED])
+    warded = replace(basic_sheet(), conditions=[ConditionType.WARDING_BOND])
 
     restrained_dexterity_save = build_saving_throw_roll_payload(restrained, "player-1", AbilityType.DEXTERITY)
     restrained_strength_save = build_saving_throw_roll_payload(restrained, "player-1", AbilityType.STRENGTH)
     paralyzed_dexterity_save = build_saving_throw_roll_payload(paralyzed, "player-1", AbilityType.DEXTERITY)
     poisoned_check = build_ability_check_roll_payload(poisoned, "player-1", AbilityType.STRENGTH)
+    warded_wisdom_save = build_saving_throw_roll_payload(warded, "player-1", AbilityType.WISDOM)
 
     assert condition_adjusted_speed(30, [ConditionType.HASTED, ConditionType.GRAPPLED]) == 0
     assert condition_adjusted_speed(30, [ConditionType.LONGSTRIDER, ConditionType.RESTRAINED]) == 0
@@ -350,6 +364,10 @@ def test_conditions_apply_speed_resistance_and_save_effects(monkeypatch) -> None
     assert poisoned_check.die == "2d20kl1"
     assert poisoned_check.disadvantageConditions == [ConditionType.POISONED]
     assert effective_damage_resistances(petrified) == set(DamageType)
+    assert condition_armor_class_bonus([ConditionType.WARDING_BOND]) == 1
+    assert warded_wisdom_save.modifierBreakdown[-1].source == "Warding Bond"
+    assert warded_wisdom_save.modifierBreakdown[-1].value == 1
+    assert effective_damage_resistances(warded) == set(DamageType)
 
 
 def test_exhaustion_levels_modify_rolls_and_speed(monkeypatch) -> None:
@@ -383,9 +401,27 @@ def test_mage_armor_condition_uses_spell_armor_class_only_without_worn_armor() -
         sheet,
         equipment=[EquipmentItem(id="leather", name="Leather", itemType=EquipmentType.ARMOR, slot=EquipmentSlot.ARMOR, armorCategory=ArmorCategory.LIGHT, armorClass=11)],
     )
+    barkskin = replace(basic_sheet(), armorClass=14, conditions=[ConditionType.BARKSKIN])
+    high_ac_barkskin = replace(basic_sheet(), armorClass=18, conditions=[ConditionType.BARKSKIN])
 
     assert condition_adjusted_armor_class(sheet) == max(sheet.armorClass, 13 + ability_modifier(sheet.abilityScores.dexterity))
     assert condition_adjusted_armor_class(armored) == armored.armorClass
+    assert condition_adjusted_armor_class(barkskin) == 17
+    assert condition_adjusted_armor_class(high_ac_barkskin) == 18
+
+
+def test_blade_ward_subtracts_d4_from_incoming_attack_roll(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 3 if maximum == 4 else 12)
+    attacker = basic_sheet()
+    target = replace(basic_sheet(), armorClass=16, conditions=[ConditionType.BLADE_WARD])
+
+    resolution = resolve_roll_against_target(build_attack_roll_payload(attacker, "player-1", attacker.attacks[0]), target)
+
+    assert resolution.roll.dice == [12]
+    assert resolution.roll.modifierBreakdown[-1].source == "Blade Ward"
+    assert resolution.roll.modifierBreakdown[-1].value == -3
+    assert resolution.roll.total == 15
+    assert resolution.outcome == "misses"
 
 
 def test_active_damage_resistance_conditions_reduce_matching_damage_by_d4(monkeypatch) -> None:
@@ -400,6 +436,21 @@ def test_active_damage_resistance_conditions_reduce_matching_damage_by_d4(monkey
     assert roll.total == 8
     assert resolution.targetHp.current == 15
     assert resolution.outcome == "deals 5 damage after Resistance Fire reduces damage by 3"
+
+
+def test_true_damage_resistance_condition_halves_matching_damage(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 8)
+    attacker = basic_sheet()
+    target = replace(basic_sheet(), conditions=[ConditionType.RESISTANT_FIRE])
+    action = replace(attacker.attacks[0], damageDiceCount=1, damageDiceType=DiceType.D8, damageType=DamageType.FIRE, damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED)
+
+    roll = build_damage_roll_payload(attacker, "player-1", action)
+    resolution = resolve_roll_against_target(roll, target)
+
+    assert effective_damage_resistances(target) == {DamageType.FIRE}
+    assert roll.total == 8
+    assert resolution.targetHp.current == 16
+    assert resolution.outcome == "deals 4 damage after Fire resistance"
 
 
 def test_protection_from_poison_adds_true_poison_resistance_and_clears_poisoned(monkeypatch) -> None:

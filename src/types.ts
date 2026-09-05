@@ -84,14 +84,18 @@ export type AbilityType = "strength" | "dexterity" | "constitution" | "intellige
 export type ConditionType =
   | "bane"
   | "banished"
+  | "barkskin"
   | "blinded"
+  | "bladeWard"
   | "blessed"
+  | "blurred"
   | "charmed"
   | "commandApproach"
   | "commandDrop"
   | "commandFlee"
   | "commandGrovel"
   | "commandHalt"
+  | "darkvision"
   | "dead"
   | "deafened"
   | "exhaustion"
@@ -112,9 +116,23 @@ export type ConditionType =
   | "paralyzed"
   | "petrified"
   | "phantasmalKiller"
+  | "passWithoutTrace"
   | "poisoned"
   | "prone"
   | "protectionFromPoison"
+  | "resistantAcid"
+  | "resistantBludgeoning"
+  | "resistantCold"
+  | "resistantFire"
+  | "resistantForce"
+  | "resistantLightning"
+  | "resistantNecrotic"
+  | "resistantPiercing"
+  | "resistantPoison"
+  | "resistantPsychic"
+  | "resistantRadiant"
+  | "resistantSlashing"
+  | "resistantThunder"
   | "resistanceAcid"
   | "resistanceBludgeoning"
   | "resistanceCold"
@@ -136,6 +154,8 @@ export type ConditionType =
   | "synapticStatic"
   | "threeQuartersCover"
   | "unconscious"
+  | "seeInvisibility"
+  | "wardingBond"
   | "zoneOfTruth";
 export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
@@ -762,6 +782,8 @@ export type RollPayload = {
   advantageConditionsLabel?: string[];
   disadvantageConditions?: ConditionType[];
   disadvantageConditionsLabel?: string[];
+  sourceConditions?: ConditionType[];
+  sourceConditionsLabel?: string[];
   damageType?: DamageType;
   damageTypeLabel?: string;
   damageComponents?: RollDamageComponent[];

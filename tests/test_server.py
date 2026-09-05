@@ -1249,6 +1249,45 @@ def test_sheet_roll_logs_and_pending_rolls_are_room_visible_to_everyone(tmp_path
     assert dm_roll.json()["roll"]["id"] in [entry["roll"]["id"] for entry in player_state["rollHistory"]]
 
 
+def test_resolved_attack_log_contains_target_condition_roll_breakdown(tmp_path, monkeypatch) -> None:
+    longsword = AttackAction("longsword", "Longsword", AbilityType.STRENGTH, 1, DiceType.D8, damageType=DamageType.SLASHING)
+    rolls = iter([15, 5])
+    write_party_campaign(
+        tmp_path,
+        "resolved-roll-breakdown-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], attacks=[longsword]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], conditions=[ConditionType.INVISIBLE]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    client = TestClient(server.app)
+
+    attack = client.post("/api/rooms/resolved-roll-breakdown-test/sheet/player-1/rolls/attack?playerKey=player-1")
+    resolution = client.post(
+        f"/api/rooms/resolved-roll-breakdown-test/rolls/{attack.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+    log_entry = client.get("/api/rooms/resolved-roll-breakdown-test/sheet?playerKey=dm").json()["rollHistory"][-1]
+
+    assert attack.status_code == 200
+    assert resolution.status_code == 200
+    assert "disadvantageConditions" not in log_entry["roll"]
+    assert log_entry["resolution"]["roll"]["die"] == "2d20kl1"
+    assert log_entry["resolution"]["roll"]["disadvantageConditions"] == ["invisible"]
+    assert log_entry["resolution"]["roll"]["disadvantageConditionsLabel"] == ["Invisible"]
+
+
 def test_ad_hoc_dice_roll_is_logged_for_everyone(monkeypatch) -> None:
     client = TestClient(server.app)
     monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: maximum)
