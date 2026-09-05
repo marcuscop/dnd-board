@@ -1184,6 +1184,24 @@ def test_sheet_roll_permissions_and_payload(monkeypatch) -> None:
     assert player_socket.messages[0] == dm_socket.messages[0]
 
 
+def test_sheet_roll_logs_and_pending_rolls_are_room_visible_to_everyone(monkeypatch) -> None:
+    client = TestClient(server.app)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 12)
+
+    player_roll = client.post("/api/rooms/shared-log-test/sheet/player-1/rolls/saving-throw?playerKey=player-1&ability=strength")
+    dm_roll = client.post("/api/rooms/shared-log-test/sheet/player-2/rolls/attack?playerKey=dm")
+
+    dm_state = client.get("/api/rooms/shared-log-test/sheet?playerKey=dm").json()
+    player_state = client.get("/api/rooms/shared-log-test/sheet?playerKey=player-3").json()
+
+    assert player_roll.status_code == 200
+    assert dm_roll.status_code == 200
+    assert [entry["roll"]["id"] for entry in player_state["rollHistory"]] == [entry["roll"]["id"] for entry in dm_state["rollHistory"]]
+    assert [roll["id"] for roll in player_state["pendingRolls"]] == [roll["id"] for roll in dm_state["pendingRolls"]]
+    assert player_roll.json()["roll"]["id"] in [entry["roll"]["id"] for entry in dm_state["rollHistory"]]
+    assert dm_roll.json()["roll"]["id"] in [entry["roll"]["id"] for entry in player_state["rollHistory"]]
+
+
 def test_player_can_roll_fire_bolt_spell_attack_and_scaled_damage(tmp_path, monkeypatch) -> None:
     fire_bolt = spell_entry(SpellId.FIRE_BOLT)
     burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
@@ -1265,6 +1283,109 @@ def test_player_can_roll_fire_bolt_spell_attack_and_scaled_damage(tmp_path, monk
     assert "passes DC 15 Dexterity save for half damage" in resolution_body["outcome"]
     assert resolution_body["responseRolls"][0]["label"] == "Dexterity Save"
     assert resolution_body["responseRolls"][0]["total"] == 18
+
+
+def test_hasted_target_rolls_dexterity_spell_saves_with_advantage(tmp_path, monkeypatch) -> None:
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    assert burning_hands is not None
+    write_party_campaign(
+        tmp_path,
+        "hasted-save-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Evoker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[burning_hands]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Hasted Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)], conditions=[ConditionType.HASTED]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d20_rolls = iter([5, 16])
+
+    def fixed_roll(minimum: int, maximum: int) -> int:
+        if maximum == 20:
+            return next(d20_rolls)
+        if maximum == 6:
+            return 4
+        return 1
+
+    monkeypatch.setattr(server.random, "randint", fixed_roll)
+    client = TestClient(server.app)
+
+    damage_response = client.post("/api/rooms/hasted-save-test/sheet/player-1/spells/burningHands/rolls/damage?playerKey=player-1")
+    damage_roll = damage_response.json()["roll"]
+    resolution = client.post(f"/api/rooms/hasted-save-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    response_roll = resolution.json()["resolution"]["responseRolls"][0]
+
+    assert damage_response.status_code == 200
+    assert resolution.status_code == 200
+    assert response_roll["die"] == "2d20kh1"
+    assert response_roll["dice"] == [5, 16]
+    assert response_roll["advantageConditions"] == ["hasted"]
+    assert response_roll["total"] == 16
+    assert "passes DC 14 Dexterity save with Advantage for half damage" in resolution.json()["resolution"]["outcome"]
+
+
+def test_outgoing_attack_damage_or_spell_cast_clears_invisibility(tmp_path, monkeypatch) -> None:
+    mage_armor = wizard_spell_entry(SpellId.MAGE_ARMOR)
+    assert mage_armor is not None
+    attack = AttackAction("dagger", "Dagger", AbilityType.DEXTERITY, 1, DiceType.D4, damageType=DamageType.PIERCING)
+    write_party_campaign(
+        tmp_path,
+        "invisibility-clear-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=3)], attacks=[attack], conditions=[ConditionType.INVISIBLE]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Damager",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=3)], attacks=[attack], conditions=[ConditionType.INVISIBLE]),
+        ),
+        PartyMemberConfig(
+            id="player-3",
+            name="Caster",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=12, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=3)], spells=[mage_armor], conditions=[ConditionType.INVISIBLE]),
+        ),
+        PartyMemberConfig(
+            id="player-4",
+            name="Checker",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=3)], attacks=[attack], conditions=[ConditionType.INVISIBLE]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
+    client = TestClient(server.app)
+
+    attack_response = client.post("/api/rooms/invisibility-clear-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=dagger")
+    damage_response = client.post("/api/rooms/invisibility-clear-test/sheet/player-2/rolls/damage?playerKey=player-2&attackId=dagger")
+    spell_response = client.post("/api/rooms/invisibility-clear-test/sheet/player-3/spells/mageArmor/rolls/effect?playerKey=player-3")
+    check_response = client.post("/api/rooms/invisibility-clear-test/sheet/player-4/rolls/ability-check?playerKey=player-4&ability=dexterity")
+
+    assert attack_response.status_code == 200
+    assert damage_response.status_code == 200
+    assert spell_response.status_code == 200
+    assert check_response.status_code == 200
+    assert client.get("/api/rooms/invisibility-clear-test/sheet/player-1?playerKey=player-1").json()["sheet"]["conditions"] == []
+    assert client.get("/api/rooms/invisibility-clear-test/sheet/player-2?playerKey=player-2").json()["sheet"]["conditions"] == []
+    assert client.get("/api/rooms/invisibility-clear-test/sheet/player-3?playerKey=player-3").json()["sheet"]["conditions"] == []
+    assert client.get("/api/rooms/invisibility-clear-test/sheet/player-4?playerKey=player-4").json()["sheet"]["conditions"] == ["invisible"]
 
 
 def test_player_can_roll_tashas_hideous_laughter_effect_and_dm_can_preserve_roll(tmp_path, monkeypatch) -> None:
@@ -1527,6 +1648,57 @@ def test_shield_applies_temporary_armor_class_condition(tmp_path, monkeypatch) -
     assert applied.status_code == 200
     assert after["conditions"] == ["shielded"]
     assert after["armorClass"] == before["armorClass"] + 5
+
+
+def test_condition_based_spell_bonuses_project_on_character_sheet(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "spell-bonus-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=8, dexterity=16, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)],
+                armorClass=12,
+                speed=30,
+                conditions=[ConditionType.HASTED, ConditionType.LONGSTRIDER, ConditionType.MAGE_ARMOR, ConditionType.SHIELD_OF_FAITH],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Armored Wizard",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=8, dexterity=16, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)],
+                armorClass=12,
+                speed=30,
+                equipment=[
+                    EquipmentItem(
+                        id="leather",
+                        name="Leather Armor",
+                        itemType=EquipmentType.ARMOR,
+                        slot=EquipmentSlot.ARMOR,
+                        armorCategory=ArmorCategory.LIGHT,
+                        armorClass=11,
+                    )
+                ],
+                conditions=[ConditionType.HASTED, ConditionType.LONGSTRIDER, ConditionType.MAGE_ARMOR, ConditionType.SHIELD_OF_FAITH],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    unarmored = client.get("/api/rooms/spell-bonus-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    armored = client.get("/api/rooms/spell-bonus-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert unarmored["armorClass"] == 20
+    assert unarmored["speed"] == 70
+    assert armored["armorClass"] == 16
+    assert armored["speed"] == 70
 
 
 def test_slowed_somatic_spell_check_applies_once_to_attack_spells_and_to_cast_damage_spells(tmp_path, monkeypatch) -> None:

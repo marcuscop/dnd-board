@@ -42,11 +42,15 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "deafened",
   "exhaustion",
   "faerieFire",
+  "flying",
   "frightened",
   "grappled",
   "guidance",
+  "hasted",
   "incapacitated",
   "invisible",
+  "longstrider",
+  "mageArmor",
   "paralyzed",
   "petrified",
   "poisoned",
@@ -67,6 +71,7 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "resistanceThunder",
   "restrained",
   "shielded",
+  "shieldOfFaith",
   "slowed",
   "stunned",
   "unconscious"
@@ -682,9 +687,11 @@ export function App() {
       );
       if (!response.ok) {
         setSheetStatus("error");
+        return;
       }
+      await loadSheets();
     },
-    [playerKey]
+    [loadSheets, playerKey]
   );
 
   const rollDamage = useCallback(
@@ -695,9 +702,11 @@ export function App() {
       );
       if (!response.ok) {
         setSheetStatus("error");
+        return;
       }
+      await loadSheets();
     },
-    [playerKey]
+    [loadSheets, playerKey]
   );
 
   const rollAbilityCheck = useCallback(
@@ -2669,6 +2678,9 @@ function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: CharacterS
   const actor = roller?.name ?? formatPlayerName(roll.roller);
   const isBlocked = entry.entryType === RollLogEntryType.ROLL_BLOCKED;
   const isLogOnly = roll.source.actionId === "log";
+  const responseRollText = entry.resolution?.responseRolls?.length
+    ? ` · ${entry.resolution.responseRolls.map((responseRoll) => `${responseRoll.label} ${rollMathText(responseRoll)}`).join(" · ")}`
+    : "";
 
   return (
     <li className="roll-log-row">
@@ -2678,7 +2690,7 @@ function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: CharacterS
         {isBlocked
           ? ` ${actor}: ${roll.label}`
           : entry.resolution
-          ? ` ${actor}: ${roll.label} ${rollMathText(roll)}; ${entry.resolution.outcome} to ${entry.resolution.targetName}`
+          ? ` ${actor}: ${roll.label} ${rollMathText(roll)}${responseRollText}; ${entry.resolution.outcome} to ${entry.resolution.targetName}`
           : ` ${actor}: ${roll.label} `}
         {!entry.resolution && !isBlocked && !isLogOnly && <span className="roll-result-number">{rollMathText(roll)}</span>}
         {roll.resourceSpent ? ` · ${roll.resourceSpent.resourceName} ${roll.resourceSpent.remainingUses}/${roll.resourceSpent.maxUses}` : ""}
@@ -4035,12 +4047,22 @@ function formatSigned(value: number) {
 }
 
 function rollMathText(roll: RollPayload) {
-  const dice = roll.dice.join("+");
+  const dice = rollDieText(roll);
   const modifierParts = (roll.modifierBreakdown ?? []).filter((part) => part.value !== 0);
   const modifiers = modifierParts.length
     ? modifierParts.map((part) => `${part.value >= 0 ? "+" : "-"} ${part.source} (${Math.abs(part.value)})`).join(" ")
     : formatSigned(roll.modifier);
   return `${dice} ${modifiers} = ${roll.total}`;
+}
+
+function rollDieText(roll: RollPayload) {
+  if (roll.dice.length === 2 && roll.die === "2d20kh1") {
+    return `${roll.dice.join(", ")} keep ${Math.max(...roll.dice)}`;
+  }
+  if (roll.dice.length === 2 && roll.die === "2d20kl1") {
+    return `${roll.dice.join(", ")} keep ${Math.min(...roll.dice)}`;
+  }
+  return roll.dice.join("+");
 }
 
 function diceImagePath(diceType: RollPayload["diceType"]) {

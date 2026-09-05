@@ -587,6 +587,7 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     cloud_of_daggers = spell_entry(SpellId.CLOUD_OF_DAGGERS)
     flaming_sphere = spell_entry(SpellId.FLAMING_SPHERE)
     heat_metal = spell_entry(SpellId.HEAT_METAL)
+    invisibility = spell_entry(SpellId.INVISIBILITY)
     melfs_acid_arrow = spell_entry(SpellId.MELF_S_ACID_ARROW)
     mind_spike = spell_entry(SpellId.MIND_SPIKE)
     moonbeam = spell_entry(SpellId.MOONBEAM)
@@ -627,6 +628,12 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert heat_metal.effects[0].scaling is not None
     assert heat_metal.effects[0].scaling[0].additionalDice is not None
     assert heat_metal.effects[0].scaling[0].additionalDice.dice == "1d8"
+
+    assert invisibility is not None and invisibility.effects is not None
+    assert invisibility.effects[0].conditions is not None
+    assert invisibility.effects[0].conditions[0].condition == ConditionType.INVISIBLE
+    assert invisibility.effects[0].scaling is not None
+    assert invisibility.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
 
     assert melfs_acid_arrow is not None and melfs_acid_arrow.effects is not None
     assert [effect.actionLabel for effect in melfs_acid_arrow.effects] == ["Hit", "Later"]
@@ -719,6 +726,8 @@ def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
     call_lightning = spell_entry(SpellId.CALL_LIGHTNING)
     conjure_barrage = spell_entry(SpellId.CONJURE_BARRAGE)
     fear = spell_entry(SpellId.FEAR)
+    fly = spell_entry(SpellId.FLY)
+    haste = spell_entry(SpellId.HASTE)
     hypnotic_pattern = spell_entry(SpellId.HYPNOTIC_PATTERN)
     lightning_bolt = spell_entry(SpellId.LIGHTNING_BOLT)
     mass_healing_word = spell_entry(SpellId.MASS_HEALING_WORD)
@@ -775,6 +784,16 @@ def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
     assert fear.effects[0].conditions[0].condition == ConditionType.FRIGHTENED
     assert fear.effects[0].savingThrow is not None
     assert fear.effects[0].savingThrow.ability == AbilityType.WISDOM
+
+    assert fly is not None and fly.effects is not None
+    assert fly.effects[0].conditions is not None
+    assert fly.effects[0].conditions[0].condition == ConditionType.FLYING
+    assert fly.effects[0].scaling is not None
+    assert fly.effects[0].scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL
+
+    assert haste is not None and haste.effects is not None
+    assert haste.effects[0].conditions is not None
+    assert haste.effects[0].conditions[0].condition == ConditionType.HASTED
 
     assert hypnotic_pattern is not None and hypnotic_pattern.effects is not None
     assert hypnotic_pattern.targeting.area.shape == SpellAreaShape.CUBE
@@ -845,6 +864,7 @@ def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
 
 def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None:
     cone_of_cold = spell_entry(SpellId.CONE_OF_COLD)
+    greater_invisibility = spell_entry(SpellId.GREATER_INVISIBILITY)
 
     assert cone_of_cold is not None and cone_of_cold.effects is not None
     assert cone_of_cold.targeting.area.shape == SpellAreaShape.CONE
@@ -858,6 +878,10 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert cone_of_cold.effects[0].scaling is not None
     assert cone_of_cold.effects[0].scaling[0].additionalDice is not None
     assert cone_of_cold.effects[0].scaling[0].additionalDice.dice == "1d8"
+
+    assert greater_invisibility is not None and greater_invisibility.effects is not None
+    assert greater_invisibility.effects[0].conditions is not None
+    assert greater_invisibility.effects[0].conditions[0].condition == ConditionType.INVISIBLE
 
 
 def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics() -> None:
@@ -878,8 +902,11 @@ def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics()
     hail_of_thorns = spell_entry(SpellId.HAIL_OF_THORNS)
     hex_spell = spell_entry(SpellId.HEX)
     hunters_mark = spell_entry(SpellId.HUNTER_S_MARK)
+    longstrider = spell_entry(SpellId.LONGSTRIDER)
+    mage_armor = spell_entry(SpellId.MAGE_ARMOR)
     searing_smite = spell_entry(SpellId.SEARING_SMITE)
     resistance = spell_entry(SpellId.RESISTANCE)
+    shield_of_faith = spell_entry(SpellId.SHIELD_OF_FAITH)
     sleep = spell_entry(SpellId.SLEEP)
     spellfire_flare = spell_entry(SpellId.SPELLFIRE_FLARE)
     thunderous_smite = spell_entry(SpellId.THUNDEROUS_SMITE)
@@ -957,6 +984,19 @@ def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics()
     assert shield.castingTime == TimeEconomy.REACTION
     assert shield.effects[0].conditions is not None
     assert shield.effects[0].conditions[0].condition == ConditionType.SHIELDED
+
+    assert longstrider is not None and longstrider.effects is not None
+    assert longstrider.effects[0].conditions is not None
+    assert longstrider.effects[0].conditions[0].condition == ConditionType.LONGSTRIDER
+    assert longstrider.effects[0].scaling is not None
+
+    assert mage_armor is not None and mage_armor.effects is not None
+    assert mage_armor.effects[0].conditions is not None
+    assert mage_armor.effects[0].conditions[0].condition == ConditionType.MAGE_ARMOR
+
+    assert shield_of_faith is not None and shield_of_faith.effects is not None
+    assert shield_of_faith.effects[0].conditions is not None
+    assert shield_of_faith.effects[0].conditions[0].condition == ConditionType.SHIELD_OF_FAITH
 
     assert chromatic_orb is not None and chromatic_orb.effects is not None
     assert len(chromatic_orb.effects) == 6

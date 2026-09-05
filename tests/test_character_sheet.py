@@ -61,6 +61,7 @@ from dnd_board.character_sheet import (
     build_spell_healing_roll_payload,
     resolve_roll_against_target,
     RollSource,
+    ability_modifier,
     armor_item_class,
     clamped_ability_score,
     enum_value,
@@ -89,6 +90,8 @@ from dnd_board.character_sheet import (
     typed_json_to_value,
     value_matches_type,
     build_ability_check_roll_payload,
+    condition_adjusted_armor_class,
+    condition_adjusted_speed,
     condition_armor_class_bonus,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
@@ -252,6 +255,9 @@ def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch
     slowed_sheet = replace(basic_sheet(), conditions=[ConditionType.SLOWED])
     slowed_dexterity_save_roll = build_saving_throw_roll_payload(slowed_sheet, "player-1", AbilityType.DEXTERITY)
     slowed_strength_save_roll = build_saving_throw_roll_payload(slowed_sheet, "player-1", AbilityType.STRENGTH)
+    hasted_sheet = replace(basic_sheet(), conditions=[ConditionType.HASTED])
+    hasted_dexterity_save_roll = build_saving_throw_roll_payload(hasted_sheet, "player-1", AbilityType.DEXTERITY)
+    hasted_strength_save_roll = build_saving_throw_roll_payload(hasted_sheet, "player-1", AbilityType.STRENGTH)
 
     assert ("Blessed", 2) in [(part.source, part.value) for part in attack_roll.modifierBreakdown]
     assert ("Guidance", 2) not in [(part.source, part.value) for part in attack_roll.modifierBreakdown]
@@ -261,8 +267,28 @@ def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch
     assert ("Bane", -2) in [(part.source, part.value) for part in baned_save_roll.modifierBreakdown]
     assert ("Slowed", -2) in [(part.source, part.value) for part in slowed_dexterity_save_roll.modifierBreakdown]
     assert ("Slowed", -2) not in [(part.source, part.value) for part in slowed_strength_save_roll.modifierBreakdown]
+    assert hasted_dexterity_save_roll.die == "2d20kh1"
+    assert hasted_dexterity_save_roll.dice == [10, 10]
+    assert hasted_dexterity_save_roll.advantageConditions == [ConditionType.HASTED]
+    assert hasted_strength_save_roll.die == "d20"
+    assert hasted_strength_save_roll.advantageConditions is None
     assert condition_armor_class_bonus([ConditionType.SHIELDED]) == 5
-    assert condition_armor_class_bonus([ConditionType.SHIELDED, ConditionType.SLOWED]) == 3
+    assert condition_armor_class_bonus([ConditionType.SHIELDED, ConditionType.SHIELD_OF_FAITH, ConditionType.HASTED, ConditionType.SLOWED]) == 7
+    assert condition_adjusted_speed(30, [ConditionType.HASTED]) == 60
+    assert condition_adjusted_speed(30, [ConditionType.SLOWED]) == 15
+    assert condition_adjusted_speed(30, [ConditionType.LONGSTRIDER]) == 40
+    assert condition_adjusted_speed(30, [ConditionType.HASTED, ConditionType.SLOWED, ConditionType.LONGSTRIDER]) == 40
+
+
+def test_mage_armor_condition_uses_spell_armor_class_only_without_worn_armor() -> None:
+    sheet = replace(basic_sheet(), conditions=[ConditionType.MAGE_ARMOR])
+    armored = replace(
+        sheet,
+        equipment=[EquipmentItem(id="leather", name="Leather", itemType=EquipmentType.ARMOR, slot=EquipmentSlot.ARMOR, armorCategory=ArmorCategory.LIGHT, armorClass=11)],
+    )
+
+    assert condition_adjusted_armor_class(sheet) == max(sheet.armorClass, 13 + ability_modifier(sheet.abilityScores.dexterity))
+    assert condition_adjusted_armor_class(armored) == armored.armorClass
 
 
 def test_active_damage_resistance_conditions_reduce_matching_damage_by_d4(monkeypatch) -> None:

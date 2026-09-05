@@ -805,11 +805,15 @@ class ConditionType(Enum):
     DEAFENED = auto()
     EXHAUSTION = auto()
     FAERIE_FIRE = auto()
+    FLYING = auto()
     FRIGHTENED = auto()
     GRAPPLED = auto()
     GUIDANCE = auto()
+    HASTED = auto()
     INCAPACITATED = auto()
     INVISIBLE = auto()
+    LONGSTRIDER = auto()
+    MAGE_ARMOR = auto()
     PARALYZED = auto()
     PETRIFIED = auto()
     POISONED = auto()
@@ -830,6 +834,7 @@ class ConditionType(Enum):
     RESISTANCE_THUNDER = auto()
     RESTRAINED = auto()
     SHIELDED = auto()
+    SHIELD_OF_FAITH = auto()
     SLOWED = auto()
     STUNNED = auto()
     UNCONSCIOUS = auto()
@@ -1504,6 +1509,8 @@ class RollPayload:
     modifierBreakdown: list[RollModifierBreakdown]
     total: int
     createdAt: int
+    advantageConditions: list[ConditionType] | None = None
+    disadvantageConditions: list[ConditionType] | None = None
     damageType: DamageType | None = None
     damageSavingThrow: AbilityType | None = None
     damageSaveDc: int | None = None
@@ -2143,6 +2150,8 @@ def build_saving_throw_roll_payload(sheet: CharacterSheet, roller: str, ability:
     if ability == AbilityType.DEXTERITY and ConditionType.SLOWED in sheet.conditions:
         modifier_breakdown.append(RollModifierBreakdown(source=enum_label(ConditionType.SLOWED), value=-2, description="Subtract 2 from Dexterity saving throws."))
     modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.SAVING_THROW))
+    advantage_conditions = condition_saving_throw_advantage_conditions(sheet, ability)
+    disadvantage_conditions = condition_saving_throw_disadvantage_conditions(sheet, ability)
     return build_d20_roll_payload(
         sheet=sheet,
         roller=roller,
@@ -2150,6 +2159,8 @@ def build_saving_throw_roll_payload(sheet: CharacterSheet, roller: str, ability:
         source_label=enum_label(ability),
         label=f"{enum_label(ability)} Save",
         modifier_breakdown=modifier_breakdown,
+        advantage_conditions=advantage_conditions,
+        disadvantage_conditions=disadvantage_conditions,
     )
 
 
@@ -2210,14 +2221,74 @@ def active_roll_modifier_breakdown(sheet: CharacterSheet, target: RollModifierEf
     return modifiers
 
 
+CONDITION_SAVING_THROW_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.HASTED: {AbilityType.DEXTERITY},
+}
+
+CONDITION_SAVING_THROW_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {}
+
+
+def condition_saving_throw_advantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
+    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_SAVING_THROW_ADVANTAGES)
+
+
+def condition_saving_throw_disadvantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
+    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_SAVING_THROW_DISADVANTAGES)
+
+
+def condition_saving_throw_roll_conditions(
+    conditions: list[ConditionType],
+    ability: AbilityType,
+    rule_map: dict[ConditionType, set[AbilityType] | None],
+) -> list[ConditionType]:
+    matching: list[ConditionType] = []
+    for condition in conditions:
+        abilities = rule_map.get(condition)
+        if abilities is None and condition in rule_map:
+            matching.append(condition)
+        elif abilities is not None and ability in abilities:
+            matching.append(condition)
+    return matching
+
+
 CONDITION_ARMOR_CLASS_BONUSES: dict[ConditionType, int] = {
+    ConditionType.HASTED: 2,
     ConditionType.SHIELDED: 5,
+    ConditionType.SHIELD_OF_FAITH: 2,
     ConditionType.SLOWED: -2,
 }
 
 
 def condition_armor_class_bonus(conditions: list[ConditionType]) -> int:
     return sum(CONDITION_ARMOR_CLASS_BONUSES.get(condition, 0) for condition in conditions)
+
+
+def condition_adjusted_armor_class(sheet: CharacterSheet) -> int:
+    bonus = condition_armor_class_bonus(sheet.conditions)
+    armor_class = sheet.armorClass + bonus
+    if ConditionType.MAGE_ARMOR in sheet.conditions and not worn_armor(sheet.equipment):
+        mage_armor_class = 13 + ability_modifier(sheet.abilityScores.dexterity) + equipped_shield_bonus(sheet.equipment) + bonus
+        armor_class = max(armor_class, mage_armor_class)
+    return armor_class
+
+
+def condition_adjusted_speed(speed: int, conditions: list[ConditionType]) -> int:
+    adjusted = speed
+    if ConditionType.HASTED in conditions:
+        adjusted *= 2
+    if ConditionType.SLOWED in conditions:
+        adjusted = max(0, adjusted // 2)
+    if ConditionType.LONGSTRIDER in conditions:
+        adjusted += 10
+    return adjusted
+
+
+def worn_armor(equipment: list[EquipmentItem]) -> EquipmentItem | None:
+    return next((item for item in equipment if item.itemType == EquipmentType.ARMOR and item.slot == EquipmentSlot.ARMOR), None)
+
+
+def equipped_shield_bonus(equipment: list[EquipmentItem]) -> int:
+    return sum(item.armorClassBonus for item in equipment if item.itemType == EquipmentType.SHIELD and item.slot in {EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND})
 
 
 def build_d20_roll_payload(
@@ -2228,9 +2299,16 @@ def build_d20_roll_payload(
     source_label: str,
     label: str,
     modifier_breakdown: list[RollModifierBreakdown],
+    advantage_conditions: list[ConditionType] | None = None,
+    disadvantage_conditions: list[ConditionType] | None = None,
 ) -> RollPayload:
     modifier = sum(part.value for part in modifier_breakdown)
     dice = [random.randint(1, 20)]
+    has_advantage = bool(advantage_conditions) and not disadvantage_conditions
+    has_disadvantage = bool(disadvantage_conditions) and not advantage_conditions
+    if has_advantage or has_disadvantage:
+        dice.append(random.randint(1, 20))
+    die_roll = min(dice) if has_disadvantage else max(dice)
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -2244,10 +2322,12 @@ def build_d20_roll_payload(
         iconUrl=None,
         dice=dice,
         diceType=DiceType.D20,
-        die=enum_key(DiceType.D20),
+        die="2d20kl1" if has_disadvantage else "2d20kh1" if has_advantage else enum_key(DiceType.D20),
         modifier=modifier,
         modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + modifier,
+        advantageConditions=advantage_conditions or None,
+        disadvantageConditions=disadvantage_conditions or None,
+        total=die_roll + modifier,
         createdAt=created_at,
     )
 

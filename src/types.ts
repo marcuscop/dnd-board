@@ -93,11 +93,15 @@ export type ConditionType =
   | "deafened"
   | "exhaustion"
   | "faerieFire"
+  | "flying"
   | "frightened"
   | "grappled"
   | "guidance"
+  | "hasted"
   | "incapacitated"
   | "invisible"
+  | "longstrider"
+  | "mageArmor"
   | "paralyzed"
   | "petrified"
   | "poisoned"
@@ -118,6 +122,7 @@ export type ConditionType =
   | "resistanceThunder"
   | "restrained"
   | "shielded"
+  | "shieldOfFaith"
   | "slowed"
   | "stunned"
   | "unconscious";
@@ -713,6 +718,10 @@ export type RollPayload = {
   }[];
   total: number;
   createdAt: number;
+  advantageConditions?: ConditionType[];
+  advantageConditionsLabel?: string[];
+  disadvantageConditions?: ConditionType[];
+  disadvantageConditionsLabel?: string[];
   damageType?: DamageType;
   damageTypeLabel?: string;
   damageSavingThrow?: AbilityType;

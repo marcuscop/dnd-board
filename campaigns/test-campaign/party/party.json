@@ -8417,15 +8417,6 @@
                     }
                   ]
                 },
-                "conditions": {
-                  "$type": "list",
-                  "items": [
-                    {
-                      "$type": "ConditionType",
-                      "value": "SLOWED"
-                    }
-                  ]
-                },
                 "equipment": {
                   "$type": "list",
                   "items": [
