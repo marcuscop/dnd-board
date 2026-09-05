@@ -5453,6 +5453,376 @@
                           }
                         }
                       }
+                    },
+                    {
+                      "$type": "SpellEntry",
+                      "fields": {
+                        "id": {
+                          "$type": "SpellId",
+                          "value": "ICE_STORM"
+                        },
+                        "name": {
+                          "$type": "SpellId",
+                          "value": "ICE_STORM"
+                        },
+                        "level": {
+                          "$type": "int",
+                          "value": 4
+                        },
+                        "school": {
+                          "$type": "SpellSchool",
+                          "value": "EVOCATION"
+                        },
+                        "castingTime": {
+                          "$type": "TimeEconomy",
+                          "value": "ACTION"
+                        },
+                        "targeting": {
+                          "$type": "SpellTargeting",
+                          "fields": {
+                            "rangeType": {
+                              "$type": "SpellRangeType",
+                              "value": "DISTANCE"
+                            },
+                            "distanceFeet": {
+                              "$type": "int",
+                              "value": 300
+                            },
+                            "area": {
+                              "$type": "SpellCylinderArea",
+                              "fields": {
+                                "radiusFeet": {
+                                  "$type": "int",
+                                  "value": 20
+                                },
+                                "heightFeet": {
+                                  "$type": "int",
+                                  "value": 40
+                                },
+                                "shape": {
+                                  "$type": "SpellAreaShape",
+                                  "value": "CYLINDER"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "duration": {
+                          "$type": "SpellDuration",
+                          "fields": {
+                            "unit": {
+                              "$type": "SpellDurationUnit",
+                              "value": "INSTANTANEOUS"
+                            },
+                            "amount": {
+                              "$type": "int",
+                              "value": 0
+                            },
+                            "maximum": {
+                              "$type": "bool",
+                              "value": false
+                            }
+                          }
+                        },
+                        "components": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellComponent",
+                              "value": "VERBAL"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "SOMATIC"
+                            },
+                            {
+                              "$type": "SpellComponent",
+                              "value": "MATERIAL"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "$type": "str",
+                          "value": "Spell lists: Druid, Sorcerer, Wizard. Casting time: Action. Range: 300 ft, 20 ft radius x 40 ft cylinder. Components: Verbal, Somatic, Material. Duration: Instantaneous."
+                        },
+                        "concentration": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "ritual": {
+                          "$type": "bool",
+                          "value": false
+                        },
+                        "effects": {
+                          "$type": "list",
+                          "items": [
+                            {
+                              "$type": "SpellEffect",
+                              "fields": {
+                                "kind": {
+                                  "$type": "SpellEffectKind",
+                                  "value": "DAMAGE"
+                                },
+                                "trigger": {
+                                  "$type": "SpellEffectTrigger",
+                                  "value": "ON_CAST"
+                                },
+                                "target": {
+                                  "$type": "SpellEffectTarget",
+                                  "value": "AREA"
+                                },
+                                "attack": {
+                                  "$type": "SpellAttackType",
+                                  "value": "NONE"
+                                },
+                                "savingThrow": {
+                                  "$type": "SpellSavingThrow",
+                                  "fields": {
+                                    "ability": {
+                                      "$type": "AbilityType",
+                                      "value": "DEXTERITY"
+                                    },
+                                    "outcome": {
+                                      "$type": "SpellSaveOutcome",
+                                      "value": "HALF_DAMAGE"
+                                    }
+                                  }
+                                },
+                                "damage": {
+                                  "$type": "SpellDamageEffect",
+                                  "fields": {
+                                    "dice": {
+                                      "$type": "SpellEffectDice",
+                                      "fields": {
+                                        "diceCount": {
+                                          "$type": "int",
+                                          "value": 2
+                                        },
+                                        "diceType": {
+                                          "$type": "DiceType",
+                                          "value": "D10"
+                                        },
+                                        "staticBonus": {
+                                          "$type": "int",
+                                          "value": 0
+                                        },
+                                        "bonusSpellcastingAbility": {
+                                          "$type": "bool",
+                                          "value": false
+                                        }
+                                      }
+                                    },
+                                    "damageType": {
+                                      "$type": "DamageType",
+                                      "value": "BLUDGEONING"
+                                    },
+                                    "scaling": {
+                                      "$type": "list",
+                                      "items": [
+                                        {
+                                          "$type": "SpellScaling",
+                                          "fields": {
+                                            "scalingType": {
+                                              "$type": "SpellScalingType",
+                                              "value": "SPELL_SLOT_LEVEL"
+                                            },
+                                            "additionalDice": {
+                                              "$type": "SpellEffectDice",
+                                              "fields": {
+                                                "diceCount": {
+                                                  "$type": "int",
+                                                  "value": 1
+                                                },
+                                                "diceType": {
+                                                  "$type": "DiceType",
+                                                  "value": "D10"
+                                                },
+                                                "staticBonus": {
+                                                  "$type": "int",
+                                                  "value": 0
+                                                },
+                                                "bonusSpellcastingAbility": {
+                                                  "$type": "bool",
+                                                  "value": false
+                                                }
+                                              }
+                                            },
+                                            "additionalStaticBonus": {
+                                              "$type": "int",
+                                              "value": 0
+                                            },
+                                            "additionalInstances": {
+                                              "$type": "int",
+                                              "value": 0
+                                            },
+                                            "interval": {
+                                              "$type": "int",
+                                              "value": 1
+                                            },
+                                            "description": {
+                                              "$type": "str",
+                                              "value": "Bludgeoning damage increases by 1d10 for each spell slot level above 4."
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                },
+                                "damageComponents": {
+                                  "$type": "list",
+                                  "items": [
+                                    {
+                                      "$type": "SpellDamageEffect",
+                                      "fields": {
+                                        "dice": {
+                                          "$type": "SpellEffectDice",
+                                          "fields": {
+                                            "diceCount": {
+                                              "$type": "int",
+                                              "value": 2
+                                            },
+                                            "diceType": {
+                                              "$type": "DiceType",
+                                              "value": "D10"
+                                            },
+                                            "staticBonus": {
+                                              "$type": "int",
+                                              "value": 0
+                                            },
+                                            "bonusSpellcastingAbility": {
+                                              "$type": "bool",
+                                              "value": false
+                                            }
+                                          }
+                                        },
+                                        "damageType": {
+                                          "$type": "DamageType",
+                                          "value": "BLUDGEONING"
+                                        },
+                                        "scaling": {
+                                          "$type": "list",
+                                          "items": [
+                                            {
+                                              "$type": "SpellScaling",
+                                              "fields": {
+                                                "scalingType": {
+                                                  "$type": "SpellScalingType",
+                                                  "value": "SPELL_SLOT_LEVEL"
+                                                },
+                                                "additionalDice": {
+                                                  "$type": "SpellEffectDice",
+                                                  "fields": {
+                                                    "diceCount": {
+                                                      "$type": "int",
+                                                      "value": 1
+                                                    },
+                                                    "diceType": {
+                                                      "$type": "DiceType",
+                                                      "value": "D10"
+                                                    },
+                                                    "staticBonus": {
+                                                      "$type": "int",
+                                                      "value": 0
+                                                    },
+                                                    "bonusSpellcastingAbility": {
+                                                      "$type": "bool",
+                                                      "value": false
+                                                    }
+                                                  }
+                                                },
+                                                "additionalStaticBonus": {
+                                                  "$type": "int",
+                                                  "value": 0
+                                                },
+                                                "additionalInstances": {
+                                                  "$type": "int",
+                                                  "value": 0
+                                                },
+                                                "interval": {
+                                                  "$type": "int",
+                                                  "value": 1
+                                                },
+                                                "description": {
+                                                  "$type": "str",
+                                                  "value": "Bludgeoning damage increases by 1d10 for each spell slot level above 4."
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "$type": "SpellDamageEffect",
+                                      "fields": {
+                                        "dice": {
+                                          "$type": "SpellEffectDice",
+                                          "fields": {
+                                            "diceCount": {
+                                              "$type": "int",
+                                              "value": 4
+                                            },
+                                            "diceType": {
+                                              "$type": "DiceType",
+                                              "value": "D6"
+                                            },
+                                            "staticBonus": {
+                                              "$type": "int",
+                                              "value": 0
+                                            },
+                                            "bonusSpellcastingAbility": {
+                                              "$type": "bool",
+                                              "value": false
+                                            }
+                                          }
+                                        },
+                                        "damageType": {
+                                          "$type": "DamageType",
+                                          "value": "COLD"
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                "instances": {
+                                  "$type": "int",
+                                  "value": 1
+                                },
+                                "instanceLabel": {
+                                  "$type": "str",
+                                  "value": ""
+                                },
+                                "actionLabel": {
+                                  "$type": "str",
+                                  "value": "Storm"
+                                },
+                                "description": {
+                                  "$type": "str",
+                                  "value": "The hailstones turn the Cylinder into Difficult Terrain until the end of your next turn."
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "status": {
+                          "$type": "SpellStatus",
+                          "fields": {
+                            "source": {
+                              "$type": "SpellSource",
+                              "value": "WIZARD"
+                            },
+                            "castingAbility": {
+                              "$type": "AbilityType",
+                              "value": "INTELLIGENCE"
+                            },
+                            "reset": {
+                              "$type": "RestType",
+                              "value": "NONE"
+                            }
+                          }
+                        }
+                      }
                     }
                   ]
                 },

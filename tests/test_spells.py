@@ -864,7 +864,14 @@ def test_catalog_spell_effects_capture_verified_level_three_mechanics() -> None:
 
 def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None:
     cone_of_cold = spell_entry(SpellId.CONE_OF_COLD)
+    fire_shield = spell_entry(SpellId.FIRE_SHIELD)
     greater_invisibility = spell_entry(SpellId.GREATER_INVISIBILITY)
+    ice_storm = spell_entry(SpellId.ICE_STORM)
+    phantasmal_killer = spell_entry(SpellId.PHANTASMAL_KILLER)
+    staggering_smite = spell_entry(SpellId.STAGGERING_SMITE)
+    stoneskin = spell_entry(SpellId.STONESKIN)
+    vitriolic_sphere = spell_entry(SpellId.VITRIOLIC_SPHERE)
+    wall_of_fire = spell_entry(SpellId.WALL_OF_FIRE)
 
     assert cone_of_cold is not None and cone_of_cold.effects is not None
     assert cone_of_cold.targeting.area.shape == SpellAreaShape.CONE
@@ -882,6 +889,91 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
     assert greater_invisibility is not None and greater_invisibility.effects is not None
     assert greater_invisibility.effects[0].conditions is not None
     assert greater_invisibility.effects[0].conditions[0].condition == ConditionType.INVISIBLE
+
+    assert ice_storm is not None and ice_storm.effects is not None
+    assert ice_storm.targeting.area.shape == SpellAreaShape.CYLINDER
+    assert ice_storm.targeting.area.radiusFeet == 20
+    assert ice_storm.targeting.area.heightFeet == 40
+    assert ice_storm.effects[0].savingThrow is not None
+    assert ice_storm.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert ice_storm.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert ice_storm.effects[0].damageComponents is not None
+    assert [component.dice.dice for component in ice_storm.effects[0].damageComponents] == ["2d10", "4d6"]
+    assert [component.damageType for component in ice_storm.effects[0].damageComponents] == [DamageType.BLUDGEONING, DamageType.COLD]
+    assert ice_storm.effects[0].damageComponents[0].scaling is not None
+    assert ice_storm.effects[0].damageComponents[0].scaling[0].additionalDice is not None
+    assert ice_storm.effects[0].damageComponents[0].scaling[0].additionalDice.dice == "1d10"
+    assert ice_storm.effects[0].damageComponents[1].scaling is None
+
+    assert fire_shield is not None and fire_shield.effects is not None
+    assert [effect.actionLabel for effect in fire_shield.effects] == ["Warm Shield", "Warm Retaliation", "Chill Shield", "Chill Retaliation"]
+    assert fire_shield.effects[0].conditions is not None
+    assert fire_shield.effects[0].conditions[0].condition == ConditionType.RESISTANCE_COLD
+    assert fire_shield.effects[1].damage is not None
+    assert fire_shield.effects[1].damage.dice.dice == "2d8"
+    assert fire_shield.effects[1].damage.damageType == DamageType.FIRE
+    assert fire_shield.effects[2].conditions is not None
+    assert fire_shield.effects[2].conditions[0].condition == ConditionType.RESISTANCE_FIRE
+    assert fire_shield.effects[3].damage is not None
+    assert fire_shield.effects[3].damage.damageType == DamageType.COLD
+
+    assert phantasmal_killer is not None and phantasmal_killer.effects is not None
+    assert phantasmal_killer.effects[0].damage is not None
+    assert phantasmal_killer.effects[0].damage.dice.dice == "4d10"
+    assert phantasmal_killer.effects[0].damage.damageType == DamageType.PSYCHIC
+    assert phantasmal_killer.effects[0].savingThrow is not None
+    assert phantasmal_killer.effects[0].savingThrow.ability == AbilityType.WISDOM
+    assert phantasmal_killer.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert phantasmal_killer.effects[0].scaling is not None
+    assert phantasmal_killer.effects[0].scaling[0].additionalDice is not None
+    assert phantasmal_killer.effects[0].scaling[0].additionalDice.dice == "1d10"
+    assert phantasmal_killer.effects[1].conditions is not None
+    assert phantasmal_killer.effects[1].conditions[0].condition == ConditionType.PHANTASMAL_KILLER
+
+    assert staggering_smite is not None and staggering_smite.effects is not None
+    assert staggering_smite.effects[0].damage is not None
+    assert staggering_smite.effects[0].damage.dice.dice == "4d6"
+    assert staggering_smite.effects[0].damage.damageType == DamageType.PSYCHIC
+    assert staggering_smite.effects[0].scaling is not None
+    assert staggering_smite.effects[0].scaling[0].additionalDice is not None
+    assert staggering_smite.effects[0].scaling[0].additionalDice.dice == "1d6"
+    assert staggering_smite.effects[1].conditions is not None
+    assert staggering_smite.effects[1].conditions[0].condition == ConditionType.STUNNED
+    assert staggering_smite.effects[1].savingThrow is not None
+    assert staggering_smite.effects[1].savingThrow.ability == AbilityType.WISDOM
+
+    assert stoneskin is not None and stoneskin.effects is not None
+    assert stoneskin.effects[0].conditions is not None
+    assert [condition.condition for condition in stoneskin.effects[0].conditions] == [
+        ConditionType.RESISTANCE_BLUDGEONING,
+        ConditionType.RESISTANCE_PIERCING,
+        ConditionType.RESISTANCE_SLASHING,
+    ]
+
+    assert vitriolic_sphere is not None and vitriolic_sphere.effects is not None
+    assert vitriolic_sphere.targeting.area.shape == SpellAreaShape.RADIUS
+    assert vitriolic_sphere.targeting.area.radiusFeet == 20
+    assert [effect.actionLabel for effect in vitriolic_sphere.effects] == ["Initial", "Later"]
+    assert vitriolic_sphere.effects[0].damage is not None
+    assert vitriolic_sphere.effects[0].damage.dice.dice == "10d4"
+    assert vitriolic_sphere.effects[0].damage.damageType == DamageType.ACID
+    assert vitriolic_sphere.effects[0].savingThrow is not None
+    assert vitriolic_sphere.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert vitriolic_sphere.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert vitriolic_sphere.effects[0].scaling is not None
+    assert vitriolic_sphere.effects[0].scaling[0].additionalDice is not None
+    assert vitriolic_sphere.effects[0].scaling[0].additionalDice.dice == "2d4"
+    assert vitriolic_sphere.effects[1].damage is not None
+    assert vitriolic_sphere.effects[1].damage.dice.dice == "5d4"
+
+    assert wall_of_fire is not None and wall_of_fire.effects is not None
+    assert [effect.actionLabel for effect in wall_of_fire.effects] == ["Appears", "Hot Side"]
+    assert all(effect.damage is not None and effect.damage.dice.dice == "5d8" for effect in wall_of_fire.effects)
+    assert all(effect.damage is not None and effect.damage.damageType == DamageType.FIRE for effect in wall_of_fire.effects)
+    assert wall_of_fire.effects[0].savingThrow is not None
+    assert wall_of_fire.effects[0].savingThrow.ability == AbilityType.DEXTERITY
+    assert wall_of_fire.effects[0].savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE
+    assert wall_of_fire.effects[1].savingThrow is None
 
 
 def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics() -> None:

@@ -104,6 +104,7 @@ export type ConditionType =
   | "mageArmor"
   | "paralyzed"
   | "petrified"
+  | "phantasmalKiller"
   | "poisoned"
   | "prone"
   | "protectionFromPoison"
@@ -271,6 +272,7 @@ export type SpellDamageEffect = {
   dice: SpellEffectDice;
   damageType: DamageType;
   damageTypeLabel: string;
+  scaling?: SpellScaling[];
 };
 export type SpellHealingEffect = {
   dice: SpellEffectDice;
@@ -331,6 +333,7 @@ export type SpellEffect = {
   targetCreatureTypesLabel?: string[];
   savingThrow?: SpellSavingThrow;
   damage?: SpellDamageEffect;
+  damageComponents?: SpellDamageEffect[];
   healing?: SpellHealingEffect;
   sourceHealing?: SpellSourceHealingEffect;
   temporaryHitPoints?: SpellEffectDice;
@@ -724,6 +727,7 @@ export type RollPayload = {
   disadvantageConditionsLabel?: string[];
   damageType?: DamageType;
   damageTypeLabel?: string;
+  damageComponents?: RollDamageComponent[];
   damageSavingThrow?: AbilityType;
   damageSavingThrowLabel?: string;
   damageSaveDc?: number;
@@ -743,6 +747,22 @@ export type RollPayload = {
     remainingUses: number;
     maxUses: number;
   };
+};
+
+export type RollDamageComponent = {
+  damageType: DamageType;
+  damageTypeLabel: string;
+  dice: number[];
+  diceType: DiceType;
+  diceTypeLabel: string;
+  die: string;
+  modifier: number;
+  modifierBreakdown: {
+    source: string;
+    value: number;
+    description: string;
+  }[];
+  total: number;
 };
 
 export type RollResolution = {

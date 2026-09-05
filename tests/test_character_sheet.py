@@ -31,6 +31,7 @@ from dnd_board.character_sheet import (
     RollAction,
     RollLogEntry,
     RollLogEntryType,
+    RollDamageComponent,
     RollModifierType,
     RollResolutionMode,
     SheetFeature,
@@ -492,6 +493,24 @@ def test_resolution_branches_cover_miss_heal_temp_hp_and_defense_text(monkeypatc
         target,
     ).outcome == "deals 8 damage after Slashing vulnerability"
 
+    target.hp = HitPoints(current=30, max=30, temporary=0)
+    target.damageResistances = [DamageType.BLUDGEONING]
+    target.damageVulnerabilities = [DamageType.COLD]
+    mixed_damage_roll = replace(
+        typed_damage_roll,
+        total=20,
+        damageType=DamageType.BLUDGEONING,
+        damageSaveOutcome=SpellSaveOutcome.HALF_DAMAGE,
+        damageSaveSucceeded=True,
+        damageComponents=[
+            RollDamageComponent(DamageType.BLUDGEONING, [5, 5], DiceType.D10, "2d10", 0, [], 10),
+            RollDamageComponent(DamageType.COLD, [2, 2, 3, 3], DiceType.D6, "4d6", 0, [], 10),
+        ],
+    )
+    mixed_resolution = resolve_roll_against_target(mixed_damage_roll, target)
+    assert mixed_resolution.targetHp.current == 18
+    assert mixed_resolution.outcome == "deals 12 damage (Bludgeoning 2 after successful save, resistance; Cold 10 after successful save, vulnerability)"
+
     static_modifier_roll = build_roll_action_payload(
         sheet,
         "player-1",
@@ -602,6 +621,7 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     guiding_bolt = cleric_spell_entry(SpellId.GUIDING_BOLT)
     eldritch_blast = spell_entry(SpellId.ELDRITCH_BLAST)
     inflict_wounds = cleric_spell_entry(SpellId.INFLICT_WOUNDS)
+    ice_storm = spell_entry(SpellId.ICE_STORM)
     lightning_bolt = wizard_spell_entry(SpellId.LIGHTNING_BOLT)
     divine_smite = spell_entry(SpellId.DIVINE_SMITE)
     magic_missile = wizard_spell_entry(SpellId.MAGIC_MISSILE)
@@ -620,6 +640,7 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert guiding_bolt is not None
     assert eldritch_blast is not None
     assert inflict_wounds is not None
+    assert ice_storm is not None
     assert lightning_bolt is not None
     assert divine_smite is not None
     assert magic_missile is not None
@@ -641,6 +662,7 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     guiding_roll = build_spell_damage_roll_payload(spell_sheet(5, [guiding_bolt]), "player-1", guiding_bolt, spell_slot_level=3)
     eldritch_roll = build_spell_damage_roll_payload(spell_sheet(11, [eldritch_blast]), "player-1", eldritch_blast, instance_index=2)
     inflict_roll = build_spell_damage_roll_payload(spell_sheet(5, [inflict_wounds]), "player-1", inflict_wounds, spell_slot_level=2)
+    ice_storm_roll = build_spell_damage_roll_payload(spell_sheet(7, [ice_storm]), "player-1", ice_storm, spell_slot_level=5)
     lightning_roll = build_spell_damage_roll_payload(spell_sheet(5, [lightning_bolt]), "player-1", lightning_bolt, spell_slot_level=4)
     divine_smite_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=0, spell_slot_level=3)
     divine_smite_bonus_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=1)
@@ -703,6 +725,17 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert inflict_roll.damageType == DamageType.NECROTIC
     assert inflict_roll.damageSavingThrow == AbilityType.CONSTITUTION
     assert inflict_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
+
+    assert ice_storm_roll.label == "Storm Damage"
+    assert ice_storm_roll.die == "3d10+4d6"
+    assert ice_storm_roll.total == 21
+    assert ice_storm_roll.damageType == DamageType.BLUDGEONING
+    assert ice_storm_roll.damageSavingThrow == AbilityType.DEXTERITY
+    assert ice_storm_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
+    assert ice_storm_roll.damageComponents is not None
+    assert [component.damageType for component in ice_storm_roll.damageComponents] == [DamageType.BLUDGEONING, DamageType.COLD]
+    assert [component.die for component in ice_storm_roll.damageComponents] == ["3d10", "4d6"]
+    assert [component.total for component in ice_storm_roll.damageComponents] == [9, 12]
 
     assert lightning_roll.die == "9d6"
     assert lightning_roll.total == 27

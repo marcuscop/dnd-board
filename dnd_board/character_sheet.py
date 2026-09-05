@@ -816,6 +816,7 @@ class ConditionType(Enum):
     MAGE_ARMOR = auto()
     PARALYZED = auto()
     PETRIFIED = auto()
+    PHANTASMAL_KILLER = auto()
     POISONED = auto()
     PRONE = auto()
     PROTECTION_FROM_POISON = auto()
@@ -996,6 +997,18 @@ class SpellEffectDice:
 class SpellDamageEffect:
     dice: SpellEffectDice
     damageType: DamageType
+    scaling: list[SpellScaling] | None = None
+
+
+@dataclass(frozen=True)
+class RollDamageComponent:
+    damageType: DamageType
+    dice: list[int]
+    diceType: DiceType
+    die: str
+    modifier: int
+    modifierBreakdown: list[RollModifierBreakdown]
+    total: int
 
 
 @dataclass(frozen=True)
@@ -1054,6 +1067,7 @@ class SpellEffect:
     targetCreatureTypes: list[CreatureType] | None = None
     savingThrow: SpellSavingThrow | None = None
     damage: SpellDamageEffect | None = None
+    damageComponents: list[SpellDamageEffect] | None = None
     healing: SpellHealingEffect | None = None
     sourceHealing: SpellSourceHealingEffect | None = None
     temporaryHitPoints: SpellEffectDice | None = None
@@ -1512,9 +1526,11 @@ class RollPayload:
     advantageConditions: list[ConditionType] | None = None
     disadvantageConditions: list[ConditionType] | None = None
     damageType: DamageType | None = None
+    damageComponents: list[RollDamageComponent] | None = None
     damageSavingThrow: AbilityType | None = None
     damageSaveDc: int | None = None
     damageSaveOutcome: SpellSaveOutcome | None = None
+    damageSaveSucceeded: bool | None = None
     damageSaveDisadvantageCreatureTypes: list[CreatureType] | None = None
     targetCreatureTypes: list[CreatureType] | None = None
     sourceHealing: SpellSourceHealingEffect | None = None
@@ -1821,24 +1837,14 @@ def build_spell_damage_roll_payload(
     if instance_index is not None and (instance_index < 0 or instance_index >= instance_count):
         raise ValueError("Spell damage instance not found")
     active_instance_index = instance_index if instance_index is not None else 0
-    dice_count = scaled_spell_effect_dice_count(effect.damage.dice.diceCount, effect.scaling, sheet, spell.level, spell_slot_level)
-    dice_type = effect.damage.dice.diceType
-    dice = [random.randint(1, dice_type.value) for _ in range(dice_count)]
-    modifier_breakdown = []
-    static_bonus = effect.damage.dice.staticBonus
-    if static_bonus:
-        modifier_breakdown.append(RollModifierBreakdown(source="Spell", value=static_bonus))
-    if effect.damage.dice.bonusAbility is not None:
-        ability_score = getattr(sheet.abilityScores, enum_key(effect.damage.dice.bonusAbility))
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(effect.damage.dice.bonusAbility), value=ability_modifier(ability_score)))
-    if effect.damage.dice.bonusSpellcastingAbility:
-        casting_ability = spell_casting_ability(sheet, spell)
-        ability_score = getattr(sheet.abilityScores, enum_key(casting_ability))
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(casting_ability), value=ability_modifier(ability_score)))
-    scaled_static_bonus = scaled_spell_effect_static_bonus(effect.damage.dice.staticBonus, effect.scaling, spell.level, spell_slot_level)
-    if scaled_static_bonus != effect.damage.dice.staticBonus:
-        modifier_breakdown.append(RollModifierBreakdown(source="Spell Slot", value=scaled_static_bonus - effect.damage.dice.staticBonus))
-    modifier = sum(part.value for part in modifier_breakdown)
+    damage_components = [
+        spell_damage_roll_component(sheet, spell, component, component.scaling or effect.scaling, spell_slot_level)
+        for component in (effect.damageComponents or [effect.damage])
+    ]
+    primary_component = damage_components[0]
+    dice = [roll for component in damage_components for roll in component.dice]
+    modifier_breakdown = [part for component in damage_components for part in component.modifierBreakdown]
+    modifier = sum(component.modifier for component in damage_components)
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -1851,13 +1857,14 @@ def build_spell_damage_roll_payload(
         label=spell_damage_roll_label(effect, active_instance_index, instance_count),
         iconUrl=None,
         dice=dice,
-        diceType=dice_type,
-        die=dice_formula(dice_count, dice_type),
+        diceType=primary_component.diceType,
+        die="+".join(component.die for component in damage_components),
         modifier=modifier,
         modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + modifier,
+        total=sum(component.total for component in damage_components),
         createdAt=created_at,
-        damageType=effect.damage.damageType,
+        damageType=primary_component.damageType,
+        damageComponents=damage_components if len(damage_components) > 1 else None,
         damageSavingThrow=effect.savingThrow.ability if effect.savingThrow is not None else None,
         damageSaveDc=spell_save_dc(sheet, spell) if effect.savingThrow is not None else None,
         damageSaveOutcome=effect.savingThrow.outcome if effect.savingThrow is not None else None,
@@ -1866,6 +1873,42 @@ def build_spell_damage_roll_payload(
         sourceHealing=effect.sourceHealing,
         conditionEffects=spell_damage_condition_effects(effect),
         restType=effect.restType,
+    )
+
+
+def spell_damage_roll_component(
+    sheet: CharacterSheet,
+    spell: SpellEntry,
+    damage: SpellDamageEffect,
+    scaling: list[SpellScaling] | None,
+    spell_slot_level: int | None,
+) -> RollDamageComponent:
+    dice_count = scaled_spell_effect_dice_count(damage.dice.diceCount, scaling, sheet, spell.level, spell_slot_level)
+    dice_type = damage.dice.diceType
+    dice = [random.randint(1, dice_type.value) for _ in range(dice_count)]
+    modifier_breakdown = []
+    static_bonus = damage.dice.staticBonus
+    if static_bonus:
+        modifier_breakdown.append(RollModifierBreakdown(source="Spell", value=static_bonus))
+    if damage.dice.bonusAbility is not None:
+        ability_score = getattr(sheet.abilityScores, enum_key(damage.dice.bonusAbility))
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(damage.dice.bonusAbility), value=ability_modifier(ability_score)))
+    if damage.dice.bonusSpellcastingAbility:
+        casting_ability = spell_casting_ability(sheet, spell)
+        ability_score = getattr(sheet.abilityScores, enum_key(casting_ability))
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(casting_ability), value=ability_modifier(ability_score)))
+    scaled_static_bonus = scaled_spell_effect_static_bonus(damage.dice.staticBonus, scaling, spell.level, spell_slot_level)
+    if scaled_static_bonus != damage.dice.staticBonus:
+        modifier_breakdown.append(RollModifierBreakdown(source="Spell Slot", value=scaled_static_bonus - damage.dice.staticBonus))
+    modifier = sum(part.value for part in modifier_breakdown)
+    return RollDamageComponent(
+        damageType=damage.damageType,
+        dice=dice,
+        diceType=dice_type,
+        die=dice_formula(dice_count, dice_type),
+        modifier=modifier,
+        modifierBreakdown=modifier_breakdown,
+        total=sum(dice) + modifier,
     )
 
 
@@ -2427,14 +2470,12 @@ def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> Ro
             target_hp = target.hp
             outcome = f"has no effect; target is not {creature_type_list_label(roll.targetCreatureTypes or [])}"
         else:
-            damage_reduction = active_damage_reduction_roll(roll.damageType, target)
-            adjusted_damage = damage_after_defenses(max(0, roll.total), roll.damageType, target, damage_reduction)
+            adjusted_damage, outcome = resolved_damage_total_and_outcome(roll, target)
             remaining_damage = adjusted_damage
             next_temporary = max(0, target.hp.temporary - remaining_damage)
             remaining_damage = max(0, remaining_damage - target.hp.temporary)
             next_hp = max(0, target.hp.current - remaining_damage)
             target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=next_temporary)
-            outcome = damage_outcome(roll.total, adjusted_damage, roll.damageType, target, damage_reduction)
     elif roll.resolution == RollResolutionMode.HEAL_SELF:
         next_hp = min(target.hp.max, target.hp.current + max(0, roll.total))
         target_hp = HitPoints(current=next_hp, max=target.hp.max, temporary=target.hp.temporary)
@@ -2469,6 +2510,27 @@ def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> Ro
         outcome=outcome,
         createdAt=time_ns(),
     )
+
+
+def resolved_damage_total_and_outcome(roll: RollPayload, target: CharacterSheet) -> tuple[int, str]:
+    save_halved = bool(roll.damageSaveSucceeded and roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE)
+    if roll.damageComponents:
+        outcomes = []
+        total = 0
+        for component in roll.damageComponents:
+            damage_reduction = active_damage_reduction_roll(component.damageType, target)
+            adjusted_damage = damage_after_defenses(max(0, component.total), component.damageType, target, damage_reduction)
+            if save_halved:
+                adjusted_damage //= 2
+            total += adjusted_damage
+            outcomes.append(damage_component_outcome(component.total, adjusted_damage, component.damageType, target, damage_reduction, save_halved))
+        return total, f"deals {total} damage ({'; '.join(outcomes)})"
+
+    damage_reduction = active_damage_reduction_roll(roll.damageType, target)
+    adjusted_damage = damage_after_defenses(max(0, roll.total), roll.damageType, target, damage_reduction)
+    if save_halved:
+        adjusted_damage //= 2
+    return adjusted_damage, damage_outcome(roll.total, adjusted_damage, roll.damageType, target, damage_reduction, save_halved)
 
 
 def target_creature_type_matches(roll: RollPayload, target: CharacterSheet) -> bool:
@@ -2536,13 +2598,15 @@ def active_damage_reduction_types(target: CharacterSheet) -> set[DamageType]:
     return {DAMAGE_RESISTANCE_CONDITIONS[condition] for condition in target.conditions if condition in DAMAGE_RESISTANCE_CONDITIONS}
 
 
-def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0) -> str:
-    if adjusted_damage == raw_damage or damage_type is None:
+def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0, save_halved: bool = False) -> str:
+    if (adjusted_damage == raw_damage and not save_halved) or damage_type is None:
         return f"deals {adjusted_damage} damage"
     damage_label = enum_label(damage_type)
     if damage_type in target.damageImmunities:
         return f"deals 0 damage after {damage_label} immunity"
     adjustments = []
+    if save_halved:
+        adjustments.append("successful save")
     if damage_reduction:
         adjustments.append(f"Resistance {damage_label} reduces damage by {damage_reduction}")
     if damage_type in effective_damage_resistances(target):
@@ -2550,6 +2614,31 @@ def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageTyp
     if damage_type in target.damageVulnerabilities:
         adjustments.append(f"{damage_label} vulnerability")
     return f"deals {adjusted_damage} damage after {', '.join(adjustments)}"
+
+
+def damage_component_outcome(
+    raw_damage: int,
+    adjusted_damage: int,
+    damage_type: DamageType,
+    target: CharacterSheet,
+    damage_reduction: int = 0,
+    save_halved: bool = False,
+) -> str:
+    damage_label = enum_label(damage_type)
+    if adjusted_damage == raw_damage and not save_halved:
+        return f"{damage_label} {adjusted_damage}"
+    if damage_type in target.damageImmunities:
+        return f"{damage_label} 0 after immunity"
+    adjustments = []
+    if save_halved:
+        adjustments.append("successful save")
+    if damage_reduction:
+        adjustments.append(f"Resistance {damage_label} reduces damage by {damage_reduction}")
+    if damage_type in effective_damage_resistances(target):
+        adjustments.append("resistance")
+    if damage_type in target.damageVulnerabilities:
+        adjustments.append("vulnerability")
+    return f"{damage_label} {adjusted_damage} after {', '.join(adjustments)}"
 
 
 def saving_throw_total(target: CharacterSheet, ability: AbilityType) -> int:

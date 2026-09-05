@@ -53,6 +53,7 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "mageArmor",
   "paralyzed",
   "petrified",
+  "phantasmalKiller",
   "poisoned",
   "prone",
   "protectionFromPoison",
@@ -2666,7 +2667,7 @@ function RollCard({
       </span>
       <span className="roll-main">
         <strong>{roll.label}</strong>
-        <small>{roll.damageTypeLabel ? `${rollParentLabel} · ${roll.damageTypeLabel}` : rollParentLabel}</small>
+        <small>{rollDamageTypeLabel(roll) ? `${rollParentLabel} · ${rollDamageTypeLabel(roll)}` : rollParentLabel}</small>
       </span>
       {!compact && <span className="roll-total roll-result-number">{rollMathText(roll)}</span>}
     </li>
@@ -4047,12 +4048,36 @@ function formatSigned(value: number) {
 }
 
 function rollMathText(roll: RollPayload) {
+  if (roll.damageComponents?.length) {
+    const components = roll.damageComponents
+      .map((component) => `${component.damageTypeLabel ?? cleanName(component.damageType)} ${rollComponentMathText(component)}`)
+      .join(" + ");
+    return `${components} = ${roll.total}`;
+  }
   const dice = rollDieText(roll);
   const modifierParts = (roll.modifierBreakdown ?? []).filter((part) => part.value !== 0);
   const modifiers = modifierParts.length
     ? modifierParts.map((part) => `${part.value >= 0 ? "+" : "-"} ${part.source} (${Math.abs(part.value)})`).join(" ")
     : formatSigned(roll.modifier);
   return `${dice} ${modifiers} = ${roll.total}`;
+}
+
+function rollComponentMathText(component: NonNullable<RollPayload["damageComponents"]>[number]) {
+  const dice = component.dice.join("+");
+  const modifierParts = (component.modifierBreakdown ?? []).filter((part) => part.value !== 0);
+  const modifiers = modifierParts.length
+    ? ` ${modifierParts.map((part) => `${part.value >= 0 ? "+" : "-"} ${part.source} (${Math.abs(part.value)})`).join(" ")}`
+    : component.modifier !== 0
+      ? ` ${formatSigned(component.modifier)}`
+      : "";
+  return `${dice}${modifiers}`;
+}
+
+function rollDamageTypeLabel(roll: RollPayload) {
+  if (roll.damageComponents?.length) {
+    return roll.damageComponents.map((component) => component.damageTypeLabel ?? cleanName(component.damageType)).join(" + ");
+  }
+  return roll.damageTypeLabel ?? "";
 }
 
 function rollDieText(roll: RollPayload) {

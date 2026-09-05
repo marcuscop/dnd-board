@@ -1861,21 +1861,20 @@ def resolve_damage_save_for_roll(roll: RollPayload, target: CharacterSheet) -> t
     )
     save_label = roll_advantage_log_label(response_roll)
     if response_roll.total < roll.damageSaveDc:
-        return f"{target.name} fails DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label}", response_roll, roll
+        return f"{target.name} fails DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label}", response_roll, replace(roll, damageSaveSucceeded=False)
     if roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE:
-        reduced_total = roll.total // 2
         return (
             f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label} for half damage",
             response_roll,
-            replace(roll, total=reduced_total),
+            replace(roll, damageSaveSucceeded=True),
         )
     if roll.damageSaveOutcome == SpellSaveOutcome.NEGATES:
         return (
             f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label} and takes no damage",
             response_roll,
-            replace(roll, total=0, conditionEffects=None),
+            replace(roll, total=0, damageComponents=None, conditionEffects=None, damageSaveSucceeded=True),
         )
-    return f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label}", response_roll, roll
+    return f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label}", response_roll, replace(roll, damageSaveSucceeded=True)
 
 
 def damage_save_disadvantage_applies(roll: RollPayload, target: CharacterSheet) -> bool:
