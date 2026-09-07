@@ -7,6 +7,7 @@ from dnd_board.character_sheet import (
     AbilityType,
     AttackAction,
     AttackDamageAbilityModifierMode,
+    AttackActionType,
     CharacterClassLevel,
     ClassType,
     ConditionApplicationMode,
@@ -58,8 +59,12 @@ from dnd_board.character_sheet import (
     build_saving_throw_roll_payload,
     build_spell_attack_roll_payload,
     build_spell_condition_roll_payload,
+    build_spell_condition_save_roll_payload,
     build_spell_damage_roll_payload,
+    build_spell_damage_save_roll_payload,
     build_spell_healing_roll_payload,
+    build_true_strike_attack_roll_payload,
+    build_true_strike_damage_roll_payload,
     resolve_roll_against_target,
     RollSource,
     ability_modifier,
@@ -84,6 +89,8 @@ from dnd_board.character_sheet import (
     spell_condition_effect_at,
     spell_target_range_label,
     spell_damage_effect_at,
+    true_strike_weapon_attacks,
+    shillelagh_weapon_attacks,
     scaled_spell_effect_instance_count,
     text_list,
     to_float,
@@ -244,6 +251,28 @@ def test_roll_action_payloads_cover_modifier_and_condition_effect_branches(monke
     assert "Frightened requires manual resolution" in resolution.outcome
 
 
+def test_roll_action_condition_prerequisite_can_be_split_from_effect() -> None:
+    sheet = basic_sheet()
+    action = RollAction(
+        AbilityType.STRENGTH,
+        AbilityType.STRENGTH,
+        1,
+        DiceType.D6,
+        resolution=RollResolutionMode.APPLY_DAMAGE,
+        conditionEffects=[ConditionEffect(ConditionType.PRONE, ConditionApplicationMode.TARGET_SAVE, savingThrow=AbilityType.STRENGTH, saveDc=14)],
+    )
+
+    save_prompt = build_roll_action_payload(sheet, "player-1", RollSource(SheetSectionType.ABILITIES, "trip", "effect"), action, condition_prerequisite_only=True)
+    failed_effect = build_roll_action_payload(sheet, "player-1", RollSource(SheetSectionType.ABILITIES, "trip", "effect"), action, condition_effect_succeeded=True)
+
+    assert save_prompt.label == "Strength Save"
+    assert save_prompt.dice == []
+    assert save_prompt.conditionEffectSucceeded is None
+    assert save_prompt.conditionEffects is not None
+    assert save_prompt.conditionEffects[0].saveDc == 14
+    assert failed_effect.conditionEffectSucceeded is True
+
+
 def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch) -> None:
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 2 if maximum == 4 else 10)
     sheet = replace(basic_sheet(), conditions=[ConditionType.BLESSED, ConditionType.GUIDANCE])
@@ -294,6 +323,64 @@ def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch
     assert condition_adjusted_speed(30, [ConditionType.SLOWED]) == 15
     assert condition_adjusted_speed(30, [ConditionType.LONGSTRIDER]) == 40
     assert condition_adjusted_speed(30, [ConditionType.HASTED, ConditionType.SLOWED, ConditionType.LONGSTRIDER]) == 40
+
+
+def test_spell_conditions_modify_ability_checks_saves_and_damage_rolls(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 5 if maximum == 20 else 3)
+    enhanced = replace(basic_sheet(), conditions=[ConditionType.ENHANCE_ABILITY_DEXTERITY])
+    enlarged = replace(basic_sheet(), conditions=[ConditionType.ENLARGED])
+    reduced = replace(basic_sheet(), conditions=[ConditionType.REDUCED])
+    enfeebled = replace(basic_sheet(), conditions=[ConditionType.RAY_OF_ENFEEBLEMENT])
+
+    enhanced_dexterity_check = build_ability_check_roll_payload(enhanced, "player-1", AbilityType.DEXTERITY)
+    enhanced_strength_check = build_ability_check_roll_payload(enhanced, "player-1", AbilityType.STRENGTH)
+    enlarged_strength_save = build_saving_throw_roll_payload(enlarged, "player-1", AbilityType.STRENGTH)
+    reduced_strength_check = build_ability_check_roll_payload(reduced, "player-1", AbilityType.STRENGTH)
+    enfeebled_strength_save = build_saving_throw_roll_payload(enfeebled, "player-1", AbilityType.STRENGTH)
+    enlarged_damage = build_damage_roll_payload(enlarged, "player-1", enlarged.attacks[0])
+    reduced_damage = build_damage_roll_payload(reduced, "player-1", reduced.attacks[0])
+    enfeebled_damage = build_damage_roll_payload(enfeebled, "player-1", enfeebled.attacks[0])
+    fire_bolt = spell_entry(SpellId.FIRE_BOLT)
+    assert fire_bolt is not None
+    enfeebled_spell_damage = build_spell_damage_roll_payload(replace(spell_sheet(5, [fire_bolt]), conditions=[ConditionType.RAY_OF_ENFEEBLEMENT]), "player-1", fire_bolt)
+
+    assert enhanced_dexterity_check.die == "2d20kh1"
+    assert enhanced_dexterity_check.advantageConditions == [ConditionType.ENHANCE_ABILITY_DEXTERITY]
+    assert enhanced_strength_check.die == "d20"
+    assert enlarged_strength_save.advantageConditions == [ConditionType.ENLARGED]
+    assert reduced_strength_check.disadvantageConditions == [ConditionType.REDUCED]
+    assert enfeebled_strength_save.disadvantageConditions == [ConditionType.RAY_OF_ENFEEBLEMENT]
+    assert ("Enlarged", 3) in [(part.source, part.value) for part in enlarged_damage.modifierBreakdown]
+    assert ("Reduced", -3) in [(part.source, part.value) for part in reduced_damage.modifierBreakdown]
+    assert ("Ray Of Enfeeblement", -3) in [(part.source, part.value) for part in enfeebled_damage.modifierBreakdown]
+    assert ("Ray Of Enfeeblement", -3) in [(part.source, part.value) for part in enfeebled_spell_damage.modifierBreakdown]
+
+
+def test_reduced_damage_roll_keeps_minimum_one_damage(monkeypatch) -> None:
+    rolls = iter([4, 2])
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(rolls))
+    reduced = replace(basic_sheet(), conditions=[ConditionType.REDUCED])
+    action = replace(reduced.attacks[0], damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED)
+
+    roll = build_damage_roll_payload(reduced, "player-1", action)
+
+    assert roll.total == 1
+    assert [(part.source, part.value) for part in roll.modifierBreakdown[-2:]] == [("Reduced", -4), ("Reduced", 3)]
+    assert roll.modifierBreakdown[-1].description == "Reduced damage can't be reduced below 1."
+
+
+def test_calm_emotions_immunity_blocks_charmed_and_frightened_conditions() -> None:
+    target = replace(basic_sheet(), conditions=[ConditionType.CALM_EMOTIONS_IMMUNITY])
+    charmed = RollAction("charm", ConditionType.CHARMED, 0, DiceType.D4, conditionEffects=[ConditionEffect(ConditionType.CHARMED, ConditionApplicationMode.DIRECT)])
+    frightened = RollAction("fear", ConditionType.FRIGHTENED, 0, DiceType.D4, conditionEffects=[ConditionEffect(ConditionType.FRIGHTENED, ConditionApplicationMode.DIRECT)])
+
+    charmed_resolution = resolve_roll_against_target(build_roll_action_payload(basic_sheet(), "player-1", RollSource(SheetSectionType.ABILITIES, "charm", "effect"), charmed), target)
+    frightened_resolution = resolve_roll_against_target(build_roll_action_payload(basic_sheet(), "player-1", RollSource(SheetSectionType.ABILITIES, "fear", "effect"), frightened), target)
+
+    assert charmed_resolution.targetConditions == [ConditionType.CALM_EMOTIONS_IMMUNITY]
+    assert "resists Charmed" in charmed_resolution.outcome
+    assert frightened_resolution.targetConditions == [ConditionType.CALM_EMOTIONS_IMMUNITY]
+    assert "resists Frightened" in frightened_resolution.outcome
 
 
 def test_conditions_modify_attack_roll_advantage_and_target_resolution(monkeypatch) -> None:
@@ -494,6 +581,86 @@ def test_creature_type_limited_damage_only_applies_to_matching_targets(monkeypat
     assert humanoid_resolution.outcome == "has no effect; target is not Fiend or Undead"
     assert undead_resolution.targetHp.current == undead.hp.current - 5
     assert undead_resolution.outcome == "deals 5 damage"
+
+
+def test_creature_type_limited_condition_only_applies_to_matching_targets() -> None:
+    friends = spell_entry(SpellId.FRIENDS)
+    assert friends is not None
+    roll = build_spell_condition_roll_payload(spell_sheet(5, [friends]), "player-1", friends)
+    undead = replace(basic_sheet(), creatureTypes=[CreatureType.UNDEAD])
+
+    resolution = resolve_roll_against_target(roll, undead)
+
+    assert roll.targetCreatureTypes == [CreatureType.HUMANOID]
+    assert resolution.targetConditions == []
+    assert resolution.outcome == "rolls 0; has no effect; target is not Humanoid"
+
+
+def test_true_strike_uses_spellcasting_ability_with_proficient_weapon_and_scaling_bonus(monkeypatch) -> None:
+    rolls = iter([10, 5, 3, 8, 4])
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(rolls))
+    true_strike = wizard_spell_entry(SpellId.TRUE_STRIKE)
+    assert true_strike is not None
+    longsword = AttackAction("longsword", "Longsword", AbilityType.STRENGTH, 1, DiceType.D8, damageType=DamageType.SLASHING)
+    unarmed = AttackAction("unarmed", "Unarmed Strike", AbilityType.STRENGTH, 1, DiceType.D4, damageType=DamageType.BLUDGEONING, attackType=AttackActionType.UNARMED_STRIKE)
+    sheet = replace(
+        spell_sheet(5, [true_strike]),
+        attacks=[longsword, replace(longsword, id="club", name="Club", proficient=False), unarmed],
+        equipment=[EquipmentItem(id="longsword", name="Longsword", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND)],
+    )
+
+    eligible_attacks = true_strike_weapon_attacks(sheet)
+    attack_roll = build_true_strike_attack_roll_payload(sheet, "player-1", true_strike, longsword, DamageType.RADIANT)
+    damage_roll = build_true_strike_damage_roll_payload(sheet, "player-1", true_strike, longsword, DamageType.SLASHING)
+    radiant_damage_roll = build_true_strike_damage_roll_payload(sheet, "player-1", true_strike, longsword, DamageType.RADIANT)
+
+    assert [attack.id for attack in eligible_attacks] == ["longsword"]
+    assert attack_roll.source.section == SheetSectionType.SPELLS
+    assert attack_roll.source.sourceId == "trueStrike"
+    assert attack_roll.label == "Attack Longsword"
+    assert attack_roll.damageType == DamageType.RADIANT
+    assert [(part.source, part.value) for part in attack_roll.modifierBreakdown] == [("Intelligence", 3), ("Proficiency", 3)]
+    assert attack_roll.total == 16
+    assert damage_roll.source.sourceId == "trueStrike"
+    assert damage_roll.label == "Damage Longsword"
+    assert damage_roll.damageType == DamageType.SLASHING
+    assert damage_roll.die == "1d8+1d6"
+    assert damage_roll.total == 11
+    assert damage_roll.damageComponents is not None
+    assert [(component.damageType, component.total) for component in damage_roll.damageComponents] == [(DamageType.SLASHING, 8), (DamageType.RADIANT, 3)]
+    assert radiant_damage_roll.damageType == DamageType.RADIANT
+    assert radiant_damage_roll.total == 15
+    assert radiant_damage_roll.damageComponents is not None
+    assert [(component.damageType, component.total) for component in radiant_damage_roll.damageComponents] == [(DamageType.RADIANT, 11), (DamageType.RADIANT, 4)]
+
+
+def test_shillelagh_projects_to_wielded_proficient_club_or_quarterstaff(monkeypatch) -> None:
+    rolls = iter([10, 5])
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(rolls))
+    shillelagh = spell_entry(SpellId.SHILLELAGH)
+    assert shillelagh is not None
+    club = AttackAction("club", "Club", AbilityType.STRENGTH, 1, DiceType.D4, damageType=DamageType.BLUDGEONING)
+    carried_staff = AttackAction("quarterstaff", "Quarterstaff", AbilityType.STRENGTH, 1, DiceType.D6, damageType=DamageType.BLUDGEONING)
+    sheet = replace(
+        spell_sheet(11, [shillelagh]),
+        conditions=[ConditionType.SHILLELAGH],
+        attacks=[club, carried_staff],
+        equipment=[
+            EquipmentItem(id="club", name="Club", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND),
+            EquipmentItem(id="quarterstaff", name="Quarterstaff", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.CARRIED),
+        ],
+    )
+
+    attack_roll = build_attack_roll_payload(sheet, "player-1", club)
+    damage_roll = build_damage_roll_payload(sheet, "player-1", club)
+
+    assert [attack.id for attack in shillelagh_weapon_attacks(sheet)] == ["club"]
+    assert attack_roll.damageType == DamageType.FORCE
+    assert [(part.source, part.value) for part in attack_roll.modifierBreakdown] == [("Intelligence", 3), ("Proficiency", 4)]
+    assert attack_roll.total == 17
+    assert damage_roll.damageType == DamageType.FORCE
+    assert damage_roll.die == "1d12"
+    assert damage_roll.total == 8
 
 
 def test_shared_parsing_and_armor_helpers_cover_edge_cases() -> None:
@@ -769,6 +936,24 @@ def test_burning_hands_spell_damage_scales_by_spell_slot(monkeypatch) -> None:
     assert {resource.spellSlotLevel for resource in sheet.resources if resource.spellSlotLevel is not None} == {1, 2, 3}
 
 
+def test_spell_damage_save_prompt_splits_save_from_damage() -> None:
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    assert burning_hands is not None
+    sheet = spell_sheet(1, [burning_hands])
+
+    save_roll = build_spell_damage_save_roll_payload(sheet, "player-1", burning_hands)
+    failed_damage = build_spell_damage_roll_payload(sheet, "player-1", burning_hands, damage_save_succeeded=False)
+    passed_damage = build_spell_damage_roll_payload(sheet, "player-1", burning_hands, damage_save_succeeded=True)
+
+    assert save_roll.resolution == RollResolutionMode.NONE
+    assert save_roll.label == "Dexterity Save"
+    assert save_roll.dice == []
+    assert save_roll.damageSavingThrow == AbilityType.DEXTERITY
+    assert save_roll.damageSaveDc == 13
+    assert failed_damage.damageSaveSucceeded is False
+    assert passed_damage.damageSaveSucceeded is True
+
+
 def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypatch) -> None:
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 3)
     acid_splash = wizard_spell_entry(SpellId.ACID_SPLASH)
@@ -1030,6 +1215,7 @@ def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None
 
     sheet = spell_sheet(5, [tasha])
     effect_roll = build_spell_condition_roll_payload(sheet, "player-1", tasha)
+    save_roll = build_spell_condition_save_roll_payload(sheet, "player-1", tasha)
     command_roll = build_spell_condition_roll_payload(spell_sheet(5, [command]), "player-1", command, effect_index=3)
     bless_roll = build_spell_condition_roll_payload(spell_sheet(5, [bless]), "player-1", bless)
     blinding_roll = build_spell_condition_roll_payload(spell_sheet(5, [blinding_smite]), "player-1", blinding_smite)
@@ -1052,6 +1238,11 @@ def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None
     assert {effect.removalSavingThrow for effect in effect_roll.conditionEffects} == {AbilityType.WISDOM}
     assert {effect.removalSaveDc for effect in effect_roll.conditionEffects} == {14}
     assert {effect.removalAdvantage for effect in effect_roll.conditionEffects} == {True}
+    assert save_roll.source.actionId == "condition-save-0"
+    assert save_roll.label == "Wisdom Save"
+    assert save_roll.dice == []
+    assert save_roll.conditionEffects is not None
+    assert [effect.condition for effect in save_roll.conditionEffects] == [ConditionType.PRONE, ConditionType.INCAPACITATED]
     assert command_roll.label == "Grovel Effect"
     assert command_roll.conditionEffects is not None
     assert [effect.condition for effect in command_roll.conditionEffects] == [ConditionType.COMMAND_GROVEL, ConditionType.PRONE]

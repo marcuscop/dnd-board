@@ -841,6 +841,45 @@ canvas.is-dragging,
   gap: 10px;
 }
 
+.resolution-prompt-panel {
+  display: grid;
+  gap: 10px;
+  border-color: rgba(244, 191, 79, 0.86);
+}
+
+.resolution-prompt-list {
+  display: grid;
+  gap: 8px;
+}
+
+.resolution-prompt-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(244, 191, 79, 0.38);
+  border-radius: 6px;
+  background: rgba(71, 43, 13, 0.42);
+}
+
+.resolution-prompt-card div {
+  display: grid;
+  gap: 3px;
+}
+
+.resolution-prompt-card span,
+.resolution-prompt-card p {
+  margin: 0;
+  color: #d8b778;
+  font-size: 0.78rem;
+}
+
+.resolution-prompt-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .panel-title-row {
   display: flex;
   align-items: center;
@@ -1165,6 +1204,18 @@ canvas.is-dragging,
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 900;
+}
+
+.attack-actions .attack-condition-pill {
+  display: inline-block;
+  margin-left: 8px;
+  border: 1px solid rgba(138, 202, 128, 0.72);
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgba(57, 106, 55, 0.38);
+  color: #def6d9;
+  font-size: 0.72rem;
+  font-weight: 800;
 }
 
 .card-roll-slot {

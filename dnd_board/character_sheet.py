@@ -27,6 +27,19 @@ class RollLogEntryType(Enum):
     ROLL_BLOCKED = auto()
 
 
+class ResolutionInterceptorType(Enum):
+    COUNTERSPELL = auto()
+    INDOMITABLE = auto()
+    MAGE_SLAYER = auto()
+    UNCANNY_DODGE = auto()
+
+
+class ResolutionInterceptorTrigger(Enum):
+    BEFORE_SPELL_RESOLVES = auto()
+    BEFORE_FAILED_SAVE_FINALIZES = auto()
+    BEFORE_DAMAGE_APPLIED = auto()
+
+
 class RollModifierType(Enum):
     NONE = auto()
     CLASS_LEVEL = auto()
@@ -807,6 +820,8 @@ class ConditionType(Enum):
     BLADE_WARD = auto()
     BLESSED = auto()
     BLURRED = auto()
+    CALM_EMOTIONS_IMMUNITY = auto()
+    CALM_EMOTIONS_INDIFFERENT = auto()
     CHARMED = auto()
     COMMAND_APPROACH = auto()
     COMMAND_DROP = auto()
@@ -815,8 +830,16 @@ class ConditionType(Enum):
     COMMAND_HALT = auto()
     DEAD = auto()
     DEAFENED = auto()
+    ENHANCE_ABILITY_CHARISMA = auto()
+    ENHANCE_ABILITY_DEXTERITY = auto()
+    ENHANCE_ABILITY_INTELLIGENCE = auto()
+    ENHANCE_ABILITY_STRENGTH = auto()
+    ENHANCE_ABILITY_WISDOM = auto()
+    ENLARGED = auto()
     EXHAUSTION = auto()
+    EXPEDITIOUS_RETREAT = auto()
     FAERIE_FIRE = auto()
+    FEATHER_FALL = auto()
     FULL_COVER = auto()
     FLYING = auto()
     FRIGHTENED = auto()
@@ -828,7 +851,9 @@ class ConditionType(Enum):
     HEROISM = auto()
     INCAPACITATED = auto()
     INVISIBLE = auto()
+    JUMP = auto()
     DARKVISION = auto()
+    LEVITATING = auto()
     LONGSTRIDER = auto()
     MAGE_ARMOR = auto()
     PARALYZED = auto()
@@ -838,6 +863,8 @@ class ConditionType(Enum):
     POISONED = auto()
     PRONE = auto()
     PROTECTION_FROM_POISON = auto()
+    RAY_OF_ENFEEBLEMENT = auto()
+    REDUCED = auto()
     RESISTANT_ACID = auto()
     RESISTANT_BLUDGEONING = auto()
     RESISTANT_COLD = auto()
@@ -868,6 +895,8 @@ class ConditionType(Enum):
     SHIELDED = auto()
     SHIELD_OF_FAITH = auto()
     SLOWED = auto()
+    SHILLELAGH = auto()
+    STABLE = auto()
     STUNNED = auto()
     SYNAPTIC_STATIC = auto()
     THREE_QUARTERS_COVER = auto()
@@ -902,6 +931,7 @@ class RollModifierEffectOperation(Enum):
 class RollModifierEffectTarget(Enum):
     ABILITY_CHECK = auto()
     ATTACK_ROLL = auto()
+    DAMAGE_ROLL = auto()
     SAVING_THROW = auto()
     CONCENTRATION_SAVE = auto()
     ARMOR_CLASS = auto()
@@ -1266,6 +1296,7 @@ class AttackAction:
     attackKind: AttackKind = AttackKind.STANDARD
     attackType: AttackActionType = AttackActionType.STANDARD
     properties: list[WeaponProperty] | None = None
+    activeSpellConditions: list[SpellId] | None = None
 
     @api_field
     def damageDie(self) -> str:
@@ -1605,6 +1636,7 @@ class RollPayload:
     maxHitPointIncrease: SpellEffectDice | None = None
     maxHitPointReduction: SpellMaxHitPointReduction | None = None
     conditionEffects: list[ConditionEffect] | None = None
+    conditionEffectSucceeded: bool | None = None
     conditionRemovals: list[ConditionType] | None = None
     restType: RestType | None = None
     resourceSpent: RollResourceSpend | None = None
@@ -1632,6 +1664,29 @@ class RollResolution:
     createdAt: int
     responseRolls: list[RollPayload] | None = None
     concentrationUpdates: list[ActiveConcentrationUpdate] | None = None
+
+
+@dataclass
+class ResolutionInterceptorPrompt:
+    id: str
+    interceptorType: ResolutionInterceptorType
+    trigger: ResolutionInterceptorTrigger
+    sourceRoll: RollPayload
+    pendingRoll: RollPayload
+    targetSheetId: str
+    targetTokenId: str
+    targetName: str
+    ownerSheetId: str
+    ownerTokenId: str
+    ownerName: str
+    ownerPlayerKey: str
+    label: str
+    description: str
+    useLabel: str
+    declineLabel: str
+    createdAt: int
+    ignoredInterceptors: list[str] = field(default_factory=list)
+    responseRolls: list[RollPayload] | None = None
 
 
 @dataclass
@@ -1746,7 +1801,7 @@ def build_character_sheet(
     max_hp += default_feat_hit_point_bonus(configured_feats, total_level)
     speed = (sheet_config.speed if sheet_config and sheet_config.speed is not None else 30) + default_feat_speed_bonus(configured_feats)
 
-    return CharacterSheet(
+    sheet = CharacterSheet(
         id=token_id,
         tokenId=token_id,
         kind=kind,
@@ -1785,9 +1840,11 @@ def build_character_sheet(
         equipment=equipment,
         purse=purse,
     )
+    return replace(sheet, attacks=[effective_attack_action(sheet, attack) for attack in attacks])
 
 
 def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
+    action = effective_attack_action(sheet, action)
     ability_score = getattr(sheet.abilityScores, enum_key(action.ability))
     modifier_breakdown = [
         RollModifierBreakdown(source=enum_label(action.ability), value=ability_modifier(ability_score)),
@@ -1829,6 +1886,7 @@ def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
 
 
 def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
+    action = effective_attack_action(sheet, action)
     ability_score = getattr(sheet.abilityScores, enum_key(action.ability))
     modifier_breakdown = []
     if action.damageAbilityModifier == AttackDamageAbilityModifierMode.INCLUDED:
@@ -1838,6 +1896,7 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         modifier_breakdown.append(RollModifierBreakdown(source=f"{action.name} Attack Bonus", value=action.toHitBonus))
     if action.damageBonus:
         modifier_breakdown.append(RollModifierBreakdown(source=f"{action.name} Damage Bonus", value=action.damageBonus))
+    modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.DAMAGE_ROLL))
     modifier = sum(part.value for part in modifier_breakdown)
     count = action.damageDiceCount
     sides = action.damageDiceType.value
@@ -1845,6 +1904,12 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
     if uses_great_weapon_fighting(sheet.classes, action):
         dice = [max(3, roll) for roll in dice]
         modifier_breakdown.append(RollModifierBreakdown(source="Great Weapon Fighting", value=0, description="Treated weapon damage dice of 1 or 2 as 3."))
+    damage_total = sum(dice) + modifier
+    if ConditionType.REDUCED in sheet.conditions and damage_total < 1:
+        floor_bonus = 1 - damage_total
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(ConditionType.REDUCED), value=floor_bonus, description="Reduced damage can't be reduced below 1."))
+        modifier += floor_bonus
+        damage_total = 1
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -1861,10 +1926,177 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         die=damage_die_formula(action),
         modifier=modifier,
         modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + modifier,
+        total=damage_total,
         createdAt=created_at,
         damageType=action.damageType,
     )
+
+
+def effective_attack_action(sheet: CharacterSheet, action: AttackAction) -> AttackAction:
+    if shillelagh_applies_to_attack(sheet, action):
+        return shillelagh_attack_action(sheet, action)
+    return action
+
+
+def weapon_attack_is_wielded(sheet: CharacterSheet, action: AttackAction) -> bool:
+    return attack_equipment_item(sheet, action) is not None
+
+
+def attack_equipment_item(sheet: CharacterSheet, action: AttackAction) -> EquipmentItem | None:
+    if action.attackType == AttackActionType.UNARMED_STRIKE:
+        return None
+    return next(
+        (
+            item
+            for item in sheet.equipment
+            if item.itemType == EquipmentType.WEAPON
+            and item.id == action.id
+            and item.slot in {EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND, EquipmentSlot.TWO_HANDS}
+        ),
+        None,
+    )
+
+
+def true_strike_weapon_attacks(sheet: CharacterSheet) -> list[AttackAction]:
+    return [
+        action
+        for action in sheet.attacks
+        if action.proficient
+        and action.attackKind == AttackKind.STANDARD
+        and action.attackType != AttackActionType.UNARMED_STRIKE
+        and weapon_attack_is_wielded(sheet, action)
+        and action.damageDiceCount > 0
+    ]
+
+
+def true_strike_weapon_attack(sheet: CharacterSheet, attack_id: str) -> AttackAction | None:
+    return next((action for action in true_strike_weapon_attacks(sheet) if action.id == attack_id), None)
+
+
+def true_strike_action_id(attack: AttackAction, damage_type: DamageType, roll_type: RollResolutionMode) -> str:
+    return f"true-strike-{enum_key(roll_type)}-{attack.id}-{enum_key(damage_type)}"
+
+
+def true_strike_attack_action(sheet: CharacterSheet, spell: SpellEntry, attack: AttackAction, damage_type: DamageType) -> AttackAction:
+    return replace(
+        attack,
+        ability=spell_casting_ability(sheet, spell),
+        damageType=damage_type,
+        activation=spell.castingTime,
+        activeSpellConditions=unique_spell_ids([*(attack.activeSpellConditions or []), SpellId.TRUE_STRIKE]),
+    )
+
+
+def build_true_strike_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, attack: AttackAction, damage_type: DamageType) -> RollPayload:
+    action = true_strike_attack_action(sheet, spell, attack, damage_type)
+    payload = build_attack_roll_payload(sheet, roller, action)
+    return replace(
+        payload,
+        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=true_strike_action_id(attack, damage_type, RollResolutionMode.ATTACK_VS_ARMOR_CLASS)),
+        sourceLabel=f"{enum_label(spell.name)}: {attack.name}",
+        label=f"Attack {attack.name}",
+        damageType=damage_type,
+    )
+
+
+def build_true_strike_damage_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, attack: AttackAction, damage_type: DamageType) -> RollPayload:
+    action = true_strike_attack_action(sheet, spell, attack, damage_type)
+    payload = build_damage_roll_payload(sheet, roller, action)
+    radiant_bonus = true_strike_radiant_bonus_component(sheet, spell)
+    components = [
+        RollDamageComponent(
+            damageType=payload.damageType or damage_type,
+            dice=payload.dice,
+            diceType=payload.diceType,
+            die=payload.die,
+            modifier=payload.modifier,
+            modifierBreakdown=payload.modifierBreakdown,
+            total=payload.total,
+        )
+    ]
+    if radiant_bonus is not None:
+        components.append(radiant_bonus)
+    return replace(
+        payload,
+        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=true_strike_action_id(attack, damage_type, RollResolutionMode.APPLY_DAMAGE)),
+        sourceLabel=f"{enum_label(spell.name)}: {attack.name}",
+        label=f"Damage {attack.name}",
+        damageType=damage_type,
+        damageComponents=components if len(components) > 1 else None,
+        total=sum(component.total for component in components),
+        dice=[roll for component in components for roll in component.dice],
+        die="+".join(component.die for component in components),
+    )
+
+
+def true_strike_radiant_bonus_component(sheet: CharacterSheet, spell: SpellEntry) -> RollDamageComponent | None:
+    effect = spell_damage_effect_at(spell, 0)
+    if effect is None or effect.damage is None:
+        return None
+    component = spell_damage_roll_component(sheet, spell, effect.damage, effect.scaling, None)
+    if component.dice:
+        return component
+    return None
+
+
+SHILLELAGH_WEAPON_IDS: tuple[str, ...] = ("club", "quarterstaff")
+
+
+def shillelagh_weapon_attacks(sheet: CharacterSheet) -> list[AttackAction]:
+    return [
+        action
+        for action in sheet.attacks
+        if action.proficient
+        and action.attackKind == AttackKind.STANDARD
+        and action.id in SHILLELAGH_WEAPON_IDS
+        and weapon_attack_is_wielded(sheet, action)
+    ]
+
+
+def shillelagh_applies_to_attack(sheet: CharacterSheet, action: AttackAction) -> bool:
+    return (
+        SpellId.TRUE_STRIKE not in (action.activeSpellConditions or [])
+        and ConditionType.SHILLELAGH in sheet.conditions
+        and any(candidate.id == action.id for candidate in shillelagh_weapon_attacks(sheet))
+    )
+
+
+def shillelagh_attack_action(sheet: CharacterSheet, action: AttackAction) -> AttackAction:
+    return replace(
+        action,
+        ability=shillelagh_casting_ability(sheet),
+        damageDiceCount=shillelagh_damage_dice_count(sheet),
+        damageDiceType=shillelagh_damage_dice_type(sheet),
+        damageType=DamageType.FORCE,
+        activeSpellConditions=unique_spell_ids([*(action.activeSpellConditions or []), SpellId.SHILLELAGH]),
+    )
+
+
+def shillelagh_casting_ability(sheet: CharacterSheet) -> AbilityType:
+    spell = next((candidate for candidate in sheet.spells if candidate.id == SpellId.SHILLELAGH), None)
+    if spell is not None:
+        return spell_casting_ability(sheet, spell)
+    return AbilityType.WISDOM
+
+
+def shillelagh_damage_dice_count(sheet: CharacterSheet) -> int:
+    total_level = sum(character_class.level for character_class in sheet.classes) or 1
+    return 2 if total_level >= 17 else 1
+
+
+def shillelagh_damage_dice_type(sheet: CharacterSheet) -> DiceType:
+    total_level = sum(character_class.level for character_class in sheet.classes) or 1
+    if total_level >= 17:
+        return DiceType.D6
+    if total_level >= 11:
+        return DiceType.D12
+    if total_level >= 5:
+        return DiceType.D10
+    return DiceType.D8
+
+
+def unique_spell_ids(spells: list[SpellId]) -> list[SpellId]:
+    return list(dict.fromkeys(spells))
 
 
 def build_spell_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry) -> RollPayload:
@@ -1912,6 +2144,7 @@ def build_spell_damage_roll_payload(
     effect_index: int = 0,
     spell_slot_level: int | None = None,
     instance_index: int | None = None,
+    damage_save_succeeded: bool | None = None,
 ) -> RollPayload:
     effect = spell_damage_effect_at(spell, effect_index)
     if effect is None or effect.damage is None:
@@ -1925,6 +2158,16 @@ def build_spell_damage_roll_payload(
         spell_damage_roll_component(sheet, spell, component, component.scaling or effect.scaling, spell_slot_level)
         for component in (effect.damageComponents or [effect.damage])
     ]
+    spell_damage_modifiers = active_spell_damage_roll_modifier_breakdown(sheet)
+    if spell_damage_modifiers:
+        primary = damage_components[0]
+        modifier = primary.modifier + sum(part.value for part in spell_damage_modifiers)
+        damage_components[0] = replace(
+            primary,
+            modifier=modifier,
+            modifierBreakdown=[*primary.modifierBreakdown, *spell_damage_modifiers],
+            total=sum(primary.dice) + modifier,
+        )
     primary_component = damage_components[0]
     dice = [roll for component in damage_components for roll in component.dice]
     modifier_breakdown = [part for component in damage_components for part in component.modifierBreakdown]
@@ -1952,6 +2195,7 @@ def build_spell_damage_roll_payload(
         damageSavingThrow=effect.savingThrow.ability if effect.savingThrow is not None else None,
         damageSaveDc=spell_save_dc(sheet, spell) if effect.savingThrow is not None else None,
         damageSaveOutcome=effect.savingThrow.outcome if effect.savingThrow is not None else None,
+        damageSaveSucceeded=damage_save_succeeded,
         damageSaveDisadvantageCreatureTypes=effect.savingThrow.disadvantageCreatureTypes if effect.savingThrow is not None else None,
         damageSaveForcedFailureCreatureTypes=effect.savingThrow.forcedFailureCreatureTypes if effect.savingThrow is not None else None,
         targetCreatureTypes=effect.targetCreatureTypes,
@@ -1959,6 +2203,37 @@ def build_spell_damage_roll_payload(
         maxHitPointReduction=effect.maxHitPointReduction,
         conditionEffects=spell_damage_condition_effects(effect, sheet, spell),
         restType=effect.restType,
+    )
+
+
+def build_spell_damage_save_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, effect_index: int = 0) -> RollPayload:
+    effect = spell_damage_effect_at(spell, effect_index)
+    if effect is None or effect.savingThrow is None:
+        raise ValueError("Spell damage save effect not found")
+    created_at = time_ns()
+    return RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=roller,
+        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=f"damage-save-{effect_index}"),
+        sourceLabel=enum_label(spell.name),
+        resolution=RollResolutionMode.NONE,
+        label=f"{enum_label(effect.savingThrow.ability)} Save",
+        iconUrl=None,
+        dice=[],
+        diceType=DiceType.D20,
+        die=enum_key(DiceType.D20),
+        modifier=0,
+        modifierBreakdown=[],
+        total=0,
+        createdAt=created_at,
+        damageSavingThrow=effect.savingThrow.ability,
+        damageSaveDc=spell_save_dc(sheet, spell),
+        damageSaveOutcome=effect.savingThrow.outcome,
+        damageSaveDisadvantageCreatureTypes=effect.savingThrow.disadvantageCreatureTypes,
+        damageSaveForcedFailureCreatureTypes=effect.savingThrow.forcedFailureCreatureTypes,
+        targetCreatureTypes=effect.targetCreatureTypes,
     )
 
 
@@ -1996,6 +2271,16 @@ def spell_damage_roll_component(
         modifierBreakdown=modifier_breakdown,
         total=sum(dice) + modifier,
     )
+
+
+def active_spell_damage_roll_modifier_breakdown(sheet: CharacterSheet) -> list[RollModifierBreakdown]:
+    if ConditionType.RAY_OF_ENFEEBLEMENT not in sheet.conditions:
+        return []
+    effect = ACTIVE_CONDITION_ROLL_MODIFIERS[ConditionType.RAY_OF_ENFEEBLEMENT]
+    value = sum(random.randint(1, effect.dice.diceType.value) for _ in range(effect.dice.diceCount)) if effect.dice is not None else effect.staticBonus
+    if effect.operation == RollModifierEffectOperation.SUBTRACT:
+        value = -value
+    return [RollModifierBreakdown(source=enum_label(ConditionType.RAY_OF_ENFEEBLEMENT), value=value, description=effect.description)]
 
 
 def build_spell_healing_roll_payload(
@@ -2102,7 +2387,7 @@ def build_spell_temporary_hit_points_roll_payload(
     )
 
 
-def build_spell_condition_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, effect_index: int = 0) -> RollPayload:
+def build_spell_condition_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, effect_index: int = 0, condition_effect_succeeded: bool | None = None) -> RollPayload:
     effect = spell_condition_effect_at(spell, effect_index)
     if effect is None or not effect.conditions:
         raise ValueError("Spell condition effect not found")
@@ -2142,6 +2427,41 @@ def build_spell_condition_roll_payload(sheet: CharacterSheet, roller: str, spell
         modifierBreakdown=[],
         total=0,
         createdAt=created_at,
+        targetCreatureTypes=effect.targetCreatureTypes,
+        conditionEffects=condition_effects,
+        conditionEffectSucceeded=condition_effect_succeeded,
+        conditionRemovals=effect.conditionRemovals,
+    )
+
+
+def build_spell_condition_save_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, effect_index: int = 0) -> RollPayload:
+    effect = spell_condition_effect_at(spell, effect_index)
+    if effect is None or not effect.conditions:
+        raise ValueError("Spell condition effect not found")
+    condition_effects = spell_damage_condition_effects(effect, sheet, spell)
+    if not condition_effects or not any(condition.mode in {ConditionApplicationMode.TARGET_SAVE, ConditionApplicationMode.SOURCE_CHECK} for condition in condition_effects):
+        raise ValueError("Spell condition save/check effect not found")
+    first = condition_effects[0]
+    label = f"{enum_label(first.savingThrow)} Save" if first.mode == ConditionApplicationMode.TARGET_SAVE and first.savingThrow is not None else "Contest Check"
+    created_at = time_ns()
+    return RollPayload(
+        id=f"roll-{created_at}",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=roller,
+        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=f"condition-save-{effect_index}"),
+        sourceLabel=enum_label(spell.name),
+        resolution=RollResolutionMode.NONE,
+        label=label,
+        iconUrl=None,
+        dice=[],
+        diceType=DiceType.D20,
+        die=enum_key(DiceType.D20),
+        modifier=0,
+        modifierBreakdown=[],
+        total=0,
+        createdAt=created_at,
+        targetCreatureTypes=effect.targetCreatureTypes,
         conditionEffects=condition_effects,
     )
 
@@ -2328,7 +2648,8 @@ def build_ability_check_roll_payload(sheet: CharacterSheet, roller: str, ability
     modifier_breakdown = [RollModifierBreakdown(source=enum_label(ability), value=ability_modifier(ability_score))]
     modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.ABILITY_CHECK))
     modifier_breakdown.extend(exhaustion_d20_modifier_breakdown(sheet))
-    disadvantage_conditions = condition_ability_check_disadvantage_conditions(sheet)
+    advantage_conditions = condition_ability_check_advantage_conditions(sheet, ability)
+    disadvantage_conditions = condition_ability_check_disadvantage_conditions(sheet, ability)
     return build_d20_roll_payload(
         sheet=sheet,
         roller=roller,
@@ -2336,6 +2657,7 @@ def build_ability_check_roll_payload(sheet: CharacterSheet, roller: str, ability
         source_label=enum_label(ability),
         label=f"{enum_label(ability)} Check",
         modifier_breakdown=modifier_breakdown,
+        advantage_conditions=advantage_conditions,
         disadvantage_conditions=disadvantage_conditions,
     )
 
@@ -2408,6 +2730,27 @@ ACTIVE_CONDITION_ROLL_MODIFIERS: dict[ConditionType, SpellRollModifierEffect] = 
         staticBonus=1,
         description="Add 1 to saving throws from Warding Bond.",
     ),
+    ConditionType.ENLARGED: SpellRollModifierEffect(
+        condition=ConditionType.ENLARGED,
+        operation=RollModifierEffectOperation.ADD,
+        targets=[RollModifierEffectTarget.DAMAGE_ROLL],
+        dice=SpellEffectDice(1, DiceType.D4),
+        description="Add 1d4 to weapon and Unarmed Strike damage rolls while Enlarged.",
+    ),
+    ConditionType.RAY_OF_ENFEEBLEMENT: SpellRollModifierEffect(
+        condition=ConditionType.RAY_OF_ENFEEBLEMENT,
+        operation=RollModifierEffectOperation.SUBTRACT,
+        targets=[RollModifierEffectTarget.DAMAGE_ROLL],
+        dice=SpellEffectDice(1, DiceType.D8),
+        description="Subtract 1d8 from damage rolls while enfeebled.",
+    ),
+    ConditionType.REDUCED: SpellRollModifierEffect(
+        condition=ConditionType.REDUCED,
+        operation=RollModifierEffectOperation.SUBTRACT,
+        targets=[RollModifierEffectTarget.DAMAGE_ROLL],
+        dice=SpellEffectDice(1, DiceType.D4),
+        description="Subtract 1d4 from weapon and Unarmed Strike damage rolls while Reduced.",
+    ),
 }
 
 
@@ -2474,10 +2817,13 @@ def exhaustion_d20_modifier_breakdown(sheet: CharacterSheet) -> list[RollModifie
 
 
 CONDITION_SAVING_THROW_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.ENLARGED: {AbilityType.STRENGTH},
     ConditionType.HASTED: {AbilityType.DEXTERITY},
 }
 
 CONDITION_SAVING_THROW_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.RAY_OF_ENFEEBLEMENT: {AbilityType.STRENGTH},
+    ConditionType.REDUCED: {AbilityType.STRENGTH},
     ConditionType.RESTRAINED: {AbilityType.DEXTERITY},
 }
 
@@ -2522,6 +2868,17 @@ CONDITION_ABILITY_CHECK_DISADVANTAGES: dict[ConditionType, set[AbilityType] | No
     ConditionType.FRIGHTENED: None,
     ConditionType.PHANTASMAL_KILLER: None,
     ConditionType.POISONED: None,
+    ConditionType.RAY_OF_ENFEEBLEMENT: {AbilityType.STRENGTH},
+    ConditionType.REDUCED: {AbilityType.STRENGTH},
+}
+
+CONDITION_ABILITY_CHECK_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
+    ConditionType.ENHANCE_ABILITY_CHARISMA: {AbilityType.CHARISMA},
+    ConditionType.ENHANCE_ABILITY_DEXTERITY: {AbilityType.DEXTERITY},
+    ConditionType.ENHANCE_ABILITY_INTELLIGENCE: {AbilityType.INTELLIGENCE},
+    ConditionType.ENHANCE_ABILITY_STRENGTH: {AbilityType.STRENGTH},
+    ConditionType.ENHANCE_ABILITY_WISDOM: {AbilityType.WISDOM},
+    ConditionType.ENLARGED: {AbilityType.STRENGTH},
 }
 
 
@@ -2553,8 +2910,12 @@ def condition_incoming_attack_disadvantage_conditions(sheet: CharacterSheet) -> 
     return condition_roll_conditions(sheet.conditions, CONDITION_INCOMING_ATTACK_DISADVANTAGES)
 
 
-def condition_ability_check_disadvantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
-    return condition_roll_conditions(sheet.conditions, CONDITION_ABILITY_CHECK_DISADVANTAGES)
+def condition_ability_check_disadvantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
+    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_ABILITY_CHECK_DISADVANTAGES)
+
+
+def condition_ability_check_advantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
+    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_ABILITY_CHECK_ADVANTAGES)
 
 
 def condition_roll_conditions(
@@ -2713,12 +3074,22 @@ def build_d20_roll_payload(
     )
 
 
-def build_roll_action_payload(sheet: CharacterSheet, roller: str, source: RollSource, action: RollAction, source_label: str | None = None) -> RollPayload:
-    dice = [random.randint(1, action.diceType.value) for _ in range(action.diceCount)]
+def build_roll_action_payload(
+    sheet: CharacterSheet,
+    roller: str,
+    source: RollSource,
+    action: RollAction,
+    source_label: str | None = None,
+    condition_effect_succeeded: bool | None = None,
+    condition_prerequisite_only: bool = False,
+) -> RollPayload:
+    condition_effects = roll_condition_effects(sheet, action)
+    dice = [] if condition_prerequisite_only else [random.randint(1, action.diceType.value) for _ in range(action.diceCount)]
     modifier = roll_action_modifier(sheet, action)
     modifier_breakdown = []
-    if modifier:
+    if modifier and not condition_prerequisite_only:
         modifier_breakdown.append(RollModifierBreakdown(source=roll_action_modifier_label(action), value=modifier))
+    label = roll_action_condition_prerequisite_label(condition_effects) if condition_prerequisite_only else enum_label(action.name)
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -2727,19 +3098,29 @@ def build_roll_action_payload(sheet: CharacterSheet, roller: str, source: RollSo
         roller=roller,
         source=source,
         sourceLabel=source_label or enum_label(action.name),
-        resolution=action.resolution,
-        label=enum_label(action.name),
+        resolution=RollResolutionMode.NONE if condition_prerequisite_only else action.resolution,
+        label=label,
         iconUrl=None,
         dice=dice,
-        diceType=action.diceType,
-        die=dice_formula(action.diceCount, action.diceType),
-        modifier=modifier,
+        diceType=DiceType.D20 if condition_prerequisite_only else action.diceType,
+        die=enum_key(DiceType.D20) if condition_prerequisite_only else dice_formula(action.diceCount, action.diceType),
+        modifier=0 if condition_prerequisite_only else modifier,
         modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + modifier,
+        total=sum(dice) + (0 if condition_prerequisite_only else modifier),
         createdAt=created_at,
         damageType=action.damageType,
-        conditionEffects=roll_condition_effects(sheet, action),
+        conditionEffects=condition_effects,
+        conditionEffectSucceeded=condition_effect_succeeded,
     )
+
+
+def roll_action_condition_prerequisite_label(condition_effects: list[ConditionEffect] | None) -> str:
+    first = next((effect for effect in condition_effects or [] if effect.mode in {ConditionApplicationMode.TARGET_SAVE, ConditionApplicationMode.SOURCE_CHECK}), None)
+    if first is None:
+        return "Check"
+    if first.mode == ConditionApplicationMode.TARGET_SAVE and first.savingThrow is not None:
+        return f"{enum_label(first.savingThrow)} Save"
+    return "Contest Check"
 
 
 def roll_condition_effects(sheet: CharacterSheet, action: RollAction) -> list[ConditionEffect] | None:
@@ -2832,7 +3213,10 @@ def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> Ro
         target_hp = target.hp
         outcome = f"rolls {roll.total}"
 
-    condition_outcomes = [] if damage_blocked_by_creature_type else resolve_condition_effects(roll, target)
+    condition_blocked_by_creature_type = bool(roll.conditionEffects) and not target_creature_type_matches(roll, target)
+    if condition_blocked_by_creature_type:
+        outcome = f"{outcome}; has no effect; target is not {creature_type_list_label(roll.targetCreatureTypes or [])}"
+    condition_outcomes = [] if damage_blocked_by_creature_type or condition_blocked_by_creature_type else resolve_condition_effects(roll, target)
     if condition_outcomes:
         target_conditions = apply_condition_outcomes(target_conditions, condition_outcomes)
         outcome = f"{outcome}; {'; '.join(condition_outcomes)}"
@@ -2954,6 +3338,8 @@ def resolve_condition_effects(roll: RollPayload, target: CharacterSheet) -> list
 
 
 def condition_immunity_blocks(target: CharacterSheet, condition: ConditionType) -> bool:
+    if ConditionType.CALM_EMOTIONS_IMMUNITY in target.conditions and condition in {ConditionType.CHARMED, ConditionType.FRIGHTENED}:
+        return True
     return condition == ConditionType.FRIGHTENED and ConditionType.HEROISM in target.conditions
 
 
@@ -3597,6 +3983,9 @@ def typed_json_registry() -> dict[str, type[Any]]:
             RollModifierEffectTarget,
             RollModifierType,
             RollResolutionMode,
+            ResolutionInterceptorPrompt,
+            ResolutionInterceptorTrigger,
+            ResolutionInterceptorType,
             ResourceTracker,
             RuneType,
             SkillType,
@@ -3696,6 +4085,10 @@ def roll_resolution_to_dict(resolution: RollResolution) -> dict[str, Any]:
 
 def roll_log_entry_to_dict(entry: RollLogEntry) -> dict[str, Any]:
     return serialize_dataclass(entry)
+
+
+def resolution_interceptor_prompt_to_dict(prompt: ResolutionInterceptorPrompt) -> dict[str, Any]:
+    return serialize_dataclass(prompt)
 
 
 def serialize_dataclass(value: Any) -> Any:

@@ -12,7 +12,7 @@ from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_s
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, RogueSubclassAttackType, RogueSubclassRollActionType, arcane_trickster_catalog_spell
 from dnd_board.rules.classes.rogue.base import RogueSubclassType
-from dnd_board.rules.feats import general_feat_feature
+from dnd_board.rules.feats import GeneralFeatType, general_feat_feature
 from dnd_board.rules.sources import RuleSource, rule_source_label
 from dnd_board.rules.spells import spell_entry, wizard_spell_entry
 from dnd_board.character_sheet import (
@@ -1393,6 +1393,336 @@ def test_player_can_roll_fire_bolt_spell_attack_and_scaled_damage(tmp_path, monk
     assert resolution_body["responseRolls"][0]["total"] == 18
 
 
+def test_spell_damage_save_can_be_resolved_before_damage(tmp_path, monkeypatch) -> None:
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    assert burning_hands is not None
+    write_party_campaign(
+        tmp_path,
+        "staged-spell-save-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=10, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[burning_hands]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Dodger",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=12, intelligence=10, wisdom=10, charisma=8),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=5)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 16 if maximum == 20 else 4)
+    client = TestClient(server.app)
+
+    save_prompt = client.post("/api/rooms/staged-spell-save-test/sheet/player-1/spells/burningHands/rolls/damage-save?playerKey=player-1")
+    save_resolution = client.post(f"/api/rooms/staged-spell-save-test/rolls/{save_prompt.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    passed_damage = client.post("/api/rooms/staged-spell-save-test/sheet/player-1/spells/burningHands/rolls/damage?playerKey=player-1&damageSaveSucceeded=true")
+    damage_resolution = client.post(f"/api/rooms/staged-spell-save-test/rolls/{passed_damage.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    dodger = client.get("/api/rooms/staged-spell-save-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert save_prompt.status_code == 200
+    assert save_prompt.json()["roll"]["label"] == "Dexterity Save"
+    assert save_prompt.json()["roll"]["dice"] == []
+    assert save_resolution.status_code == 200
+    assert "resolve passed-save damage/effects next" in save_resolution.json()["resolution"]["outcome"]
+    assert save_resolution.json()["resolution"]["roll"]["total"] == 22
+    assert passed_damage.json()["roll"]["damageSaveSucceeded"] is True
+    assert damage_resolution.status_code == 200
+    assert "previously passed the DC 15 Dexterity save for half damage" in damage_resolution.json()["resolution"]["outcome"]
+    assert dodger["hp"]["current"] == 24
+
+
+def test_indomitable_prompts_on_failed_damage_save_and_can_reroll(tmp_path, monkeypatch) -> None:
+    harm = spell_entry(SpellId.HARM)
+    assert harm is not None
+    write_party_campaign(
+        tmp_path,
+        "indomitable-interceptor-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=18, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=11)], spells=[harm]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Fighter",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=9)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 2)
+    rolls = iter([1, 20])
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls) if maximum == 20 else 2)
+    client = TestClient(server.app)
+
+    damage_roll = client.post("/api/rooms/indomitable-interceptor-test/sheet/player-1/spells/harm/rolls/damage?playerKey=player-1").json()["roll"]
+    prompt_response = client.post(f"/api/rooms/indomitable-interceptor-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    prompt = prompt_response.json()["prompt"]
+    final_response = client.post(f"/api/rooms/indomitable-interceptor-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-2&use=true")
+    fighter = client.get("/api/rooms/indomitable-interceptor-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert prompt["label"] == "Indomitable"
+    assert final_response.status_code == 200
+    assert "uses Indomitable" in final_response.json()["resolution"]["outcome"]
+    assert "rerolls with Indomitable and passes" in final_response.json()["resolution"]["outcome"]
+    assert fighter["resources"][2]["id"] == "indomitable"
+    assert fighter["resources"][2]["currentUses"] == 0
+
+
+def test_mage_slayer_prompts_on_failed_spell_int_wis_cha_save(tmp_path, monkeypatch) -> None:
+    synaptic_static = spell_entry(SpellId.SYNAPTIC_STATIC)
+    mage_slayer = general_feat_feature(enum_key(GeneralFeatType.MAGE_SLAYER))
+    assert synaptic_static is not None
+    assert mage_slayer is not None
+    write_party_campaign(
+        tmp_path,
+        "mage-slayer-interceptor-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=50,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=9)], spells=[synaptic_static]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Slayer",
+            maxHp=50,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=8, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=4)], feats=[mage_slayer]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 3)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    client = TestClient(server.app)
+
+    damage_roll = client.post("/api/rooms/mage-slayer-interceptor-test/sheet/player-1/spells/synapticStatic/rolls/damage?playerKey=player-1").json()["roll"]
+    prompt_response = client.post(f"/api/rooms/mage-slayer-interceptor-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    prompt = prompt_response.json()["prompt"]
+    final_response = client.post(f"/api/rooms/mage-slayer-interceptor-test/resolution-prompts/{prompt['id']}/respond?playerKey=dm&use=true")
+    slayer = client.get("/api/rooms/mage-slayer-interceptor-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert prompt["label"] == "Mage Slayer"
+    assert "turns the failed save into a success" in final_response.json()["resolution"]["outcome"]
+    assert "muddled" not in slayer["conditions"]
+    assert next(resource for resource in slayer["resources"] if resource["id"] == "mageSlayer")["currentUses"] == 0
+
+
+def test_mage_slayer_intercepts_failed_condition_spell_save(tmp_path, monkeypatch) -> None:
+    tasha = wizard_spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
+    mage_slayer = general_feat_feature(enum_key(GeneralFeatType.MAGE_SLAYER))
+    assert tasha is not None
+    assert mage_slayer is not None
+    write_party_campaign(
+        tmp_path,
+        "mage-slayer-condition-interceptor-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[tasha]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Slayer",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=14, intelligence=10, wisdom=8, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=4)], feats=[mage_slayer]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    client = TestClient(server.app)
+
+    effect_roll = client.post("/api/rooms/mage-slayer-condition-interceptor-test/sheet/player-1/spells/tashaSHideousLaughter/rolls/effect?playerKey=player-1").json()["roll"]
+    prompt_response = client.post(f"/api/rooms/mage-slayer-condition-interceptor-test/rolls/{effect_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    prompt = prompt_response.json()["prompt"]
+    final_response = client.post(f"/api/rooms/mage-slayer-condition-interceptor-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-2&use=true")
+    slayer = client.get("/api/rooms/mage-slayer-condition-interceptor-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert prompt["label"] == "Mage Slayer"
+    assert "failed a DC 15 Wisdom save" in prompt["description"]
+    assert "turns the failed save into a success" in final_response.json()["resolution"]["outcome"]
+    assert slayer["conditions"] == []
+
+
+def test_counterspell_prompt_can_cancel_spell_resolution(tmp_path, monkeypatch) -> None:
+    fireball = spell_entry(SpellId.FIREBALL)
+    counterspell = spell_entry(SpellId.COUNTERSPELL)
+    assert fireball is not None
+    assert counterspell is not None
+    write_party_campaign(
+        tmp_path,
+        "counterspell-interceptor-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Evoker",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[fireball]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Abjurer",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[counterspell]),
+        ),
+        PartyMemberConfig(
+            id="player-3",
+            name="Target",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
+    client = TestClient(server.app)
+
+    damage_roll = client.post("/api/rooms/counterspell-interceptor-test/sheet/player-1/spells/fireball/rolls/damage?playerKey=player-1").json()["roll"]
+    prompt_response = client.post(f"/api/rooms/counterspell-interceptor-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-3")
+    prompt = prompt_response.json()["prompt"]
+    final_response = client.post(f"/api/rooms/counterspell-interceptor-test/resolution-prompts/{prompt['id']}/respond?playerKey=dm&use=true")
+    target = client.get("/api/rooms/counterspell-interceptor-test/sheet/player-3?playerKey=player-3").json()["sheet"]
+
+    assert prompt["label"] == "Counterspell"
+    assert "counters Fireball" in final_response.json()["resolution"]["outcome"]
+    assert target["hp"]["current"] == 40
+
+
+def test_uncanny_dodge_prompts_before_attack_damage_and_halves_it(tmp_path, monkeypatch) -> None:
+    longsword = AttackAction(
+        id="longsword",
+        name="Longsword",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+    )
+    write_party_campaign(
+        tmp_path,
+        "uncanny-dodge-interceptor-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Fighter",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], attacks=[longsword]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Rogue",
+            maxHp=40,
+            abilityScores=AbilityScores(strength=10, dexterity=18, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=5)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 8)
+    client = TestClient(server.app)
+
+    damage_roll = client.post("/api/rooms/uncanny-dodge-interceptor-test/sheet/player-1/rolls/damage?playerKey=player-1&attackId=longsword").json()["roll"]
+    prompt_response = client.post(f"/api/rooms/uncanny-dodge-interceptor-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    prompt = prompt_response.json()["prompt"]
+    final_response = client.post(f"/api/rooms/uncanny-dodge-interceptor-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-2&use=true")
+    rogue = client.get("/api/rooms/uncanny-dodge-interceptor-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert prompt["label"] == "Uncanny Dodge"
+    assert "halves the incoming damage" in final_response.json()["resolution"]["outcome"]
+    assert rogue["hp"]["current"] == 35
+
+
+def test_true_strike_roll_endpoints_use_selected_weapon_and_damage_type(tmp_path, monkeypatch) -> None:
+    true_strike = wizard_spell_entry(SpellId.TRUE_STRIKE)
+    assert true_strike is not None
+    write_party_campaign(
+        tmp_path,
+        "true-strike-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)],
+                spells=[true_strike],
+                attacks=[AttackAction("longsword", "Longsword", AbilityType.STRENGTH, 1, DiceType.D8, damageType=DamageType.SLASHING)],
+                equipment=[EquipmentItem(id="longsword", name="Longsword", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND)],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([10, 5, 3])
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(rolls))
+    client = TestClient(server.app)
+
+    attack = client.post("/api/rooms/true-strike-test/sheet/player-1/spells/trueStrike/rolls/true-strike-attack?playerKey=player-1&attackId=longsword&damageType=radiant")
+    damage = client.post("/api/rooms/true-strike-test/sheet/player-1/spells/trueStrike/rolls/true-strike-damage?playerKey=player-1&attackId=longsword&damageType=slashing")
+    invalid_damage_type = client.post("/api/rooms/true-strike-test/sheet/player-1/spells/trueStrike/rolls/true-strike-damage?playerKey=player-1&attackId=longsword&damageType=fire")
+
+    assert attack.status_code == 200
+    assert attack.json()["roll"]["source"]["sourceId"] == "trueStrike"
+    assert attack.json()["roll"]["label"] == "Attack Longsword"
+    assert attack.json()["roll"]["damageType"] == "radiant"
+    assert damage.status_code == 200
+    assert damage.json()["roll"]["label"] == "Damage Longsword"
+    assert damage.json()["roll"]["damageType"] == "slashing"
+    assert [component["damageType"] for component in damage.json()["roll"]["damageComponents"]] == ["slashing", "radiant"]
+    assert invalid_damage_type.status_code == 400
+
+
+def test_weapon_spell_requirement_failures_are_logged(tmp_path, monkeypatch) -> None:
+    true_strike = wizard_spell_entry(SpellId.TRUE_STRIKE)
+    shillelagh = spell_entry(SpellId.SHILLELAGH)
+    assert true_strike is not None
+    assert shillelagh is not None
+    write_party_campaign(
+        tmp_path,
+        "weapon-spell-block-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)],
+                spells=[true_strike, shillelagh],
+                attacks=[
+                    AttackAction("longsword", "Longsword", AbilityType.STRENGTH, 1, DiceType.D8, damageType=DamageType.SLASHING),
+                    AttackAction("club", "Club", AbilityType.STRENGTH, 1, DiceType.D4, damageType=DamageType.BLUDGEONING),
+                ],
+                equipment=[
+                    EquipmentItem(id="longsword", name="Longsword", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.CARRIED),
+                    EquipmentItem(id="club", name="Club", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.CARRIED),
+                ],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    true_strike_blocked = client.post("/api/rooms/weapon-spell-block-test/sheet/player-1/spells/trueStrike/rolls/true-strike-attack?playerKey=player-1&attackId=longsword&damageType=radiant")
+    shillelagh_blocked = client.post("/api/rooms/weapon-spell-block-test/sheet/player-1/spells/shillelagh/rolls/effect?playerKey=player-1")
+    history = client.get("/api/rooms/weapon-spell-block-test/sheet?playerKey=player-1").json()["rollHistory"]
+
+    assert true_strike_blocked.status_code == 400
+    assert shillelagh_blocked.status_code == 400
+    assert [entry["entryType"] for entry in history] == ["rollBlocked", "rollBlocked"]
+    assert history[0]["roll"]["label"] == "True Strike blocked: requires a wielded proficient weapon"
+    assert history[1]["roll"]["label"] == "Shillelagh blocked: requires a wielded proficient Club or Quarterstaff"
+
+
 def test_hasted_target_rolls_dexterity_spell_saves_with_advantage(tmp_path, monkeypatch) -> None:
     burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
     assert burning_hands is not None
@@ -1685,7 +2015,8 @@ def test_player_can_roll_tashas_hideous_laughter_effect_and_dm_can_preserve_roll
 
     assert resolution.status_code == 200
     assert set(target["conditions"]) >= {"prone", "incapacitated"}
-    assert "fails DC 15 Wisdom save and gains Prone, and Incapacitated" in resolution_body["outcome"]
+    assert "fails DC 15 Wisdom save against Prone, and Incapacitated" in resolution_body["outcome"]
+    assert "previously failed DC 15 Wisdom save and gains Prone, and Incapacitated" in resolution_body["outcome"]
     assert len(resolution_body["responseRolls"]) == 1
     assert resolution_body["responseRolls"][0]["label"] == "Wisdom Save"
     assert resolution_body["responseRolls"][0]["total"] == 0
@@ -1705,6 +2036,100 @@ def test_player_can_roll_tashas_hideous_laughter_effect_and_dm_can_preserve_roll
     assert damage_resolution_body["responseRolls"][0]["dice"] == [2, 20]
     assert damage_resolution_body["responseRolls"][0]["die"] == "2d20kh1"
     assert damage_resolution_body["responseRolls"][0]["total"] == 19
+
+
+def test_spell_condition_save_can_be_resolved_before_effect(tmp_path, monkeypatch) -> None:
+    tasha = wizard_spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
+    assert tasha is not None
+    write_party_campaign(
+        tmp_path,
+        "staged-condition-save-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Enchanter",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[tasha]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=12, intelligence=10, wisdom=8, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    client = TestClient(server.app)
+
+    save_prompt = client.post("/api/rooms/staged-condition-save-test/sheet/player-1/spells/tashaSHideousLaughter/rolls/effect-save?playerKey=player-1")
+    save_resolution = client.post(f"/api/rooms/staged-condition-save-test/rolls/{save_prompt.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target_after_save = client.get("/api/rooms/staged-condition-save-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    failed_effect = client.post("/api/rooms/staged-condition-save-test/sheet/player-1/spells/tashaSHideousLaughter/rolls/effect?playerKey=player-1&conditionEffectSucceeded=true")
+    effect_resolution = client.post(f"/api/rooms/staged-condition-save-test/rolls/{failed_effect.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    target = client.get("/api/rooms/staged-condition-save-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert save_prompt.status_code == 200
+    assert save_prompt.json()["roll"]["label"] == "Wisdom Save"
+    assert save_resolution.status_code == 200
+    assert "resolve successful effect next" in save_resolution.json()["resolution"]["outcome"]
+    assert target_after_save["conditions"] == []
+    assert failed_effect.json()["roll"]["conditionEffectSucceeded"] is True
+    assert effect_resolution.status_code == 200
+    assert set(target["conditions"]) == {"prone", "incapacitated"}
+
+
+def test_calm_emotions_suppresses_existing_charmed_and_frightened_conditions(tmp_path, monkeypatch) -> None:
+    calm_emotions = spell_entry(SpellId.CALM_EMOTIONS)
+    assert calm_emotions is not None
+    calm_emotions = replace(
+        calm_emotions,
+        status=SpellStatus(source=SpellSource.CLERIC, castingAbility=AbilityType.WISDOM),
+    )
+    write_party_campaign(
+        tmp_path,
+        "calm-emotions-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=10, constitution=14, intelligence=10, wisdom=18, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.CLERIC, level=3)],
+                spells=[calm_emotions],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)],
+                conditions=[ConditionType.CHARMED, ConditionType.FRIGHTENED],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    client = TestClient(server.app)
+
+    effect_response = client.post(
+        f"/api/rooms/calm-emotions-test/sheet/player-1/spells/{enum_key(SpellId.CALM_EMOTIONS)}/rolls/effect?playerKey=player-1"
+    )
+    effect_roll = effect_response.json()["roll"]
+    resolution = client.post(
+        f"/api/rooms/calm-emotions-test/rolls/{effect_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+    target = client.get("/api/rooms/calm-emotions-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert effect_response.status_code == 200
+    assert effect_roll["conditionRemovals"] == ["charmed", "frightened"]
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetConditions"] == ["calmEmotionsImmunity"]
+    assert "removes Charmed, and Frightened" in resolution.json()["resolution"]["outcome"]
+    assert target["conditions"] == ["calmEmotionsImmunity"]
 
 
 def test_spell_damage_saves_can_negate_and_damage_can_apply_conditions(tmp_path, monkeypatch) -> None:
@@ -2326,6 +2751,8 @@ def test_harm_failed_save_reduces_max_hit_points_until_long_rest(tmp_path, monke
     damage_response = client.post("/api/rooms/harm-max-hp-test/sheet/player-1/spells/harm/rolls/damage?playerKey=player-1")
     damage_roll = damage_response.json()["roll"]
     resolution = client.post(f"/api/rooms/harm-max-hp-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+    if "prompt" in resolution.json():
+        resolution = client.post(f"/api/rooms/harm-max-hp-test/resolution-prompts/{resolution.json()['prompt']['id']}/respond?playerKey=dm&use=false")
     target = client.get("/api/rooms/harm-max-hp-test/sheet/player-2?playerKey=player-2").json()["sheet"]
     saved_data = json.loads((tmp_path / "harm-max-hp-test" / "saves" / "harm-max-hp-test.json").read_text(encoding="utf-8"))
     rest_response = client.post("/api/rooms/harm-max-hp-test/sheet/rest?playerKey=dm&rest=long")

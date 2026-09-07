@@ -599,17 +599,22 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     darkness = spell_entry(SpellId.DARKNESS)
     darkvision = spell_entry(SpellId.DARKVISION)
     dragon_breath = spell_entry(SpellId.DRAGON_S_BREATH)
+    calm_emotions = spell_entry(SpellId.CALM_EMOTIONS)
+    enhance_ability = spell_entry(SpellId.ENHANCE_ABILITY)
+    enlarge_reduce = spell_entry(SpellId.ENLARGE_REDUCE)
     flame_blade = spell_entry(SpellId.FLAME_BLADE)
     flaming_sphere = spell_entry(SpellId.FLAMING_SPHERE)
     heat_metal = spell_entry(SpellId.HEAT_METAL)
     invisibility = spell_entry(SpellId.INVISIBILITY)
     lesser_restoration = spell_entry(SpellId.LESSER_RESTORATION)
+    levitate = spell_entry(SpellId.LEVITATE)
     melfs_acid_arrow = spell_entry(SpellId.MELF_S_ACID_ARROW)
     mind_spike = spell_entry(SpellId.MIND_SPIKE)
     moonbeam = spell_entry(SpellId.MOONBEAM)
     pass_without_trace = spell_entry(SpellId.PASS_WITHOUT_TRACE)
     prayer_of_healing = spell_entry(SpellId.PRAYER_OF_HEALING)
     protection_from_poison = spell_entry(SpellId.PROTECTION_FROM_POISON)
+    ray_of_enfeeblement = spell_entry(SpellId.RAY_OF_ENFEEBLEMENT)
     scorching_ray = spell_entry(SpellId.SCORCHING_RAY)
     searing_orb = spell_entry(SpellId.SEARING_ORB)
     see_invisibility = spell_entry(SpellId.SEE_INVISIBILITY)
@@ -661,6 +666,16 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert darkvision.effects[0].conditions is not None
     assert darkvision.effects[0].conditions[0].condition == ConditionType.DARKVISION
 
+    assert calm_emotions is not None and calm_emotions.effects is not None
+    assert calm_emotions.targeting.area.shape == SpellAreaShape.RADIUS
+    assert calm_emotions.targeting.area.radiusFeet == 20
+    assert [effect.conditions[0].condition for effect in calm_emotions.effects if effect.conditions] == [
+        ConditionType.CALM_EMOTIONS_IMMUNITY,
+        ConditionType.CALM_EMOTIONS_INDIFFERENT,
+    ]
+    assert calm_emotions.effects[0].conditionRemovals == [ConditionType.CHARMED, ConditionType.FRIGHTENED]
+    assert all(effect.savingThrow is not None and effect.savingThrow.ability == AbilityType.CHARISMA for effect in calm_emotions.effects)
+
     assert dragon_breath is not None and dragon_breath.effects is not None
     assert [effect.damage.damageType for effect in dragon_breath.effects if effect.damage is not None] == [
         DamageType.ACID,
@@ -673,6 +688,22 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert all(effect.savingThrow is not None and effect.savingThrow.ability == AbilityType.DEXTERITY for effect in dragon_breath.effects)
     assert all(effect.savingThrow is not None and effect.savingThrow.outcome == SpellSaveOutcome.HALF_DAMAGE for effect in dragon_breath.effects)
     assert all(effect.scaling is not None and effect.scaling[0].additionalDice is not None and effect.scaling[0].additionalDice.dice == "1d6" for effect in dragon_breath.effects)
+
+    assert enhance_ability is not None and enhance_ability.effects is not None
+    assert [effect.actionLabel for effect in enhance_ability.effects] == ["Strength", "Dexterity", "Intelligence", "Wisdom", "Charisma"]
+    assert [effect.conditions[0].condition for effect in enhance_ability.effects if effect.conditions] == [
+        ConditionType.ENHANCE_ABILITY_STRENGTH,
+        ConditionType.ENHANCE_ABILITY_DEXTERITY,
+        ConditionType.ENHANCE_ABILITY_INTELLIGENCE,
+        ConditionType.ENHANCE_ABILITY_WISDOM,
+        ConditionType.ENHANCE_ABILITY_CHARISMA,
+    ]
+    assert all(effect.scaling is not None and effect.scaling[0].scalingType == SpellScalingType.SPELL_SLOT_LEVEL for effect in enhance_ability.effects)
+
+    assert enlarge_reduce is not None and enlarge_reduce.effects is not None
+    assert [effect.actionLabel for effect in enlarge_reduce.effects] == ["Enlarge", "Reduce"]
+    assert [effect.conditions[0].condition for effect in enlarge_reduce.effects if effect.conditions] == [ConditionType.ENLARGED, ConditionType.REDUCED]
+    assert all(effect.savingThrow is not None and effect.savingThrow.ability == AbilityType.CONSTITUTION for effect in enlarge_reduce.effects)
 
     assert flame_blade is not None and flame_blade.effects is not None
     assert flame_blade.effects[0].damage is not None
@@ -713,6 +744,12 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
         [ConditionType.PARALYZED],
         [ConditionType.POISONED],
     ]
+
+    assert levitate is not None and levitate.effects is not None
+    assert levitate.effects[0].conditions is not None
+    assert levitate.effects[0].conditions[0].condition == ConditionType.LEVITATING
+    assert levitate.effects[0].savingThrow is not None
+    assert levitate.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
 
     assert melfs_acid_arrow is not None and melfs_acid_arrow.effects is not None
     assert [effect.actionLabel for effect in melfs_acid_arrow.effects] == ["Hit", "Later"]
@@ -755,6 +792,13 @@ def test_catalog_spell_effects_capture_verified_level_two_mechanics() -> None:
     assert protection_from_poison is not None and protection_from_poison.effects is not None
     assert protection_from_poison.effects[0].conditions is not None
     assert protection_from_poison.effects[0].conditions[0].condition == ConditionType.PROTECTION_FROM_POISON
+
+    assert ray_of_enfeeblement is not None and ray_of_enfeeblement.effects is not None
+    assert ray_of_enfeeblement.effects[0].conditions is not None
+    assert ray_of_enfeeblement.effects[0].conditions[0].condition == ConditionType.RAY_OF_ENFEEBLEMENT
+    assert ray_of_enfeeblement.effects[0].savingThrow is not None
+    assert ray_of_enfeeblement.effects[0].savingThrow.ability == AbilityType.CONSTITUTION
+    assert ray_of_enfeeblement.effects[0].savingThrow.repeat == SpellEffectTrigger.END_OF_TURN
     assert searing_orb is not None and searing_orb.effects is not None
     assert searing_orb.targeting.area.shape == SpellAreaShape.RADIUS
     assert searing_orb.targeting.area.radiusFeet == 10
@@ -1369,10 +1413,18 @@ def test_catalog_spell_effects_capture_verified_higher_level_mechanics() -> None
 
 def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics() -> None:
     blade_ward = spell_entry(SpellId.BLADE_WARD)
+    expeditious_retreat = spell_entry(SpellId.EXPEDITIOUS_RETREAT)
+    feather_fall = spell_entry(SpellId.FEATHER_FALL)
+    fog_cloud = spell_entry(SpellId.FOG_CLOUD)
+    friends = spell_entry(SpellId.FRIENDS)
     produce_flame = spell_entry(SpellId.PRODUCE_FLAME)
+    jump = spell_entry(SpellId.JUMP)
+    shillelagh = spell_entry(SpellId.SHILLELAGH)
     sorcerous_burst = spell_entry(SpellId.SORCEROUS_BURST)
+    spare_the_dying = spell_entry(SpellId.SPARE_THE_DYING)
     thorn_whip = spell_entry(SpellId.THORN_WHIP)
     toll_the_dead = spell_entry(SpellId.TOLL_THE_DEAD)
+    true_strike = spell_entry(SpellId.TRUE_STRIKE)
     animal_friendship = spell_entry(SpellId.ANIMAL_FRIENDSHIP)
     bane = spell_entry(SpellId.BANE)
     bless = spell_entry(SpellId.BLESS)
@@ -1401,11 +1453,37 @@ def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics()
     assert blade_ward.effects[0].conditions[0].condition == ConditionType.BLADE_WARD
     assert blade_ward.effects[0].target == SpellEffectTarget.SELF
 
+    assert friends is not None and friends.effects is not None
+    assert friends.effects[0].conditions is not None
+    assert friends.effects[0].conditions[0].condition == ConditionType.CHARMED
+    assert friends.effects[0].savingThrow is not None
+    assert friends.effects[0].savingThrow.ability == AbilityType.WISDOM
+    assert friends.effects[0].targetCreatureTypes == [CreatureType.HUMANOID]
+
     assert produce_flame is not None and produce_flame.effects is not None
     assert produce_flame.effects[0].actionLabel == "Hurl"
     assert produce_flame.effects[0].damage is not None
     assert produce_flame.effects[0].damage.dice.dice == "1d8"
     assert produce_flame.effects[0].attack == SpellAttackType.RANGED_SPELL_ATTACK
+
+    assert shillelagh is not None and shillelagh.effects is not None
+    assert shillelagh.effects[0].conditions is not None
+    assert shillelagh.effects[0].conditions[0].condition == ConditionType.SHILLELAGH
+    assert shillelagh.effects[0].target == SpellEffectTarget.SELF
+
+    assert spare_the_dying is not None and spare_the_dying.effects is not None
+    assert spare_the_dying.effects[0].conditions is not None
+    assert spare_the_dying.effects[0].conditions[0].condition == ConditionType.STABLE
+    assert spare_the_dying.effects[0].scaling is not None
+    assert spare_the_dying.effects[0].scaling[0].scalingType == SpellScalingType.CANTRIP_LEVEL
+
+    assert true_strike is not None and true_strike.effects is not None
+    assert true_strike.effects[0].damage is not None
+    assert true_strike.effects[0].damage.damageType == DamageType.RADIANT
+    assert true_strike.effects[0].damage.dice.dice == "0d6"
+    assert true_strike.effects[0].scaling is not None
+    assert true_strike.effects[0].scaling[0].additionalDice is not None
+    assert true_strike.effects[0].scaling[0].additionalDice.dice == "1d6"
 
     assert sorcerous_burst is not None and sorcerous_burst.effects is not None
     assert {effect.damage.damageType for effect in sorcerous_burst.effects if effect.damage is not None} == {
@@ -1535,11 +1613,32 @@ def test_catalog_spell_effects_capture_additional_level_zero_and_one_mechanics()
     assert goodberry.effects[0].healing is not None
     assert goodberry.effects[0].healing.dice.staticBonus == 1
 
+    assert expeditious_retreat is not None and expeditious_retreat.effects is not None
+    assert expeditious_retreat.effects[0].conditions is not None
+    assert expeditious_retreat.effects[0].conditions[0].condition == ConditionType.EXPEDITIOUS_RETREAT
+    assert expeditious_retreat.effects[0].target == SpellEffectTarget.SELF
+
+    assert feather_fall is not None and feather_fall.effects is not None
+    assert feather_fall.effects[0].conditions is not None
+    assert feather_fall.effects[0].conditions[0].condition == ConditionType.FEATHER_FALL
+
+    assert fog_cloud is not None and fog_cloud.effects is not None
+    assert fog_cloud.targeting.area.shape == SpellAreaShape.RADIUS
+    assert fog_cloud.targeting.area.radiusFeet == 20
+    assert fog_cloud.effects[0].conditions is not None
+    assert fog_cloud.effects[0].conditions[0].condition == ConditionType.HEAVILY_OBSCURED
+    assert fog_cloud.effects[0].target == SpellEffectTarget.AREA
+
     assert guidance is not None and guidance.effects is not None
     assert guidance.effects[0].conditions is not None
     assert guidance.effects[0].conditions[0].condition == ConditionType.GUIDANCE
     assert guidance.effects[0].rollModifier is not None
     assert guidance.effects[0].rollModifier.targets == [RollModifierEffectTarget.ABILITY_CHECK]
+
+    assert jump is not None and jump.effects is not None
+    assert jump.effects[0].conditions is not None
+    assert jump.effects[0].conditions[0].condition == ConditionType.JUMP
+    assert jump.effects[0].scaling is not None
 
     assert hail_of_thorns is not None and hail_of_thorns.effects is not None
     assert hail_of_thorns.targeting.area.shape == SpellAreaShape.RADIUS

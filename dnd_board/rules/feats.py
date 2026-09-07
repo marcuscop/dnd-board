@@ -68,6 +68,7 @@ class FeatFeatureField(Enum):
 
 class FeatResourceId(Enum):
     LUCK_POINTS = "luckPoints"
+    MAGE_SLAYER = "mageSlayer"
     BOON_OF_COMBAT_PROWESS = "boonOfCombatProwess"
     BOON_OF_DIMENSIONAL_TRAVEL = "boonOfDimensionalTravel"
     BOON_OF_FATE = "boonOfFate"
@@ -1178,6 +1179,8 @@ def feat_resources(classes: list[CharacterClassLevel], feats=None, proficiency_b
             activation=TimeEconomy.SPECIAL,
             description="Spend Luck Points to gain Advantage on a D20 Test or impose Disadvantage on an attack roll against you.",
         ))
+    if GeneralFeatType.MAGE_SLAYER in selected_feats:
+        resources.append(feat_single_use_resource(FeatResourceId.MAGE_SLAYER, GeneralFeatType.MAGE_SLAYER, RestType.SHORT_REST, "If you fail an Intelligence, Wisdom, or Charisma saving throw, you can cause yourself to succeed instead."))
     if GeneralFeatType.BOON_OF_COMBAT_PROWESS in selected_feats:
         resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_COMBAT_PROWESS, GeneralFeatType.BOON_OF_COMBAT_PROWESS, RestType.SHORT_REST, "Turn a missed melee weapon attack into a hit."))
     if GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL in selected_feats:

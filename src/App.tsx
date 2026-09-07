@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MutableRefObject } from "react";
 import { RollLogEntryType, RollResolutionMode, SheetSectionType, TokenKind } from "./types";
-import type { AbilityScores, AbilityType, Asset, Board, CharacterBuilderDraft, CharacterBuilderOptions, CharacterSheet, ConditionType, DamageType, DiceType, EquipmentSlot, FogState, PlayerSummary, ProgressionChoice, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
+import type { AbilityScores, AbilityType, Asset, Board, CharacterBuilderDraft, CharacterBuilderOptions, CharacterSheet, ConditionType, DamageType, DiceType, EquipmentSlot, FogState, PlayerSummary, ProgressionChoice, ResolutionInterceptorPrompt, RollAction, RollLogEntry, RollPayload, ServerMessage, Token } from "./types";
 
 const DEFAULT_BOARD_WIDTH = 1200;
 const DEFAULT_BOARD_HEIGHT = 720;
@@ -37,6 +37,8 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "bladeWard",
   "blessed",
   "blurred",
+  "calmEmotionsImmunity",
+  "calmEmotionsIndifferent",
   "charmed",
   "commandApproach",
   "commandDrop",
@@ -46,7 +48,15 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "darkvision",
   "dead",
   "deafened",
+  "enhanceAbilityCharisma",
+  "enhanceAbilityDexterity",
+  "enhanceAbilityIntelligence",
+  "enhanceAbilityStrength",
+  "enhanceAbilityWisdom",
+  "enlarged",
+  "expeditiousRetreat",
   "faerieFire",
+  "featherFall",
   "fullCover",
   "flying",
   "frightened",
@@ -58,6 +68,8 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "heroism",
   "incapacitated",
   "invisible",
+  "jump",
+  "levitating",
   "longstrider",
   "mageArmor",
   "paralyzed",
@@ -67,6 +79,8 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "poisoned",
   "prone",
   "protectionFromPoison",
+  "rayOfEnfeeblement",
+  "reduced",
   "resistantAcid",
   "resistantBludgeoning",
   "resistantCold",
@@ -96,7 +110,9 @@ const CONDITION_OPTIONS: ConditionType[] = [
   "restrained",
   "shielded",
   "shieldOfFaith",
+  "shillelagh",
   "slowed",
+  "stable",
   "stunned",
   "synapticStatic",
   "threeQuartersCover",
@@ -179,6 +195,7 @@ export function App() {
   const [sheets, setSheets] = useState<CharacterSheet[]>([]);
   const [expandedSheetId, setExpandedSheetId] = useState<string | null>(null);
   const [rolls, setRolls] = useState<RollPayload[]>([]);
+  const [resolutionPrompts, setResolutionPrompts] = useState<ResolutionInterceptorPrompt[]>([]);
   const [rollHistory, setRollHistory] = useState<RollLogEntry[]>([]);
   const [sheetStatus, setSheetStatus] = useState<"idle" | "loading" | "error">("idle");
   const [selectedAssetKey, setSelectedAssetKey] = useState("");
@@ -300,6 +317,16 @@ export function App() {
         return;
       }
 
+      if (message.type === "resolution_prompt_created") {
+        setResolutionPrompts((current) => upsertResolutionPrompt(current, message.prompt));
+        return;
+      }
+
+      if (message.type === "resolution_prompt_resolved") {
+        setResolutionPrompts((current) => current.filter((prompt) => prompt.id !== message.promptId));
+        return;
+      }
+
       if (message.type === "roll_blocked") {
         setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
         return;
@@ -327,9 +354,10 @@ export function App() {
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; rollHistory: RollLogEntry[] };
+      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; pendingResolutionPrompts: ResolutionInterceptorPrompt[]; rollHistory: RollLogEntry[] };
       setSheets(body.sheets);
       setRolls(body.pendingRolls);
+      setResolutionPrompts(body.pendingResolutionPrompts);
       setRollHistory(body.rollHistory);
       setExpandedSheetId((current) => current && body.sheets.some((sheet) => sheet.id === current) ? current : null);
       setSheetStatus("idle");
@@ -820,6 +848,36 @@ export function App() {
     [loadSheets, playerKey]
   );
 
+  const rollTrueStrikeAttack = useCallback(
+    async (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/true-strike-attack?playerKey=${encodeURIComponent(playerKey)}&attackId=${encodeURIComponent(attackId)}&damageType=${encodeURIComponent(damageType)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      await loadSheets();
+    },
+    [loadSheets, playerKey]
+  );
+
+  const rollTrueStrikeDamage = useCallback(
+    async (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/true-strike-damage?playerKey=${encodeURIComponent(playerKey)}&attackId=${encodeURIComponent(attackId)}&damageType=${encodeURIComponent(damageType)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      await loadSheets();
+    },
+    [loadSheets, playerKey]
+  );
+
   const rollSpellHealing = useCallback(
     async (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => {
       const slotQuery = spellSlotLevel === undefined ? "" : `&spellSlotLevel=${encodeURIComponent(spellSlotLevel)}`;
@@ -883,6 +941,32 @@ export function App() {
     [playerKey]
   );
 
+  const respondToResolutionPrompt = useCallback(
+    async (prompt: ResolutionInterceptorPrompt, use: boolean) => {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/resolution-prompts/${encodeURIComponent(prompt.id)}/respond?playerKey=${encodeURIComponent(playerKey)}&use=${encodeURIComponent(use)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        setSheetStatus("error");
+        return;
+      }
+      const body = (await response.json()) as { prompt?: ResolutionInterceptorPrompt; resolution?: RollLogEntry["resolution"]; logEntry?: RollLogEntry };
+      setResolutionPrompts((current) => current.filter((candidate) => candidate.id !== prompt.id));
+      if (body.prompt) {
+        setResolutionPrompts((current) => upsertResolutionPrompt(current, body.prompt as ResolutionInterceptorPrompt));
+      }
+      if (body.resolution && body.logEntry) {
+        setRolls((current) =>
+          (body.resolution?.responseRolls ?? []).reduce(upsertPendingRoll, current.filter((roll) => roll.id !== prompt.sourceRoll.id))
+        );
+        setRollHistory((current) => appendRollLogEntry(current, body.logEntry as RollLogEntry));
+        setSheets((current) => applyResolvedRollToSheetState(current, body.resolution as NonNullable<RollLogEntry["resolution"]>));
+      }
+    },
+    [playerKey]
+  );
+
   const restSheets = useCallback(
     async (rest: "short" | "long") => {
       const response = await fetch(
@@ -893,9 +977,10 @@ export function App() {
         setSheetStatus("error");
         return;
       }
-      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; rollHistory: RollLogEntry[] };
+      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; pendingResolutionPrompts?: ResolutionInterceptorPrompt[]; rollHistory: RollLogEntry[] };
       setSheets(body.sheets);
       setRolls(body.pendingRolls);
+      setResolutionPrompts(body.pendingResolutionPrompts ?? []);
       setRollHistory(body.rollHistory);
     },
     [playerKey]
@@ -911,9 +996,10 @@ export function App() {
         setSheetStatus("error");
         return;
       }
-      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; rollHistory: RollLogEntry[] };
+      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; pendingResolutionPrompts?: ResolutionInterceptorPrompt[]; rollHistory: RollLogEntry[] };
       setSheets(body.sheets);
       setRolls(body.pendingRolls);
+      setResolutionPrompts(body.pendingResolutionPrompts ?? []);
       setRollHistory(body.rollHistory);
     },
     [playerKey]
@@ -1056,9 +1142,10 @@ export function App() {
         setSheetStatus("error");
         return;
       }
-      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; rollHistory: RollLogEntry[] };
+      const body = (await response.json()) as { sheets: CharacterSheet[]; pendingRolls: RollPayload[]; pendingResolutionPrompts?: ResolutionInterceptorPrompt[]; rollHistory: RollLogEntry[] };
       setSheets(body.sheets);
       setRolls(body.pendingRolls);
+      setResolutionPrompts(body.pendingResolutionPrompts ?? []);
       setRollHistory(body.rollHistory);
       setSheetStatus("idle");
     },
@@ -1081,6 +1168,8 @@ export function App() {
         onRollSavingThrow={rollSavingThrow}
         onRollSpellAttack={rollSpellAttack}
         onRollSpellDamage={rollSpellDamage}
+        onRollTrueStrikeAttack={rollTrueStrikeAttack}
+        onRollTrueStrikeDamage={rollTrueStrikeDamage}
         onRollSpellHealing={rollSpellHealing}
         onRollSpellTemporaryHitPoints={rollSpellTemporaryHitPoints}
         onRollSpellEffect={rollSpellEffect}
@@ -1095,11 +1184,13 @@ export function App() {
         onUpdateSheetLevel={updateSheetLevel}
         onUpdateResource={updateResource}
         playerKey={playerKey}
+        resolutionPrompts={resolutionPrompts}
         rollHistory={rollHistory}
         rolls={rolls}
         sheets={sheets}
         sheetStatus={sheetStatus}
         tokens={tokens}
+        onRespondToResolutionPrompt={respondToResolutionPrompt}
       />
     );
   }
@@ -1280,6 +1371,8 @@ type SheetViewProps = {
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
+  onRollTrueStrikeAttack: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
+  onRollTrueStrikeDamage: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
@@ -1292,7 +1385,9 @@ type SheetViewProps = {
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
+  onRespondToResolutionPrompt: (prompt: ResolutionInterceptorPrompt, use: boolean) => void;
   playerKey: string;
+  resolutionPrompts: ResolutionInterceptorPrompt[];
   rollHistory: RollLogEntry[];
   rolls: RollPayload[];
   sheets: CharacterSheet[];
@@ -1300,7 +1395,7 @@ type SheetViewProps = {
   tokens: Token[];
 };
 
-function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollSpellHealing, onRollSpellTemporaryHitPoints, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, playerKey, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollTrueStrikeAttack, onRollTrueStrikeDamage, onRollSpellHealing, onRollSpellTemporaryHitPoints, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, onRespondToResolutionPrompt, playerKey, resolutionPrompts, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -1376,6 +1471,12 @@ function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreate
         )}
       </header>
 
+      <ResolutionPromptPanel
+        isDm={isDm}
+        prompts={resolutionPrompts}
+        onRespond={onRespondToResolutionPrompt}
+      />
+
       {expandedSheet ? (
         <FullSheet
           sheet={expandedSheet}
@@ -1400,6 +1501,8 @@ function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreate
           onRollSavingThrow={onRollSavingThrow}
           onRollSpellAttack={onRollSpellAttack}
           onRollSpellDamage={onRollSpellDamage}
+          onRollTrueStrikeAttack={onRollTrueStrikeAttack}
+          onRollTrueStrikeDamage={onRollTrueStrikeDamage}
           onRollSpellHealing={onRollSpellHealing}
           onRollSpellTemporaryHitPoints={onRollSpellTemporaryHitPoints}
           onRollSpellEffect={onRollSpellEffect}
@@ -2874,6 +2977,34 @@ function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: CharacterS
   );
 }
 
+function ResolutionPromptPanel({ isDm, prompts, onRespond }: { isDm: boolean; prompts: ResolutionInterceptorPrompt[]; onRespond: (prompt: ResolutionInterceptorPrompt, use: boolean) => void }) {
+  if (prompts.length === 0) return null;
+
+  return (
+    <section className="sheet-panel resolution-prompt-panel">
+      <div className="panel-title-row">
+        <h2>Interruptions</h2>
+        <span>{prompts.length}</span>
+      </div>
+      <div className="resolution-prompt-list">
+        {prompts.map((prompt) => (
+          <article className="resolution-prompt-card" key={prompt.id}>
+            <div>
+              <strong>{prompt.label}</strong>
+              <span>{prompt.ownerName}{isDm ? " · DM override available" : ""}</span>
+              <p>{prompt.description}</p>
+            </div>
+            <div className="resolution-prompt-actions">
+              <button onClick={() => onRespond(prompt, true)}>{prompt.useLabel}</button>
+              <button onClick={() => onRespond(prompt, false)}>{prompt.declineLabel}</button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function RollActionList({
   canRoll,
   pendingRolls,
@@ -3090,6 +3221,8 @@ function FullSheet({
   onRollSavingThrow,
   onRollSpellAttack,
   onRollSpellDamage,
+  onRollTrueStrikeAttack,
+  onRollTrueStrikeDamage,
   onRollSpellHealing,
   onRollSpellTemporaryHitPoints,
   onRollSpellEffect,
@@ -3118,6 +3251,8 @@ function FullSheet({
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
+  onRollTrueStrikeAttack: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
+  onRollTrueStrikeDamage: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
@@ -3253,6 +3388,8 @@ function FullSheet({
         onDragRollStart={onDragRollStart}
         onRollSpellAttack={onRollSpellAttack}
         onRollSpellDamage={onRollSpellDamage}
+        onRollTrueStrikeAttack={onRollTrueStrikeAttack}
+        onRollTrueStrikeDamage={onRollTrueStrikeDamage}
         onRollSpellHealing={onRollSpellHealing}
         onRollSpellTemporaryHitPoints={onRollSpellTemporaryHitPoints}
         onRollSpellEffect={onRollSpellEffect}
@@ -3265,6 +3402,9 @@ function FullSheet({
           <div className="attack-actions" key={attack.id}>
             <span>
               {attack.name} · {attack.abilityLabel} · {attack.damageDie} {attack.damageTypeLabel}
+              {attack.activeSpellConditions?.map((spellId) => (
+                <small className="attack-condition-pill" key={spellId}>{cleanName(spellId)}</small>
+              ))}
             </span>
             <button disabled={!canRoll} onClick={() => onRollAttack(sheet, attack.id)}>
               Attack Roll
@@ -3376,6 +3516,8 @@ function SheetSpellList({
   onDragRollStart,
   onRollSpellAttack,
   onRollSpellDamage,
+  onRollTrueStrikeAttack,
+  onRollTrueStrikeDamage,
   onRollSpellHealing,
   onRollSpellTemporaryHitPoints,
   onRollSpellEffect,
@@ -3390,6 +3532,8 @@ function SheetSpellList({
   onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number) => void;
+  onRollTrueStrikeAttack: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
+  onRollTrueStrikeDamage: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number) => void;
@@ -3414,6 +3558,7 @@ function SheetSpellList({
           const healingEffects = spellHealingEffects(spell);
           const temporaryHitPointEffects = spellTemporaryHitPointEffects(spell);
           const conditionEffects = spellConditionEffects(spell);
+          const trueStrikeAttacks = spell.id === "trueStrike" ? trueStrikeWeaponAttacks(sheet) : [];
           const slotLevelsByDamageEffect = new Map(damageEffects.map((effectIndex) => [effectIndex, spellDamageSlotLevels(sheet, spell, effectIndex)]));
           const slotLevelsByHealingEffect = new Map(healingEffects.map((effectIndex) => [effectIndex, spellHealingSlotLevels(sheet, spell, effectIndex)]));
           const slotLevelsByTemporaryHitPointEffect = new Map(temporaryHitPointEffects.map((effectIndex) => [effectIndex, spellTemporaryHitPointSlotLevels(sheet, spell, effectIndex)]));
@@ -3445,10 +3590,20 @@ function SheetSpellList({
                 />
               )}
               {spell.description && <p>{spell.description}</p>}
-              {(spellHasAttackRoll(spell) || damageEffects.length > 0 || healingEffects.length > 0 || temporaryHitPointEffects.length > 0 || conditionEffects.length > 0 || matchingRolls.length > 0 || matchingResolvedRolls.length > 0) && (
+              {(spellHasAttackRoll(spell) || damageEffects.length > 0 || healingEffects.length > 0 || temporaryHitPointEffects.length > 0 || conditionEffects.length > 0 || trueStrikeAttacks.length > 0 || matchingRolls.length > 0 || matchingResolvedRolls.length > 0) && (
                 <div className="inline-roll-area">
-                  {(spellHasAttackRoll(spell) || damageEffects.length > 0 || healingEffects.length > 0 || temporaryHitPointEffects.length > 0 || conditionEffects.length > 0) && (
+                  {(spellHasAttackRoll(spell) || damageEffects.length > 0 || healingEffects.length > 0 || temporaryHitPointEffects.length > 0 || conditionEffects.length > 0 || trueStrikeAttacks.length > 0) && (
                     <div className="roll-action-buttons">
+                      {trueStrikeAttacks.flatMap((attack) => trueStrikeDamageTypes(attack).map((damageType) => (
+                        <span className="spell-roll-control" key={`true-strike-${attack.id}-${damageType}`}>
+                          <button disabled={!canRoll} onClick={() => onRollTrueStrikeAttack(sheet, spell.id, attack.id, damageType)}>
+                            Attack {attack.name}{damageType === "radiant" ? " Radiant" : ""}
+                          </button>
+                          <button disabled={!canRoll} onClick={() => onRollTrueStrikeDamage(sheet, spell.id, attack.id, damageType)}>
+                            Damage {attack.name}{damageType === "radiant" ? " Radiant" : ""}
+                          </button>
+                        </span>
+                      )))}
                       {spellHasAttackRoll(spell) && (
                         <button disabled={!canRoll} onClick={() => onRollSpellAttack(sheet, spell.id)}>
                           Attack Roll
@@ -3548,9 +3703,11 @@ function SheetSpellList({
                       {conditionEffects.map((effectIndex) => {
                         const conditionEffect = spellConditionEffectAt(spell, effectIndex);
                         return (
-                          <button key={`effect-${effectIndex}`} disabled={!canRoll} onClick={() => onRollSpellEffect(sheet, spell.id, effectIndex)}>
-                            {spellConditionButtonLabel(conditionEffect)}
-                          </button>
+                          <span className="spell-roll-control" key={`effect-${effectIndex}`}>
+                            <button disabled={!canRoll} onClick={() => onRollSpellEffect(sheet, spell.id, effectIndex)}>
+                              {spellConditionButtonLabel(conditionEffect)}
+                            </button>
+                          </span>
                         );
                       })}
                     </div>
@@ -4014,6 +4171,10 @@ function appendRollLogEntry(entries: RollLogEntry[], entry: RollLogEntry) {
   return [...entries.filter((candidate) => candidate.id !== entry.id), entry].slice(-ROLL_HISTORY_LIMIT);
 }
 
+function upsertResolutionPrompt(prompts: ResolutionInterceptorPrompt[], prompt: ResolutionInterceptorPrompt) {
+  return [prompt, ...prompts.filter((candidate) => candidate.id !== prompt.id)];
+}
+
 function applyResolvedRollToSheetState(sheets: CharacterSheet[], resolution: NonNullable<RollLogEntry["resolution"]>) {
   const concentrationUpdates = new Map((resolution.concentrationUpdates ?? []).map((update) => [update.sheetId, update.activeConcentration]));
   return sheets.map((sheet) =>
@@ -4045,6 +4206,9 @@ function spellHasAttackRoll(spell: CharacterSheet["spells"][number]) {
 }
 
 function spellDamageEffects(spell: CharacterSheet["spells"][number]) {
+  if (spell.id === "trueStrike") {
+    return [];
+  }
   return (spell.effects ?? [])
     .filter((effect) => effect.kind === "damage" && effect.damage)
     .map((_effect, index) => index);
@@ -4056,6 +4220,30 @@ function spellDamageEffectAt(spell: CharacterSheet["spells"][number], damageEffe
 
 function spellDamageButtonLabel(effect: ReturnType<typeof spellDamageEffectAt>) {
   return effect?.actionLabel ? `Damage ${effect.actionLabel}` : "Damage";
+}
+
+function trueStrikeWeaponAttacks(sheet: CharacterSheet) {
+  return sheet.attacks.filter(
+    (attack) =>
+      attack.proficient &&
+      attack.attackKind === "standard" &&
+      attack.attackType !== "unarmedStrike" &&
+      weaponAttackIsWielded(sheet, attack.id) &&
+      attack.damageDiceCount > 0
+  );
+}
+
+function weaponAttackIsWielded(sheet: CharacterSheet, attackId: string) {
+  return sheet.equipment.some(
+    (item) =>
+      item.itemType === "weapon" &&
+      item.id === attackId &&
+      (item.slot === "mainHand" || item.slot === "offHand" || item.slot === "twoHands")
+  );
+}
+
+function trueStrikeDamageTypes(attack: CharacterSheet["attacks"][number]) {
+  return attack.damageType === "radiant" ? ["radiant" as DamageType] : [attack.damageType, "radiant" as DamageType];
 }
 
 function spellHealingEffects(spell: CharacterSheet["spells"][number]) {
@@ -4170,6 +4358,9 @@ function isTargetableRoll(roll: RollPayload | undefined) {
     roll.resolution === RollResolutionMode.HEAL_SELF ||
     roll.resolution === RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS
   ) {
+    return true;
+  }
+  if (roll.damageSavingThrow && roll.damageSaveDc) {
     return true;
   }
   return (roll.conditionEffects ?? []).some((effect) => effect.mode === "targetSave" || effect.mode === "sourceCheck" || effect.mode === "direct");

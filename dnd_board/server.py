@@ -20,6 +20,7 @@ from dnd_board.character_sheet import (
     ActiveConcentrationUpdate,
     AbilityScores,
     AbilityType,
+    AttackAction,
     CharacterSheet,
     CharacterClassLevel,
     ClassType,
@@ -45,6 +46,9 @@ from dnd_board.character_sheet import (
     RollResourceSpend,
     RollResolution,
     RollSource,
+    ResolutionInterceptorPrompt,
+    ResolutionInterceptorTrigger,
+    ResolutionInterceptorType,
     RestType,
     SheetSectionType,
     SkillType,
@@ -64,12 +68,16 @@ from dnd_board.character_sheet import (
     build_damage_roll_payload,
     build_spell_attack_roll_payload,
     build_spell_condition_roll_payload,
+    build_spell_condition_save_roll_payload,
     build_spell_damage_roll_payload,
+    build_spell_damage_save_roll_payload,
     build_spell_healing_roll_payload,
     build_spell_temporary_hit_points_roll_payload,
     spell_damage_effect_at,
     build_saving_throw_roll_payload,
     build_roll_action_payload,
+    build_true_strike_attack_roll_payload,
+    build_true_strike_damage_roll_payload,
     ability_modifier,
     active_roll_modifier_breakdown,
     condition_adjusted_armor_class,
@@ -79,6 +87,10 @@ from dnd_board.character_sheet import (
     condition_saving_throw_disadvantage_conditions,
     condition_saving_throw_forced_failure_conditions,
     creature_type_list_label,
+    target_creature_type_matches,
+    shillelagh_weapon_attacks,
+    true_strike_weapon_attack,
+    true_strike_weapon_attacks,
     enum_value,
     enum_key,
     enum_label,
@@ -88,6 +100,7 @@ from dnd_board.character_sheet import (
     resolve_roll_against_target as resolve_dnd_roll_against_target,
     roll_payload_to_dict,
     roll_log_entry_to_dict,
+    resolution_interceptor_prompt_to_dict,
     roll_resolution_to_dict,
     sanitize_identifier,
     sheet_to_dict,
@@ -262,6 +275,7 @@ class Room:
     board_id: str
     next_token_number: int
     pending_rolls: dict[tuple[str, str, str, str], RollPayload]
+    pending_resolution_prompts: dict[str, ResolutionInterceptorPrompt]
     roll_history: list[RollLogEntry]
     hit_points: dict[str, int]
     temporary_hit_points: dict[str, int]
@@ -430,9 +444,24 @@ async def roll_sheet_spell_attack(room_id: str, sheet_id: str, spell_id: str, pl
     return await create_spell_attack_roll(room_id, sheet_id, playerKey, spell_id)
 
 
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/true-strike-attack")
+async def roll_sheet_true_strike_attack(room_id: str, sheet_id: str, spell_id: str, playerKey: str, attackId: str, damageType: str) -> dict[str, Any]:
+    return await create_true_strike_attack_roll(room_id, sheet_id, playerKey, spell_id, attackId, damageType)
+
+
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/damage")
-async def roll_sheet_spell_damage(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, instanceIndex: int | None = None) -> dict[str, Any]:
-    return await create_spell_damage_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, instanceIndex)
+async def roll_sheet_spell_damage(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, instanceIndex: int | None = None, damageSaveSucceeded: bool | None = None) -> dict[str, Any]:
+    return await create_spell_damage_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, instanceIndex, damageSaveSucceeded)
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/damage-save")
+async def roll_sheet_spell_damage_save(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0) -> dict[str, Any]:
+    return await create_spell_damage_save_roll(room_id, sheet_id, playerKey, spell_id, effectIndex)
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/true-strike-damage")
+async def roll_sheet_true_strike_damage(room_id: str, sheet_id: str, spell_id: str, playerKey: str, attackId: str, damageType: str) -> dict[str, Any]:
+    return await create_true_strike_damage_roll(room_id, sheet_id, playerKey, spell_id, attackId, damageType)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/healing")
@@ -446,8 +475,13 @@ async def roll_sheet_spell_temporary_hit_points(room_id: str, sheet_id: str, spe
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/effect")
-async def roll_sheet_spell_effect(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0) -> dict[str, Any]:
-    return await create_spell_condition_roll(room_id, sheet_id, playerKey, spell_id, effectIndex)
+async def roll_sheet_spell_effect(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, conditionEffectSucceeded: bool | None = None) -> dict[str, Any]:
+    return await create_spell_condition_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, conditionEffectSucceeded)
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/effect-save")
+async def roll_sheet_spell_effect_save(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0) -> dict[str, Any]:
+    return await create_spell_condition_save_roll(room_id, sheet_id, playerKey, spell_id, effectIndex)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/ability-check")
@@ -461,13 +495,13 @@ async def roll_sheet_saving_throw(room_id: str, sheet_id: str, playerKey: str, a
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/resources/{resource_id}/rolls/{action_id}")
-async def roll_sheet_resource_action(room_id: str, sheet_id: str, resource_id: str, action_id: str, playerKey: str) -> dict[str, Any]:
-    return await create_resource_roll(room_id, sheet_id, playerKey, resource_id, action_id)
+async def roll_sheet_resource_action(room_id: str, sheet_id: str, resource_id: str, action_id: str, playerKey: str, conditionEffectSucceeded: bool | None = None, conditionPrerequisiteOnly: bool = False) -> dict[str, Any]:
+    return await create_resource_roll(room_id, sheet_id, playerKey, resource_id, action_id, conditionEffectSucceeded, conditionPrerequisiteOnly)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/abilities/{ability_id}/rolls/{action_id}")
-async def roll_sheet_ability_action(room_id: str, sheet_id: str, ability_id: str, action_id: str, playerKey: str) -> dict[str, Any]:
-    return await create_ability_roll(room_id, sheet_id, playerKey, ability_id, action_id)
+async def roll_sheet_ability_action(room_id: str, sheet_id: str, ability_id: str, action_id: str, playerKey: str, conditionEffectSucceeded: bool | None = None, conditionPrerequisiteOnly: bool = False) -> dict[str, Any]:
+    return await create_ability_roll(room_id, sheet_id, playerKey, ability_id, action_id, conditionEffectSucceeded, conditionPrerequisiteOnly)
 
 
 @app.post("/api/rooms/{room_id}/dice")
@@ -838,7 +872,16 @@ async def resolve_roll(room_id: str, roll_id: str, playerKey: str, targetSheetId
     if target is None:
         raise HTTPException(status_code=404, detail="Target sheet not found")
 
-    resolution = resolve_roll_against_target(room, roll, target)
+    resolution_or_prompt = resolve_roll_or_prompt(room, roll, target)
+    if isinstance(resolution_or_prompt, ResolutionInterceptorPrompt):
+        if not preserveRoll:
+            room.pending_rolls.pop(roll_queue_key(roll), None)
+        room.pending_resolution_prompts[resolution_or_prompt.id] = resolution_or_prompt
+        prompt_data = resolution_interceptor_prompt_to_dict(resolution_or_prompt)
+        await broadcast(room, {"type": "resolution_prompt_created", "prompt": prompt_data})
+        return {"roomId": room.id, "prompt": prompt_data}
+
+    resolution = resolution_or_prompt
     save_room_if_concentration_changed(room, resolution)
     if not preserveRoll:
         room.pending_rolls.pop(roll_queue_key(roll), None)
@@ -865,6 +908,74 @@ async def resolve_roll(room_id: str, roll_id: str, playerKey: str, targetSheetId
         },
     )
     return {"roomId": room.id, "preserveRoll": preserveRoll, "resolution": resolution_data, "logEntry": roll_log_entry_to_dict(log_entry)}
+
+
+@app.post("/api/rooms/{room_id}/resolution-prompts/{prompt_id}/respond")
+async def respond_to_resolution_prompt(room_id: str, prompt_id: str, playerKey: str, use: bool) -> dict[str, Any]:
+    sanitized_room_id = sanitize_room_id(room_id)
+    room = get_or_create_room(sanitized_room_id)
+    player = Player(id="http-resolution-prompt", name="Prompt", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    prompt = room.pending_resolution_prompts.get(sanitize_asset_id(prompt_id))
+    if prompt is None:
+        raise HTTPException(status_code=404, detail="Resolution prompt not found")
+    if not is_dm(player) and prompt.ownerPlayerKey != player.player_key:
+        raise HTTPException(status_code=403, detail="Cannot answer another player's prompt")
+
+    target = get_visible_sheet(room, Player(id="prompt-dm", name="DM", player_key="dm", websocket=None, room_id=room.id), prompt.targetSheetId)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Target sheet not found")
+
+    room.pending_resolution_prompts.pop(prompt.id, None)
+    response_rolls = list(prompt.responseRolls or [])
+    outcome_prefixes = [f"{prompt.ownerName} {'uses' if use else 'declines'} {prompt.label}"]
+    next_roll = prompt.pendingRoll
+    ignored = [*prompt.ignoredInterceptors, resolution_interceptor_key(prompt)]
+    if use:
+        used_roll, used_outcomes, used_response_rolls, canceled_resolution = apply_resolution_interceptor(room, prompt, target)
+        outcome_prefixes.extend(used_outcomes)
+        response_rolls.extend(used_response_rolls)
+        if canceled_resolution is not None:
+            resolution = attach_resolution_context(canceled_resolution, outcome_prefixes, response_rolls)
+            resolution_data = roll_resolution_to_dict(resolution)
+            log_entry = append_roll_log_entry(
+                room,
+                RollLogEntry(
+                    id=f"log-{resolution.id}",
+                    entryType=RollLogEntryType.ROLL_RESOLVED,
+                    createdAt=resolution.createdAt,
+                    roll=prompt.sourceRoll,
+                    resolution=resolution,
+                ),
+            )
+            await broadcast(room, {"type": "resolution_prompt_resolved", "promptId": prompt.id})
+            await broadcast(room, {"type": "roll_resolved", "rollId": prompt.sourceRoll.id, "tokenId": prompt.sourceRoll.tokenId, "resolution": resolution_data, "logEntry": roll_log_entry_to_dict(log_entry)})
+            return {"roomId": room.id, "resolution": resolution_data, "logEntry": roll_log_entry_to_dict(log_entry)}
+        next_roll = used_roll
+
+    resolution_or_prompt = resolve_roll_or_prompt(room, next_roll, target, ignored, response_rolls, outcome_prefixes)
+    if isinstance(resolution_or_prompt, ResolutionInterceptorPrompt):
+        room.pending_resolution_prompts[resolution_or_prompt.id] = resolution_or_prompt
+        prompt_data = resolution_interceptor_prompt_to_dict(resolution_or_prompt)
+        await broadcast(room, {"type": "resolution_prompt_resolved", "promptId": prompt.id})
+        await broadcast(room, {"type": "resolution_prompt_created", "prompt": prompt_data})
+        return {"roomId": room.id, "prompt": prompt_data}
+
+    resolution = resolution_or_prompt
+    save_room_if_concentration_changed(room, resolution)
+    resolution_data = roll_resolution_to_dict(resolution)
+    log_entry = append_roll_log_entry(
+        room,
+        RollLogEntry(
+            id=f"log-{resolution.id}",
+            entryType=RollLogEntryType.ROLL_RESOLVED,
+            createdAt=resolution.createdAt,
+            roll=prompt.sourceRoll,
+            resolution=resolution,
+        ),
+    )
+    await broadcast(room, {"type": "resolution_prompt_resolved", "promptId": prompt.id})
+    await broadcast(room, {"type": "roll_resolved", "rollId": prompt.sourceRoll.id, "tokenId": prompt.sourceRoll.tokenId, "resolution": resolution_data, "logEntry": roll_log_entry_to_dict(log_entry)})
+    return {"roomId": room.id, "resolution": resolution_data, "logEntry": roll_log_entry_to_dict(log_entry)}
 
 
 @app.get("/campaigns/{campaign_id}/{asset_kind}/{filename}")
@@ -1236,6 +1347,7 @@ def get_or_create_room(room_id: str) -> Room:
         board_id=saved_board_id,
         next_token_number=next_dynamic_token_number(tokens),
         pending_rolls={},
+        pending_resolution_prompts={},
         roll_history=[],
         hit_points={},
         temporary_hit_points={},
@@ -1335,6 +1447,7 @@ def sheet_state_message(room: Room, player: Player) -> dict[str, Any]:
         "playerKey": player.player_key,
         "sheets": [sheet_to_dict(sheet) for sheet in sheets],
         "pendingRolls": [roll_payload_to_dict(roll) for roll in visible_pending_rolls(room, player)],
+        "pendingResolutionPrompts": [resolution_interceptor_prompt_to_dict(prompt) for prompt in visible_resolution_prompts(room, player)],
         "rollHistory": [roll_log_entry_to_dict(entry) for entry in visible_roll_history(room, player)],
     }
 
@@ -1350,6 +1463,12 @@ def visible_sheets(room: Room, player: Player) -> list[CharacterSheet]:
 
 def visible_pending_rolls(room: Room, player: Player, visible_token_ids: set[str] | None = None) -> list[RollPayload]:
     return list(room.pending_rolls.values())
+
+
+def visible_resolution_prompts(room: Room, player: Player) -> list[ResolutionInterceptorPrompt]:
+    if is_dm(player):
+        return list(room.pending_resolution_prompts.values())
+    return [prompt for prompt in room.pending_resolution_prompts.values() if prompt.ownerPlayerKey == player.player_key]
 
 
 def visible_roll_history(room: Room, player: Player, visible_token_ids: set[str] | None = None) -> list[RollLogEntry]:
@@ -1442,7 +1561,41 @@ async def create_spell_attack_roll(room_id: str, sheet_id: str, player_key: str,
     return await store_outgoing_roll(room, sheet, payload)
 
 
-async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, instance_index: int | None = None) -> dict[str, Any]:
+async def create_true_strike_attack_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, attack_id: str, damage_type_key: str) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    spell, attack, damage_type = await true_strike_context(room, player, sheet, spell_id, attack_id, damage_type_key)
+    await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "True Strike Attack")
+    await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
+    payload = build_true_strike_attack_roll_payload(sheet, player.player_key, spell, attack, damage_type)
+    return await store_outgoing_roll(room, sheet, payload)
+
+
+async def create_true_strike_damage_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, attack_id: str, damage_type_key: str) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    spell, attack, damage_type = await true_strike_context(room, player, sheet, spell_id, attack_id, damage_type_key)
+    await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "True Strike Damage")
+    payload = build_true_strike_damage_roll_payload(sheet, player.player_key, spell, attack, damage_type)
+    return await store_outgoing_roll(room, sheet, payload)
+
+
+async def true_strike_context(room: Room, player: Player, sheet: CharacterSheet, spell_id: str, attack_id: str, damage_type_key: str) -> tuple[SpellEntry, AttackAction, DamageType]:
+    spell = find_spell(sheet, spell_id)
+    if spell.id != SpellId.TRUE_STRIKE:
+        raise HTTPException(status_code=404, detail="True Strike spell not found")
+    if not true_strike_weapon_attacks(sheet):
+        await log_blocked_roll(room, sheet, player, enum_label(spell.name), "True Strike", "requires a wielded proficient weapon")
+        raise HTTPException(status_code=400, detail="True Strike requires a wielded proficient weapon")
+    attack = true_strike_weapon_attack(sheet, attack_id)
+    if attack is None:
+        await log_blocked_roll(room, sheet, player, enum_label(spell.name), "True Strike", "selected weapon is not wielded and proficient")
+        raise HTTPException(status_code=404, detail="True Strike weapon attack not found")
+    damage_type = enum_value(DamageType, damage_type_key)
+    if damage_type is None or damage_type not in {attack.damageType, DamageType.RADIANT}:
+        raise HTTPException(status_code=400, detail="Invalid True Strike damage type")
+    return spell, attack, damage_type
+
+
+async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, instance_index: int | None = None, damage_save_succeeded: bool | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     spell = find_spell(sheet, spell_id)
     validate_spell_slot_level(sheet, spell, spell_slot_level)
@@ -1450,7 +1603,19 @@ async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str,
     if spell_damage_roll_requires_cast_check(spell, effect_index):
         await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
     try:
-        payload = build_spell_damage_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level, instance_index)
+        payload = build_spell_damage_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level, instance_index, damage_save_succeeded)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return await store_outgoing_roll(room, sheet, payload)
+
+
+async def create_spell_damage_save_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    spell = find_spell(sheet, spell_id)
+    await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "Spell Save")
+    await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
+    try:
+        payload = build_spell_damage_save_roll_payload(sheet, player.player_key, spell, effect_index)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return await store_outgoing_roll(room, sheet, payload)
@@ -1482,13 +1647,28 @@ async def create_spell_temporary_hit_points_roll(room_id: str, sheet_id: str, pl
     return await store_outgoing_roll(room, sheet, payload)
 
 
-async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0) -> dict[str, Any]:
+async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, condition_effect_succeeded: bool | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     spell = find_spell(sheet, spell_id)
+    if spell.id == SpellId.SHILLELAGH and not shillelagh_weapon_attacks(sheet):
+        await log_blocked_roll(room, sheet, player, enum_label(spell.name), "Shillelagh", "requires a wielded proficient Club or Quarterstaff")
+        raise HTTPException(status_code=400, detail="Shillelagh requires a wielded proficient Club or Quarterstaff")
     await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "Spell Effect")
     await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
     try:
-        payload = build_spell_condition_roll_payload(sheet, player.player_key, spell, effect_index)
+        payload = build_spell_condition_roll_payload(sheet, player.player_key, spell, effect_index, condition_effect_succeeded)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return await store_outgoing_roll(room, sheet, payload)
+
+
+async def create_spell_condition_save_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, player_key)
+    spell = find_spell(sheet, spell_id)
+    await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "Spell Save")
+    await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
+    try:
+        payload = build_spell_condition_save_roll_payload(sheet, player.player_key, spell, effect_index)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return await store_outgoing_roll(room, sheet, payload)
@@ -1515,7 +1695,7 @@ def parse_ability(ability_key: str) -> AbilityType:
     return ability
 
 
-async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, resource_id: str, action_id: str) -> dict[str, Any]:
+async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, resource_id: str, action_id: str, condition_effect_succeeded: bool | None = None, condition_prerequisite_only: bool = False) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     sanitized_resource_id = sanitize_asset_id(resource_id)
     resource = next((candidate for candidate in sheet.resources if sanitize_asset_id(candidate.id) == sanitized_resource_id), None)
@@ -1530,13 +1710,13 @@ async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, res
 
     await assert_roll_activation_allowed(room, sheet, player, action.activation or resource.activation, resource.name, enum_label(action.name))
     source = RollSource(section=SheetSectionType.RESOURCES, sourceId=resource.id, actionId=enum_key(action.id))
-    payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=resource.name)
-    if action.consumesResource is not None:
+    payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=resource.name, condition_effect_succeeded=condition_effect_succeeded, condition_prerequisite_only=condition_prerequisite_only)
+    if action.consumesResource is not None and not condition_prerequisite_only:
         spend_resource_use(room, sheet, enum_key(action.consumesResource), payload)
     return await store_outgoing_roll(room, sheet, payload)
 
 
-async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, ability_id: str, action_id: str) -> dict[str, Any]:
+async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, ability_id: str, action_id: str, condition_effect_succeeded: bool | None = None, condition_prerequisite_only: bool = False) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     sanitized_ability_id = sanitize_asset_id(ability_id)
     ability = next((candidate for candidate in sheet.abilities if sanitize_asset_id(candidate.id) == sanitized_ability_id), None)
@@ -1551,8 +1731,8 @@ async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, abil
 
     await assert_roll_activation_allowed(room, sheet, player, action.activation or ability.activation, ability.source, enum_label(action.name))
     source = RollSource(section=SheetSectionType.ABILITIES, sourceId=ability.id, actionId=enum_key(action.id))
-    payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=ability.source)
-    if action.consumesResource is not None:
+    payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=ability.source, condition_effect_succeeded=condition_effect_succeeded, condition_prerequisite_only=condition_prerequisite_only)
+    if action.consumesResource is not None and not condition_prerequisite_only:
         spend_resource_use(room, sheet, enum_key(action.consumesResource), payload)
     return await store_outgoing_roll(room, sheet, payload)
 
@@ -1988,18 +2168,356 @@ def remove_pending_rolls_for_token(room: Room, token_id: str) -> None:
         room.pending_rolls.pop(key, None)
 
 
+ResolutionResult = RollResolution | ResolutionInterceptorPrompt
+
+
+def resolve_roll_or_prompt(
+    room: Room,
+    roll: RollPayload,
+    target: CharacterSheet,
+    ignored_interceptors: list[str] | None = None,
+    response_rolls: list[RollPayload] | None = None,
+    outcome_prefixes: list[str] | None = None,
+) -> ResolutionResult:
+    ignored = set(ignored_interceptors or [])
+    prefixes = list(outcome_prefixes or [])
+    pre_response_rolls = list(response_rolls or [])
+
+    counterspell_prompt = counterspell_prompt_for_roll(room, roll, target, ignored, pre_response_rolls, prefixes)
+    if counterspell_prompt is not None:
+        return counterspell_prompt
+
+    working_roll = roll
+    if working_roll.damageSavingThrow is not None and working_roll.damageSaveSucceeded is None:
+        damage_save_outcome, damage_save_roll, resolved_roll = resolve_damage_save_for_roll(working_roll, target)
+        if damage_save_outcome:
+            prefixes.append(damage_save_outcome)
+        if damage_save_roll is not None:
+            pre_response_rolls.append(damage_save_roll)
+        working_roll = resolved_roll
+        failed_save_prompt = failed_save_prompt_for_roll(room, roll, working_roll, target, ignored, pre_response_rolls, prefixes)
+        if failed_save_prompt is not None:
+            return failed_save_prompt
+
+    if condition_save_should_resolve_before_effect(working_roll, target):
+        condition_save_outcomes = resolve_target_save_prerequisite_effects(working_roll, target)
+        for outcome, _condition, response_roll in condition_save_outcomes:
+            prefixes.append(outcome)
+            if response_roll is not None:
+                pre_response_rolls.append(response_roll)
+        failed = any(" fails DC " in outcome for outcome, _condition, _response_roll in condition_save_outcomes)
+        working_roll = replace(working_roll, conditionEffectSucceeded=failed)
+        failed_save_prompt = failed_save_prompt_for_roll(room, roll, working_roll, target, ignored, pre_response_rolls, prefixes)
+        if failed_save_prompt is not None:
+            return failed_save_prompt
+
+    uncanny_prompt = uncanny_dodge_prompt_for_roll(room, roll, working_roll, target, ignored, pre_response_rolls, prefixes)
+    if uncanny_prompt is not None:
+        return uncanny_prompt
+
+    for response_roll in pre_response_rolls:
+        room.pending_rolls[roll_queue_key(response_roll)] = response_roll
+    resolution = resolve_roll_against_target(room, working_roll, target)
+    return attach_resolution_context(resolution, prefixes, pre_response_rolls)
+
+
+def attach_resolution_context(resolution: RollResolution, outcome_prefixes: list[str], response_rolls: list[RollPayload]) -> RollResolution:
+    if outcome_prefixes:
+        resolution.outcome = f"{'; '.join(outcome_prefixes)}; {resolution.outcome}"
+    if response_rolls:
+        merged = dedupe_response_rolls([*response_rolls, *(resolution.responseRolls or [])])
+        resolution.responseRolls = merged
+    return resolution
+
+
+def counterspell_prompt_for_roll(
+    room: Room,
+    source_roll: RollPayload,
+    target: CharacterSheet,
+    ignored: set[str],
+    response_rolls: list[RollPayload],
+    outcome_prefixes: list[str],
+) -> ResolutionInterceptorPrompt | None:
+    if source_roll.source.section != SheetSectionType.SPELLS or source_roll.source.sourceId == enum_key(SpellId.COUNTERSPELL):
+        return None
+    source = source_sheet_for_roll(room, source_roll)
+    for sheet in all_room_sheets(room):
+        if source is not None and sheet.id == source.id:
+            continue
+        if not sheet_has_spell(sheet, SpellId.COUNTERSPELL):
+            continue
+        key = resolution_interceptor_key_for(ResolutionInterceptorType.COUNTERSPELL, sheet.id)
+        if key in ignored:
+            continue
+        return ResolutionInterceptorPrompt(
+            id=f"prompt-{time_ns()}",
+            interceptorType=ResolutionInterceptorType.COUNTERSPELL,
+            trigger=ResolutionInterceptorTrigger.BEFORE_SPELL_RESOLVES,
+            sourceRoll=source_roll,
+            pendingRoll=source_roll,
+            targetSheetId=target.id,
+            targetTokenId=target.tokenId,
+            targetName=target.name,
+            ownerSheetId=sheet.id,
+            ownerTokenId=sheet.tokenId,
+            ownerName=sheet.name,
+            ownerPlayerKey=sheet.owner,
+            label=enum_label(ResolutionInterceptorType.COUNTERSPELL),
+            description=f"{source_roll.sourceLabel} is about to resolve against {target.name}.",
+            useLabel="Cast Counterspell",
+            declineLabel="Decline",
+            createdAt=time_ns(),
+            ignoredInterceptors=list(ignored),
+            responseRolls=response_rolls or None,
+        )
+    return None
+
+
+def failed_save_prompt_for_roll(
+    room: Room,
+    source_roll: RollPayload,
+    pending_roll: RollPayload,
+    target: CharacterSheet,
+    ignored: set[str],
+    response_rolls: list[RollPayload],
+    outcome_prefixes: list[str],
+) -> ResolutionInterceptorPrompt | None:
+    saving_throw = failed_save_ability(pending_roll)
+    save_dc = failed_save_dc(pending_roll)
+    if saving_throw is None or save_dc is None:
+        return None
+    for interceptor_type in failed_save_interceptor_types(target, pending_roll):
+        key = resolution_interceptor_key_for(interceptor_type, target.id)
+        if key in ignored:
+            continue
+        return ResolutionInterceptorPrompt(
+            id=f"prompt-{time_ns()}",
+            interceptorType=interceptor_type,
+            trigger=ResolutionInterceptorTrigger.BEFORE_FAILED_SAVE_FINALIZES,
+            sourceRoll=source_roll,
+            pendingRoll=pending_roll,
+            targetSheetId=target.id,
+            targetTokenId=target.tokenId,
+            targetName=target.name,
+            ownerSheetId=target.id,
+            ownerTokenId=target.tokenId,
+            ownerName=target.name,
+            ownerPlayerKey=target.owner,
+            label=enum_label(interceptor_type),
+            description=f"{target.name} failed a DC {save_dc} {enum_label(saving_throw)} save.",
+            useLabel=failed_save_use_label(interceptor_type),
+            declineLabel="Decline",
+            createdAt=time_ns(),
+            ignoredInterceptors=list(ignored),
+            responseRolls=response_rolls or None,
+        )
+    return None
+
+
+def uncanny_dodge_prompt_for_roll(
+    room: Room,
+    source_roll: RollPayload,
+    pending_roll: RollPayload,
+    target: CharacterSheet,
+    ignored: set[str],
+    response_rolls: list[RollPayload],
+    outcome_prefixes: list[str],
+) -> ResolutionInterceptorPrompt | None:
+    if pending_roll.resolution != RollResolutionMode.APPLY_DAMAGE or not sheet_has_feature(target, "uncannyDodge"):
+        return None
+    if pending_roll.damageSavingThrow is not None:
+        return None
+    key = resolution_interceptor_key_for(ResolutionInterceptorType.UNCANNY_DODGE, target.id)
+    if key in ignored:
+        return None
+    preview = resolve_dnd_roll_against_target(pending_roll, target)
+    if not damage_was_taken(target.hp, preview.targetHp):
+        return None
+    return ResolutionInterceptorPrompt(
+        id=f"prompt-{time_ns()}",
+        interceptorType=ResolutionInterceptorType.UNCANNY_DODGE,
+        trigger=ResolutionInterceptorTrigger.BEFORE_DAMAGE_APPLIED,
+        sourceRoll=source_roll,
+        pendingRoll=pending_roll,
+        targetSheetId=target.id,
+        targetTokenId=target.tokenId,
+        targetName=target.name,
+        ownerSheetId=target.id,
+        ownerTokenId=target.tokenId,
+        ownerName=target.name,
+        ownerPlayerKey=target.owner,
+        label=enum_label(ResolutionInterceptorType.UNCANNY_DODGE),
+        description=f"{target.name} is about to take damage.",
+        useLabel="Halve Damage",
+        declineLabel="Decline",
+        createdAt=time_ns(),
+        ignoredInterceptors=list(ignored),
+        responseRolls=response_rolls or None,
+    )
+
+
+def failed_save_interceptor_types(target: CharacterSheet, roll: RollPayload) -> list[ResolutionInterceptorType]:
+    interceptors: list[ResolutionInterceptorType] = []
+    saving_throw = failed_save_ability(roll)
+    if sheet_resource_current_uses(target, "indomitable") > 0:
+        interceptors.append(ResolutionInterceptorType.INDOMITABLE)
+    if (
+        roll.source.section == SheetSectionType.SPELLS
+        and saving_throw in {AbilityType.INTELLIGENCE, AbilityType.WISDOM, AbilityType.CHARISMA}
+        and sheet_has_feature(target, "mageSlayer")
+        and sheet_resource_current_uses(target, "mageSlayer") > 0
+    ):
+        interceptors.append(ResolutionInterceptorType.MAGE_SLAYER)
+    return interceptors
+
+
+def failed_save_use_label(interceptor_type: ResolutionInterceptorType) -> str:
+    if interceptor_type == ResolutionInterceptorType.INDOMITABLE:
+        return "Reroll"
+    if interceptor_type == ResolutionInterceptorType.MAGE_SLAYER:
+        return "Succeed Instead"
+    return "Use"
+
+
+def apply_resolution_interceptor(
+    room: Room,
+    prompt: ResolutionInterceptorPrompt,
+    target: CharacterSheet,
+) -> tuple[RollPayload, list[str], list[RollPayload], RollResolution | None]:
+    if prompt.interceptorType == ResolutionInterceptorType.COUNTERSPELL:
+        resolution = RollResolution(
+            id=f"resolution-{time_ns()}",
+            roll=prompt.sourceRoll,
+            targetSheetId=target.id,
+            targetTokenId=target.tokenId,
+            targetName=target.name,
+            targetArmorClass=target.armorClass,
+            targetHp=target.hp,
+            targetConditions=target.conditions,
+            outcome=f"{prompt.ownerName} counters {prompt.sourceRoll.sourceLabel}; it has no effect on {target.name}",
+            createdAt=time_ns(),
+        )
+        return prompt.pendingRoll, [], [], resolution
+    if prompt.interceptorType == ResolutionInterceptorType.MAGE_SLAYER:
+        consume_sheet_resource(room, target, "mageSlayer")
+        return successful_save_roll(prompt.pendingRoll), [f"{prompt.ownerName} turns the failed save into a success"], [], None
+    if prompt.interceptorType == ResolutionInterceptorType.INDOMITABLE:
+        consume_sheet_resource(room, target, "indomitable")
+        saving_throw = failed_save_ability(prompt.pendingRoll) or AbilityType.STRENGTH
+        save_dc = failed_save_dc(prompt.pendingRoll)
+        reroll = response_ability_roll(
+            sheet=target,
+            ability=saving_throw,
+            action_id="indomitable",
+            label=enum_label(ResolutionInterceptorType.INDOMITABLE),
+            source_label=prompt.pendingRoll.sourceLabel,
+            modifier=save_modifier(target, saving_throw) + class_level(target, ClassType.FIGHTER),
+        )
+        succeeded = save_dc is not None and reroll.total >= save_dc
+        outcome = f"{target.name} rerolls with {enum_label(ResolutionInterceptorType.INDOMITABLE)} and {'passes' if succeeded else 'fails'} with {reroll.total}"
+        return save_outcome_roll(prompt.pendingRoll, succeeded), [outcome], [reroll], None
+    if prompt.interceptorType == ResolutionInterceptorType.UNCANNY_DODGE:
+        return halved_damage_roll(prompt.pendingRoll), [f"{prompt.ownerName} halves the incoming damage"], [], None
+    return prompt.pendingRoll, [], [], None
+
+
+def halved_damage_roll(roll: RollPayload) -> RollPayload:
+    if roll.damageComponents:
+        components = [replace(component, total=max(0, component.total // 2)) for component in roll.damageComponents]
+        return replace(roll, total=sum(component.total for component in components), damageComponents=components)
+    return replace(roll, total=max(0, roll.total // 2))
+
+
+def condition_save_should_resolve_before_effect(roll: RollPayload, target: CharacterSheet) -> bool:
+    if roll.conditionEffectSucceeded is not None:
+        return False
+    if not roll.conditionEffects or not target_creature_type_matches(roll, target):
+        return False
+    return any(effect.mode == ConditionApplicationMode.TARGET_SAVE and effect.savingThrow is not None and effect.saveDc is not None for effect in roll.conditionEffects)
+
+
+def failed_save_ability(roll: RollPayload) -> AbilityType | None:
+    if roll.damageSaveSucceeded is False:
+        return roll.damageSavingThrow
+    if roll.conditionEffectSucceeded is True:
+        return next((effect.savingThrow for effect in roll.conditionEffects or [] if effect.mode == ConditionApplicationMode.TARGET_SAVE and effect.savingThrow is not None), None)
+    return None
+
+
+def failed_save_dc(roll: RollPayload) -> int | None:
+    if roll.damageSaveSucceeded is False:
+        return roll.damageSaveDc
+    if roll.conditionEffectSucceeded is True:
+        return next((effect.saveDc for effect in roll.conditionEffects or [] if effect.mode == ConditionApplicationMode.TARGET_SAVE and effect.saveDc is not None), None)
+    return None
+
+
+def successful_save_roll(roll: RollPayload) -> RollPayload:
+    return save_outcome_roll(roll, True)
+
+
+def save_outcome_roll(roll: RollPayload, succeeded: bool) -> RollPayload:
+    if roll.damageSavingThrow is not None:
+        return replace(roll, damageSaveSucceeded=succeeded)
+    if roll.conditionEffects:
+        return replace(roll, conditionEffectSucceeded=not succeeded)
+    return roll
+
+
+def all_room_sheets(room: Room) -> list[CharacterSheet]:
+    player = Player(id="interceptor-dm", name="DM", player_key="dm", websocket=None, room_id=room.id)
+    return visible_sheets(room, player)
+
+
+def sheet_has_spell(sheet: CharacterSheet, spell_id: SpellId) -> bool:
+    return any(spell.id == spell_id for spell in [*sheet.spells, *sheet.spellbook])
+
+
+def sheet_has_feature(sheet: CharacterSheet, feature_id: str) -> bool:
+    return any(feature.id == feature_id for feature in sheet.features)
+
+
+def sheet_resource_current_uses(sheet: CharacterSheet, resource_id: str) -> int:
+    resource = next((resource for resource in sheet.resources if resource.id == resource_id), None)
+    return resource.currentUses if resource is not None else 0
+
+
+def consume_sheet_resource(room: Room, sheet: CharacterSheet, resource_id: str) -> None:
+    resource = next((resource for resource in sheet.resources if resource.id == resource_id), None)
+    if resource is None:
+        return
+    room.resource_uses.setdefault(sheet.tokenId, {})[resource_id] = clamp_int(resource.currentUses - 1, 0, resource.maxUses)
+    save_room_to_disk(room)
+
+
+def class_level(sheet: CharacterSheet, class_type: ClassType) -> int:
+    return sum(character_class.level for character_class in sheet.classes if character_class.name == class_type)
+
+
+def resolution_interceptor_key(prompt: ResolutionInterceptorPrompt) -> str:
+    return resolution_interceptor_key_for(prompt.interceptorType, prompt.ownerSheetId)
+
+
+def resolution_interceptor_key_for(interceptor_type: ResolutionInterceptorType, owner_sheet_id: str) -> str:
+    return f"{enum_key(interceptor_type)}:{owner_sheet_id}"
+
+
 def resolve_roll_against_target(room: Room, roll: RollPayload, target: CharacterSheet) -> RollResolution:
+    if roll.resolution == RollResolutionMode.NONE and roll.damageSavingThrow is not None and roll.damageSaveDc is not None:
+        return resolve_damage_save_prompt_against_target(roll, target)
+    if is_condition_prerequisite_prompt(roll):
+        return resolve_condition_prerequisite_prompt_against_target(room, roll, target)
     damage_save_outcome, damage_save_roll, resolved_roll = resolve_damage_save_for_roll(roll, target)
     resolution = resolve_dnd_roll_against_target(resolved_roll, target)
     source = source_sheet_for_roll(room, roll)
     concentration_update_sheet_ids: set[str] = set()
-    target_save_outcomes = resolve_target_save_effects(roll, target)
+    target_save_outcomes = [] if roll.conditionEffects and not target_creature_type_matches(roll, target) else resolve_target_save_effects(roll, target)
     source_check_outcomes = resolve_source_check_condition_effects(roll, source, target)
     damage_triggered_condition_outcomes = resolve_damage_triggered_condition_saves(room, roll, target, resolution)
     response_rolls = dedupe_response_rolls(
         [
             *([damage_save_roll] if damage_save_roll is not None else []),
-            *(response_roll for _outcome, _condition, response_roll in target_save_outcomes),
+            *(response_roll for _outcome, _condition, response_roll in target_save_outcomes if response_roll is not None),
             *(response_roll for _outcome, _condition, response_rolls_for_effect in source_check_outcomes for response_roll in response_rolls_for_effect),
             *(response_roll for _outcome, _conditions, response_roll in damage_triggered_condition_outcomes),
         ]
@@ -2188,6 +2706,22 @@ def resolve_damage_save_for_roll(roll: RollPayload, target: CharacterSheet) -> t
         or roll.damageSaveOutcome == SpellSaveOutcome.NONE
     ):
         return None, None, roll
+    if roll.damageSaveSucceeded is not None:
+        if not roll.damageSaveSucceeded:
+            return f"{target.name} previously failed the DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save", None, roll
+        if roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE:
+            return (
+                f"{target.name} previously passed the DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save for half damage",
+                None,
+                replace(roll, damageSaveSucceeded=True),
+            )
+        if roll.damageSaveOutcome == SpellSaveOutcome.NEGATES:
+            return (
+                f"{target.name} previously passed the DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save and takes no damage",
+                None,
+                replace(roll, total=0, damageComponents=None, conditionEffects=None, damageSaveSucceeded=True),
+            )
+        return f"{target.name} previously passed the DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save", None, replace(roll, damageSaveSucceeded=True)
     disadvantage = damage_save_disadvantage_applies(roll, target)
     response_roll = response_ability_roll(
         sheet=target,
@@ -2217,6 +2751,41 @@ def resolve_damage_save_for_roll(roll: RollPayload, target: CharacterSheet) -> t
             replace(roll, total=0, damageComponents=None, conditionEffects=None, damageSaveSucceeded=True),
         )
     return f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label}", response_roll, replace(roll, damageSaveSucceeded=True)
+
+
+def resolve_damage_save_prompt_against_target(roll: RollPayload, target: CharacterSheet) -> RollResolution:
+    assert roll.damageSavingThrow is not None
+    assert roll.damageSaveDc is not None
+    disadvantage = damage_save_disadvantage_applies(roll, target)
+    response_roll = response_ability_roll(
+        sheet=target,
+        ability=roll.damageSavingThrow,
+        action_id="save",
+        label=f"{enum_label(roll.damageSavingThrow)} Save",
+        source_label=roll.sourceLabel,
+        modifier=save_modifier(target, roll.damageSavingThrow),
+        disadvantage=disadvantage,
+    )
+    save_label = roll_advantage_log_label(response_roll)
+    forced_failure = damage_save_forced_failure_applies(roll, target)
+    forced_failure_conditions = condition_saving_throw_forced_failure_conditions(target, roll.damageSavingThrow)
+    forced_failure_label = damage_save_forced_failure_label(target, forced_failure, forced_failure_conditions)
+    if forced_failure or forced_failure_conditions or response_roll.total < roll.damageSaveDc:
+        outcome = f"{target.name} fails DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label}{forced_failure_label}; resolve failed-save damage/effects next"
+    else:
+        outcome = f"{target.name} passes DC {roll.damageSaveDc} {enum_label(roll.damageSavingThrow)} save{save_label}; resolve passed-save damage/effects next"
+    return RollResolution(
+        id=f"resolution-{time_ns()}",
+        roll=response_roll,
+        targetSheetId=target.id,
+        targetTokenId=target.tokenId,
+        targetName=target.name,
+        targetArmorClass=target.armorClass,
+        targetHp=target.hp,
+        targetConditions=target.conditions,
+        outcome=outcome,
+        createdAt=time_ns(),
+    )
 
 
 def damage_save_disadvantage_applies(roll: RollPayload, target: CharacterSheet) -> bool:
@@ -2289,8 +2858,46 @@ def damage_was_taken(before: HitPoints, after: HitPoints) -> bool:
     return after.current < before.current or after.temporary < before.temporary
 
 
-def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> list[tuple[str, ConditionType | None, RollPayload]]:
-    outcomes: list[tuple[str, ConditionType | None, RollPayload]] = []
+def is_condition_prerequisite_prompt(roll: RollPayload) -> bool:
+    return roll.source.actionId.startswith("condition-save-") and bool(roll.conditionEffects)
+
+
+def resolve_condition_prerequisite_prompt_against_target(room: Room, roll: RollPayload, target: CharacterSheet) -> RollResolution:
+    source = source_sheet_for_roll(room, roll)
+    target_save_outcomes = [] if roll.conditionEffects and not target_creature_type_matches(roll, target) else resolve_target_save_prerequisite_effects(roll, target)
+    source_check_outcomes = resolve_source_check_condition_effects(roll, source, target)
+    response_rolls = dedupe_response_rolls(
+        [
+            *(response_roll for _outcome, _condition, response_roll in target_save_outcomes if response_roll is not None),
+            *(response_roll for _outcome, _condition, response_rolls_for_effect in source_check_outcomes for response_roll in response_rolls_for_effect),
+        ]
+    )
+    outcomes = [outcome for outcome, _condition, _response_roll in target_save_outcomes]
+    outcomes.extend(outcome for outcome, _condition, _response_rolls in source_check_outcomes)
+    if roll.conditionEffects and not target_creature_type_matches(roll, target):
+        outcomes.append(f"has no effect; target is not {creature_type_list_label(roll.targetCreatureTypes or [])}")
+    outcome = "; ".join(outcomes) if outcomes else "no save/check needed"
+    if any(condition is not None for _outcome, condition, _response_roll in target_save_outcomes) or any(condition is not None for _outcome, condition, _response_rolls in source_check_outcomes):
+        outcome = f"{outcome}; resolve successful effect next"
+    else:
+        outcome = f"{outcome}; resolve failed effect next only if needed"
+    return RollResolution(
+        id=f"resolution-{time_ns()}",
+        roll=response_rolls[0] if response_rolls else roll,
+        targetSheetId=target.id,
+        targetTokenId=target.tokenId,
+        targetName=target.name,
+        targetArmorClass=target.armorClass,
+        targetHp=target.hp,
+        targetConditions=target.conditions,
+        outcome=outcome,
+        createdAt=time_ns(),
+        responseRolls=response_rolls or None,
+    )
+
+
+def resolve_target_save_prerequisite_effects(roll: RollPayload, target: CharacterSheet) -> list[tuple[str, ConditionType | None, RollPayload | None]]:
+    outcomes: list[tuple[str, ConditionType | None, RollPayload | None]] = []
     grouped_effects: dict[tuple[AbilityType, int, bool], list[ConditionEffect]] = {}
     for effect in roll.conditionEffects or []:
         if effect.mode != ConditionApplicationMode.TARGET_SAVE or effect.savingThrow is None or effect.saveDc is None:
@@ -2298,6 +2905,49 @@ def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> li
         advantage = poison_protection_save_advantage(target, effect.savingThrow, [effect])
         grouped_effects.setdefault((effect.savingThrow, effect.saveDc, advantage), []).append(effect)
     for (saving_throw, save_dc, advantage), effects in grouped_effects.items():
+        response_roll = response_ability_roll(
+            sheet=target,
+            ability=saving_throw,
+            action_id="save",
+            label=f"{enum_label(saving_throw)} Save",
+            source_label=roll.label,
+            modifier=save_modifier(target, saving_throw),
+            advantage=advantage,
+            advantage_conditions=[ConditionType.PROTECTION_FROM_POISON] if advantage else None,
+        )
+        advantage_label = roll_advantage_log_label(response_roll)
+        forced_failure_conditions = condition_saving_throw_forced_failure_conditions(target, saving_throw)
+        forced_failure_label = f" due to {text_list_label([enum_label(condition) for condition in forced_failure_conditions])}" if forced_failure_conditions else ""
+        condition_label = text_list_label([enum_label(effect.condition) for effect in effects if effect.condition is not None]) or "effect"
+        if forced_failure_conditions or response_roll.total < save_dc:
+            outcomes.append((f"{target.name} fails DC {save_dc} {enum_label(saving_throw)} save{advantage_label}{forced_failure_label} against {condition_label}", effects[0].condition, response_roll))
+        else:
+            outcomes.append((f"{target.name} passes DC {save_dc} {enum_label(saving_throw)} save{advantage_label} against {condition_label}", None, response_roll))
+    return outcomes
+
+
+def resolve_target_save_effects(roll: RollPayload, target: CharacterSheet) -> list[tuple[str, ConditionType | None, RollPayload | None]]:
+    outcomes: list[tuple[str, ConditionType | None, RollPayload | None]] = []
+    grouped_effects: dict[tuple[AbilityType, int, bool], list[ConditionEffect]] = {}
+    for effect in roll.conditionEffects or []:
+        if effect.mode != ConditionApplicationMode.TARGET_SAVE or effect.savingThrow is None or effect.saveDc is None:
+            continue
+        advantage = poison_protection_save_advantage(target, effect.savingThrow, [effect])
+        grouped_effects.setdefault((effect.savingThrow, effect.saveDc, advantage), []).append(effect)
+    for (saving_throw, save_dc, advantage), effects in grouped_effects.items():
+        if roll.conditionEffectSucceeded is not None:
+            resisted_conditions = [effect.condition for effect in effects if effect.condition is not None and condition_immunity_blocks(target, effect.condition)]
+            conditions = [effect.condition for effect in effects if effect.condition is not None and not condition_immunity_blocks(target, effect.condition)]
+            if roll.conditionEffectSucceeded and resisted_conditions:
+                resisted_label = text_list_label([enum_label(condition) for condition in resisted_conditions])
+                outcomes.append((f"{target.name} resists {resisted_label}", None, None))
+            if roll.conditionEffectSucceeded and conditions:
+                condition_label = text_list_label([enum_label(condition) for condition in conditions])
+                outcomes.extend((f"{target.name} previously failed DC {save_dc} {enum_label(saving_throw)} save and gains {condition_label}", condition, None) for condition in conditions)
+            elif conditions:
+                condition_label = text_list_label([enum_label(condition) for condition in conditions])
+                outcomes.append((f"{target.name} previously passed DC {save_dc} {enum_label(saving_throw)} save against {condition_label}", None, None))
+            continue
         response_roll = response_ability_roll(
             sheet=target,
             ability=saving_throw,
@@ -2344,6 +2994,8 @@ def poison_protection_save_advantage(target: CharacterSheet, saving_throw: Abili
 
 
 def condition_immunity_blocks(target: CharacterSheet, condition: ConditionType) -> bool:
+    if ConditionType.CALM_EMOTIONS_IMMUNITY in target.conditions and condition in {ConditionType.CHARMED, ConditionType.FRIGHTENED}:
+        return True
     return condition == ConditionType.FRIGHTENED and ConditionType.HEROISM in target.conditions
 
 
@@ -2370,6 +3022,12 @@ def resolve_source_check_condition_effects(
     outcomes: list[tuple[str, ConditionType | None, list[RollPayload]]] = []
     for effect in roll.conditionEffects or []:
         if effect.mode != ConditionApplicationMode.SOURCE_CHECK or effect.sourceCheck is None or not effect.contestChecks:
+            continue
+        if roll.conditionEffectSucceeded is not None:
+            if roll.conditionEffectSucceeded:
+                outcomes.append((f"{source.name} previously won the contest; {target.name} gains {enum_label(effect.condition)}", effect.condition, []))
+            else:
+                outcomes.append((f"{source.name} previously lost the contest; no {enum_label(effect.condition)}", None, []))
             continue
         source_check = condition_source_check(source, effect)
         target_check = condition_target_contest_check(target, effect)
@@ -2769,6 +3427,7 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.board_id = saved_board_id
     room.next_token_number = next_dynamic_token_number(tokens)
     room.pending_rolls = {}
+    room.pending_resolution_prompts = {}
     room.roll_history = []
     room.hit_points = {}
     room.temporary_hit_points = {}

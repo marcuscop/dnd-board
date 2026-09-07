@@ -89,6 +89,8 @@ export type ConditionType =
   | "bladeWard"
   | "blessed"
   | "blurred"
+  | "calmEmotionsImmunity"
+  | "calmEmotionsIndifferent"
   | "charmed"
   | "commandApproach"
   | "commandDrop"
@@ -98,8 +100,16 @@ export type ConditionType =
   | "darkvision"
   | "dead"
   | "deafened"
+  | "enhanceAbilityCharisma"
+  | "enhanceAbilityDexterity"
+  | "enhanceAbilityIntelligence"
+  | "enhanceAbilityStrength"
+  | "enhanceAbilityWisdom"
+  | "enlarged"
   | "exhaustion"
+  | "expeditiousRetreat"
   | "faerieFire"
+  | "featherFall"
   | "fullCover"
   | "flying"
   | "frightened"
@@ -111,6 +121,8 @@ export type ConditionType =
   | "heroism"
   | "incapacitated"
   | "invisible"
+  | "jump"
+  | "levitating"
   | "longstrider"
   | "mageArmor"
   | "paralyzed"
@@ -120,6 +132,8 @@ export type ConditionType =
   | "poisoned"
   | "prone"
   | "protectionFromPoison"
+  | "rayOfEnfeeblement"
+  | "reduced"
   | "resistantAcid"
   | "resistantBludgeoning"
   | "resistantCold"
@@ -149,7 +163,9 @@ export type ConditionType =
   | "restrained"
   | "shielded"
   | "shieldOfFaith"
+  | "shillelagh"
   | "slowed"
+  | "stable"
   | "stunned"
   | "synapticStatic"
   | "threeQuartersCover"
@@ -161,7 +177,7 @@ export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" |
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
 export type ConditionRemovalTrigger = "afterTakingDamage";
 export type RollModifierEffectOperation = "add" | "subtract";
-export type RollModifierEffectTarget = "abilityCheck" | "attackRoll" | "savingThrow" | "concentrationSave" | "armorClass";
+export type RollModifierEffectTarget = "abilityCheck" | "attackRoll" | "damageRoll" | "savingThrow" | "concentrationSave" | "armorClass";
 export type SpellMaxHitPointReductionMode = "damageTaken";
 export type ConditionEffect = {
   condition?: ConditionType;
@@ -420,6 +436,7 @@ export type AttackAction = {
   attackTypeLabel: string;
   properties: WeaponProperty[];
   propertiesLabel?: string[];
+  activeSpellConditions?: string[];
 };
 
 export type RollAction = {
@@ -802,6 +819,7 @@ export type RollPayload = {
   maxHitPointIncrease?: SpellEffectDice;
   maxHitPointReduction?: SpellMaxHitPointReduction;
   conditionEffects?: ConditionEffect[];
+  conditionEffectSucceeded?: boolean;
   conditionRemovals?: ConditionType[];
   conditionRemovalsLabel?: string[];
   restType?: RestType;
@@ -852,6 +870,30 @@ export type RollResolution = {
   }[];
 };
 
+export type ResolutionInterceptorPrompt = {
+  id: string;
+  interceptorType: string;
+  interceptorTypeLabel: string;
+  trigger: string;
+  triggerLabel: string;
+  sourceRoll: RollPayload;
+  pendingRoll: RollPayload;
+  targetSheetId: string;
+  targetTokenId: string;
+  targetName: string;
+  ownerSheetId: string;
+  ownerTokenId: string;
+  ownerName: string;
+  ownerPlayerKey: string;
+  label: string;
+  description: string;
+  useLabel: string;
+  declineLabel: string;
+  createdAt: number;
+  ignoredInterceptors: string[];
+  responseRolls?: RollPayload[];
+};
+
 export type RollLogEntry = {
   id: string;
   entryType: RollLogEntryType;
@@ -879,6 +921,8 @@ export type ServerMessage =
   | { type: "board_updated"; board: Board }
   | { type: "roll_created"; roll: RollPayload; logEntry: RollLogEntry }
   | { type: "roll_resolved"; rollId: string; tokenId: string; preserveRoll?: boolean; resolution: RollResolution; logEntry: RollLogEntry }
+  | { type: "resolution_prompt_created"; prompt: ResolutionInterceptorPrompt }
+  | { type: "resolution_prompt_resolved"; promptId: string }
   | { type: "roll_blocked"; logEntry: RollLogEntry }
   | { type: "roll_logged"; logEntry: RollLogEntry }
   | { type: "token_lock_denied"; tokenId: string; lockedBy?: string }
