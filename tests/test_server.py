@@ -12,6 +12,7 @@ from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_s
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, RogueSubclassAttackType, RogueSubclassRollActionType, arcane_trickster_catalog_spell
 from dnd_board.rules.classes.rogue.base import RogueSubclassType
+from dnd_board.rules.classes.wizard.base import WizardSubclassType
 from dnd_board.rules.feats import GeneralFeatType, general_feat_feature
 from dnd_board.rules.sources import RuleSource, rule_source_label
 from dnd_board.rules.spells import spell_entry, wizard_spell_entry
@@ -3682,6 +3683,63 @@ def test_level_down_prunes_fighter_feat_improvements(tmp_path, monkeypatch) -> N
     assert "actor" not in {feature["id"] for feature in sheet["features"]}
 
 
+def test_wizard_level_up_preserves_existing_cantrips_before_new_cantrip_choice(tmp_path, monkeypatch) -> None:
+    cantrip_ids = [SpellId.FIRE_BOLT, SpellId.LIGHT, SpellId.MAGE_HAND]
+    prepared_ids = [SpellId.BURNING_HANDS, SpellId.SHIELD, SpellId.MAGIC_MISSILE, SpellId.CHARM_PERSON, SpellId.SLEEP, SpellId.FIND_FAMILIAR]
+    spellbook_ids = [
+        SpellId.BURNING_HANDS,
+        SpellId.SHIELD,
+        SpellId.MAGIC_MISSILE,
+        SpellId.CHARM_PERSON,
+        SpellId.SLEEP,
+        SpellId.FIND_FAMILIAR,
+        SpellId.ALARM,
+        SpellId.COLOR_SPRAY,
+        SpellId.CHROMATIC_ORB,
+        SpellId.IDENTIFY,
+    ]
+    write_party_campaign(
+        tmp_path,
+        "wizard-cantrip-level-up-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Level Wizard",
+            maxHp=24,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=3, subclass=WizardSubclassType.ABJURER)],
+                skills={
+                    enum_key(SkillType.ARCANA): ProficiencyLevel.PROFICIENT,
+                    enum_key(SkillType.HISTORY): ProficiencyLevel.PROFICIENT,
+                },
+                spells=[spell for spell_id in [*cantrip_ids, *prepared_ids] if (spell := wizard_spell_entry(spell_id)) is not None],
+                spellbook=[spell for spell_id in spellbook_ids if (spell := wizard_spell_entry(spell_id)) is not None],
+                hitPointIncreases=[4, 4],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    leveled = client.post("/api/rooms/wizard-cantrip-level-up-test/sheet/player-1/level?playerKey=dm&delta=1&className=wizard")
+    sheet = leveled.json()["sheet"]
+    cantrip_choice = next(choice for choice in sheet["pendingChoices"] if choice["id"] == "wizardCantrips")
+
+    assert leveled.status_code == 200
+    assert cantrip_choice["selected"] == ["fireBolt", "light", "mageHand"]
+
+    applied = client.post(
+        "/api/rooms/wizard-cantrip-level-up-test/sheet/player-1/choices/wizardCantrips?playerKey=player-1",
+        json={"values": [*cantrip_choice["selected"], "minorIllusion"]},
+    )
+    sheet = applied.json()["sheet"]
+    cantrips = [spell["id"] for spell in sheet["spells"] if spell["source"] == "wizard" and spell["level"] == 0]
+
+    assert applied.status_code == 200
+    assert cantrips == ["fireBolt", "light", "mageHand", "minorIllusion"]
+    assert "wizardCantrips" not in {choice["id"] for choice in sheet["pendingChoices"]}
+
+
 def test_player_can_choose_eldritch_knight_spells(tmp_path, monkeypatch) -> None:
     write_party_campaign(
         tmp_path,
@@ -5374,11 +5432,26 @@ def test_member_spell_pruning_paths() -> None:
             reset=mage_hand.reset,
         ),
     )
+    eldritch_knight_shield = replace(
+        shield,
+        status=SpellStatus(
+            source=SpellSource.ELDRITCH_KNIGHT,
+            castingAbility=shield.castingAbility,
+            resourceId=shield.resourceId,
+            reset=shield.reset,
+        ),
+    )
+    wizard_shield = shield
 
     fighter_member = PartyMemberConfig(
         id="player-1",
         name="Not EK",
-        sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.CHAMPION)], spells=[shield]),
+        sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.CHAMPION)], spells=[eldritch_knight_shield]),
+    )
+    wizard_spell_member = PartyMemberConfig(
+        id="player-2",
+        name="Wizard Spell",
+        sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.CHAMPION)], spells=[wizard_shield]),
     )
     rogue_member = PartyMemberConfig(
         id="player-1",
@@ -5389,8 +5462,10 @@ def test_member_spell_pruning_paths() -> None:
     server.prune_member_eldritch_knight_spells(PartyMemberConfig(id="player-1", name="No Sheet"))
     server.prune_member_arcane_trickster_spells(PartyMemberConfig(id="player-1", name="No Spells", sheet=PartyMemberSheet()))
     server.prune_member_eldritch_knight_spells(fighter_member)
+    server.prune_member_eldritch_knight_spells(wizard_spell_member)
     server.prune_member_arcane_trickster_spells(rogue_member)
     assert fighter_member.sheet.spells is None
+    assert wizard_spell_member.sheet.spells == [wizard_shield]
     assert rogue_member.sheet.spells is None
 
 

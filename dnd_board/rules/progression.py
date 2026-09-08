@@ -681,8 +681,16 @@ def wizard_progression_choices(wizard: CharacterClassLevel | None, spells: list[
     if wizard is None:
         return []
     wizard_spells = [spell for spell in spells if spell.source == SpellSource.WIZARD]
-    wizard_spellbook = [spell for spell in spellbook or [] if spell.source == SpellSource.WIZARD and spell.level > 0]
-    selected_cantrips = [spell for spell in wizard_spells if spell.level == 0]
+    cantrip_options = wizard_cantrip_options(wizard.level)
+    spellbook_options = wizard_spellbook_spell_options(wizard.level)
+    cantrip_option_ids = {spell.id for spell in cantrip_options}
+    spellbook_option_ids = {spell.id for spell in spellbook_options}
+    wizard_spellbook = [
+        spell
+        for spell in spellbook or []
+        if spell.source == SpellSource.WIZARD and spell.level > 0 and spell.id in spellbook_option_ids
+    ]
+    selected_cantrips = [spell for spell in wizard_spells if spell.level == 0 and spell.id in cantrip_option_ids]
     selected_prepared_spells = [spell for spell in wizard_spells if spell.level > 0]
     cantrip_count = wizard_cantrip_count(wizard)
     spellbook_spell_count = wizard_spellbook_spell_count(wizard)
@@ -697,7 +705,7 @@ def wizard_progression_choices(wizard: CharacterClassLevel | None, spells: list[
             minimum=cantrip_count,
             maximum=cantrip_count,
             selected=[enum_key(spell.id) for spell in selected_cantrips],
-            options=[ProgressionChoiceOption(value=enum_key(spell.id), label=spell_option_label(spell)) for spell in wizard_cantrip_options(wizard.level)],
+            options=[ProgressionChoiceOption(value=enum_key(spell.id), label=spell_option_label(spell)) for spell in cantrip_options],
         ))
     if len(wizard_spellbook) < spellbook_spell_count:
         choices.append(ProgressionChoice(
@@ -708,7 +716,7 @@ def wizard_progression_choices(wizard: CharacterClassLevel | None, spells: list[
             minimum=spellbook_spell_count,
             maximum=spellbook_spell_count,
             selected=[enum_key(spell.id) for spell in wizard_spellbook],
-            options=[ProgressionChoiceOption(value=enum_key(spell.id), label=spell_option_label(spell)) for spell in wizard_spellbook_spell_options(wizard.level)],
+            options=[ProgressionChoiceOption(value=enum_key(spell.id), label=spell_option_label(spell)) for spell in spellbook_options],
         ))
     if len(wizard_spellbook) >= spellbook_spell_count and len(selected_prepared_spells) < prepared_spell_count:
         choices.append(ProgressionChoice(

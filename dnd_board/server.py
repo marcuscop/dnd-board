@@ -4435,7 +4435,11 @@ def prune_member_eldritch_knight_spells(member: PartyMemberConfig) -> None:
 
     fighter = next((character_class for character_class in member_sheet_classes(member) if character_class.name == ClassType.FIGHTER), None)
     if fighter is None or fighter.subclass != FighterSubclassType.ELDRITCH_KNIGHT or fighter.level < 3:
-        member.sheet.spells = [spell for spell in member.sheet.spells if eldritch_knight_catalog_spell(spell.id) is None] or None
+        member.sheet.spells = [
+            spell
+            for spell in member.sheet.spells
+            if spell.source != SpellSource.ELDRITCH_KNIGHT or eldritch_knight_catalog_spell(spell.id) is None
+        ] or None
         return
 
     eldritch_knight_spells = [spell for spell in member.sheet.spells if eldritch_knight_catalog_spell(spell.id) is not None]

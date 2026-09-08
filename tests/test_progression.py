@@ -1,6 +1,9 @@
-from dnd_board.character_sheet import ArcaneShotType, BattleMasterManeuverType, CharacterClassLevel, ClassType, FightingStyleType, RuneType
+from dataclasses import replace
+
+from dnd_board.character_sheet import ArcaneShotType, BattleMasterManeuverType, CharacterClassLevel, ClassType, FightingStyleType, RuneType, SpellId, SpellSource, SpellStatus
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.rogue.base import RogueSubclassType
+from dnd_board.rules.spells import spell_entry, wizard_spell_entry
 from dnd_board.rules.progression import (
     ProgressionChoiceId,
     apply_progression_choice,
@@ -12,6 +15,7 @@ from dnd_board.rules.progression import (
     selected_enum_keys,
     unique_values,
     update_class_level,
+    wizard_progression_choices,
 )
 
 
@@ -95,3 +99,27 @@ def test_progression_value_helpers_filter_duplicates_and_invalid_values() -> Non
     assert selected_enum_keys([FightingStyleType.DEFENSE, FightingStyleType.DEFENSE, FightingStyleType.DUELING]) == ["defense", "dueling"]
     assert parse_enum_values(FightingStyleType, ["defense", "defense", "not-real"]) == [FightingStyleType.DEFENSE]
     assert unique_values(["a", "a", "b"]) == ["a", "b"]
+
+
+def test_wizard_progression_choices_ignore_invalid_hidden_cantrip_selections() -> None:
+    guidance = spell_entry(SpellId.GUIDANCE)
+    resistance = spell_entry(SpellId.RESISTANCE)
+    shillelagh = spell_entry(SpellId.SHILLELAGH)
+    fire_bolt = wizard_spell_entry(SpellId.FIRE_BOLT)
+    assert guidance is not None
+    assert resistance is not None
+    assert shillelagh is not None
+    assert fire_bolt is not None
+    stale_cantrips = [
+        replace(spell, status=SpellStatus(source=SpellSource.WIZARD, castingAbility=spell.castingAbility))
+        for spell in (guidance, resistance, shillelagh)
+    ]
+
+    choices = wizard_progression_choices(
+        CharacterClassLevel(name=ClassType.WIZARD, level=4),
+        [*stale_cantrips, fire_bolt],
+    )
+    cantrip_choice = next(choice for choice in choices if choice.id == "wizardCantrips")
+
+    assert cantrip_choice.maximum == 4
+    assert cantrip_choice.selected == ["fireBolt"]
