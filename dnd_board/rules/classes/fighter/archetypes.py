@@ -7,8 +7,6 @@ from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
     ArcaneShotType,
-    ConditionEffect,
-    ConditionApplicationMode,
     ConditionType,
     DamageType,
     DiceType,
@@ -45,6 +43,21 @@ from dnd_board.character_sheet import (
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.fighter.base import fighter_subclass_label
 from dnd_board.rules.classes.fighter.battle_master import battle_master_features
+from dnd_board.rules.shared.effects import (
+    ApplyEffect,
+    ConditionChangeEffect,
+    ConditionOperation,
+    DamageEffect,
+    DifficultyClass,
+    DifficultyClassType,
+    EffectNode,
+    EffectTarget,
+    FeatureMechanics,
+    FixedAmount,
+    SavingThrow,
+    SavingThrowEffect,
+    SequenceEffect,
+)
 
 
 class ChampionFeatureType(Enum):
@@ -214,7 +227,33 @@ class SubclassFeatureProgression:
     minimum_level: int
     activation: TimeEconomy
     description: str
-    conditionEffects: tuple[ConditionEffect, ...] = ()
+    mechanics: FeatureMechanics | None = None
+
+
+def saving_throw_effect(
+    saving_ability: AbilityType,
+    dc_ability: AbilityType,
+    on_failure: EffectNode,
+) -> SavingThrowEffect:
+    return SavingThrowEffect(
+        SavingThrow(
+            saving_ability,
+            DifficultyClass(DifficultyClassType.SOURCE_ABILITY, ability=dc_ability),
+        ),
+        onFailure=on_failure,
+    )
+
+
+def save_condition_mechanics(
+    saving_ability: AbilityType,
+    dc_ability: AbilityType,
+    condition: ConditionType,
+) -> FeatureMechanics:
+    return FeatureMechanics(activatedEffects=[saving_throw_effect(
+        saving_ability,
+        dc_ability,
+        ApplyEffect(ConditionChangeEffect(condition, ConditionOperation.ADD)),
+    )])
 
 
 @dataclass(frozen=True)
@@ -710,14 +749,10 @@ SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
         minimum_level=15,
         activation=TimeEconomy.SPECIAL,
         description="Once on each of your turns, if you move at least 10 feet straight before hitting a creature with an attack, it must pass a Strength save or fall prone.",
-        conditionEffects=(
-            ConditionEffect(
-                condition=ConditionType.PRONE,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.STRENGTH,
-                saveDcAbility=AbilityType.STRENGTH,
-                description="After you move 10 feet straight and hit, the target falls prone on a failed Strength save.",
-            ),
+        mechanics=save_condition_mechanics(
+            AbilityType.STRENGTH,
+            AbilityType.STRENGTH,
+            ConditionType.PRONE,
         ),
     ),
     SubclassFeatureProgression(
@@ -1020,18 +1055,10 @@ SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
         minimum_level=7,
         activation=TimeEconomy.ACTION,
         description="See and hear through your echo for up to 10 minutes while you are deafened and blinded; during this use, the echo can be up to 1,000 feet away.",
-        conditionEffects=(
-            ConditionEffect(
-                condition=ConditionType.DEAFENED,
-                mode=ConditionApplicationMode.MANUAL,
-                description="While seeing and hearing through your echo, you are deafened to your own senses.",
-            ),
-            ConditionEffect(
-                condition=ConditionType.BLINDED,
-                mode=ConditionApplicationMode.MANUAL,
-                description="While seeing and hearing through your echo, you are blinded to your own senses.",
-            ),
-        ),
+        mechanics=FeatureMechanics(activatedEffects=[SequenceEffect([
+            ApplyEffect(ConditionChangeEffect(ConditionType.DEAFENED, ConditionOperation.ADD, EffectTarget.SOURCE)),
+            ApplyEffect(ConditionChangeEffect(ConditionType.BLINDED, ConditionOperation.ADD, EffectTarget.SOURCE)),
+        ])]),
     ),
     SubclassFeatureProgression(
         subclass=FighterSubclassType.ECHO_KNIGHT,
@@ -1067,14 +1094,10 @@ SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
         minimum_level=7,
         activation=TimeEconomy.SPECIAL,
         description="Gain Psi-Powered Leap and Telekinetic Thrust. Telekinetic Thrust can knock a Psionic Strike target prone or move it on a failed Strength save.",
-        conditionEffects=(
-            ConditionEffect(
-                condition=ConditionType.PRONE,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.STRENGTH,
-                saveDcAbility=AbilityType.INTELLIGENCE,
-                description="After Psionic Strike deals damage, Telekinetic Thrust can knock the target prone on a failed Strength save.",
-            ),
+        mechanics=save_condition_mechanics(
+            AbilityType.STRENGTH,
+            AbilityType.INTELLIGENCE,
+            ConditionType.PRONE,
         ),
     ),
     SubclassFeatureProgression(
@@ -1447,7 +1470,7 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                         source=enum_label(FighterSubclassType.PSI_WARRIOR),
                         resolution=RollResolutionMode.APPLY_DAMAGE,
                         damageType=DamageType.FORCE,
-                        conditionEffects=psionic_strike_condition_effects(fighter_level_value),
+                        mechanics=psionic_strike_mechanics(fighter_level_value),
                     ),
                 ],
                 source=enum_label(FighterSubclassType.PSI_WARRIOR),
@@ -1624,7 +1647,7 @@ def fighter_subclass_abilities(classes) -> list[SheetAbility]:
                     description=rune_ability_description(rune),
                     resourceId=enum_key(rune),
                     rollActions=rune_roll_actions(rune),
-                    conditionEffects=rune_condition_effects(rune),
+                    mechanics=rune_mechanics(rune),
                 )
             )
     if subclass == FighterSubclassType.RUNE_KNIGHT and fighter_level_value >= 7:
@@ -1925,7 +1948,7 @@ def resource_ability(
     *,
     ability_id: str | None = None,
     ability_name: str | None = None,
-    conditionEffects: list[ConditionEffect] | None = None,
+    mechanics: FeatureMechanics | None = None,
 ) -> SheetAbility:
     return SheetAbility(
         id=ability_id or enum_key(resource_type),
@@ -1934,7 +1957,7 @@ def resource_ability(
         activation=activation,
         description=description,
         resourceId=enum_key(resource_type),
-        conditionEffects=conditionEffects,
+        mechanics=mechanics,
     )
 
 
@@ -1967,13 +1990,26 @@ def subclass_feature(progression: SubclassFeatureProgression, fighter_level_valu
     if progression.subclass == FighterSubclassType.ELDRITCH_KNIGHT and progression.featureType == EldritchKnightFeatureType.SPELLCASTING:
         spellcasting = eldritch_knight_spellcasting(fighter_level_value)
         description = f"{description} You know {spellcasting.cantrips_known} cantrips and prepare {spellcasting.spells_known} leveled spells."
+    roll_actions = None
+    if progression.mechanics is not None and progression.mechanics.activatedEffects:
+        roll_actions = [RollAction(
+            id=progression.featureType,
+            name=progression.featureType,
+            diceCount=0,
+            diceType=DiceType.D20,
+            activation=progression.activation,
+            source=fighter_subclass_label(progression.subclass),
+            description=description,
+            mechanics=progression.mechanics,
+        )]
     return SheetFeature(
         id=enum_key(progression.featureType),
         name=enum_label(progression.featureType),
         source=fighter_subclass_label(progression.subclass),
         activation=progression.activation,
         description=description,
-        conditionEffects=list(progression.conditionEffects) or None,
+        rollActions=roll_actions,
+        mechanics=progression.mechanics,
     )
 
 
@@ -1992,7 +2028,7 @@ def arcane_shot_roll_actions(arcane_shot: ArcaneShotType, fighter_level_value: i
             source=enum_label(FighterSubclassType.ARCANE_ARCHER),
             resolution=RollResolutionMode.APPLY_DAMAGE,
             damageType=damage_type,
-            conditionEffects=arcane_shot_condition_effects(arcane_shot),
+            mechanics=arcane_shot_mechanics(arcane_shot),
         )
     ]
 
@@ -2018,78 +2054,53 @@ def arcane_shot_damage_type(arcane_shot: ArcaneShotType) -> DamageType | None:
     }.get(arcane_shot)
 
 
-def arcane_shot_condition_effects(arcane_shot: ArcaneShotType) -> list[ConditionEffect] | None:
-    effects = {
-        ArcaneShotType.BANISHING_ARROW: [
-            ConditionEffect(
-                condition=None,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.CHARISMA,
-                saveDcAbility=AbilityType.INTELLIGENCE,
-                description="On a failed Charisma save, the target is banished until the end of its next turn.",
-            )
-        ],
-        ArcaneShotType.BEGUILING_ARROW: [
-            ConditionEffect(
-                condition=ConditionType.CHARMED,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.WISDOM,
-                saveDcAbility=AbilityType.INTELLIGENCE,
-                description="On a failed Wisdom save, the target is charmed by an ally until the start of your next turn.",
-            )
-        ],
-        ArcaneShotType.ENFEEBLING_ARROW: [
-            ConditionEffect(
-                condition=None,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.CONSTITUTION,
-                saveDcAbility=AbilityType.INTELLIGENCE,
-                description="On a failed Constitution save, the target's weapon attack damage is halved until your next turn.",
-            )
-        ],
-        ArcaneShotType.PIERCING_ARROW: [
-            ConditionEffect(
-                condition=None,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.DEXTERITY,
-                saveDcAbility=AbilityType.INTELLIGENCE,
-                description="On a successful Dexterity save, the target takes half damage.",
-            )
-        ],
-        ArcaneShotType.SEEKING_ARROW: [
-            ConditionEffect(
-                condition=None,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.DEXTERITY,
-                saveDcAbility=AbilityType.INTELLIGENCE,
-                description="On a successful Dexterity save, the target takes half damage.",
-            )
-        ],
-        ArcaneShotType.SHADOW_ARROW: [
-            ConditionEffect(
-                condition=ConditionType.BLINDED,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.WISDOM,
-                saveDcAbility=AbilityType.INTELLIGENCE,
-                description="On a failed Wisdom save, the target cannot see farther than 5 feet until the start of your next turn.",
-            )
-        ],
+def arcane_shot_mechanics(arcane_shot: ArcaneShotType) -> FeatureMechanics:
+    damage_type = arcane_shot_damage_type(arcane_shot)
+    damage = ApplyEffect(DamageEffect(FixedAmount(0), damage_type))
+    save_conditions = {
+        ArcaneShotType.BANISHING_ARROW: (AbilityType.CHARISMA, ConditionType.BANISHED),
+        ArcaneShotType.BEGUILING_ARROW: (AbilityType.WISDOM, ConditionType.CHARMED),
+        ArcaneShotType.SHADOW_ARROW: (AbilityType.WISDOM, ConditionType.BLINDED),
     }
-    return effects.get(arcane_shot)
+    if arcane_shot in save_conditions:
+        saving_ability, condition = save_conditions[arcane_shot]
+        return FeatureMechanics(activatedEffects=[SequenceEffect([
+            damage,
+            saving_throw_effect(
+                saving_ability,
+                AbilityType.INTELLIGENCE,
+                ApplyEffect(ConditionChangeEffect(condition, ConditionOperation.ADD)),
+            ),
+        ])])
+    if arcane_shot in {ArcaneShotType.PIERCING_ARROW, ArcaneShotType.SEEKING_ARROW}:
+        return FeatureMechanics(activatedEffects=[SavingThrowEffect(
+            SavingThrow(
+                AbilityType.DEXTERITY,
+                DifficultyClass(DifficultyClassType.SOURCE_ABILITY, ability=AbilityType.INTELLIGENCE),
+            ),
+            onFailure=damage,
+            onSuccess=ApplyEffect(DamageEffect(
+                FixedAmount(0),
+                damage_type,
+                multiplierNumerator=1,
+                multiplierDenominator=2,
+            )),
+        )])
+    return FeatureMechanics(activatedEffects=[damage])
 
 
-def psionic_strike_condition_effects(fighter_level_value: int) -> list[ConditionEffect] | None:
+def psionic_strike_mechanics(fighter_level_value: int) -> FeatureMechanics:
+    damage = ApplyEffect(DamageEffect(FixedAmount(0), DamageType.FORCE))
     if fighter_level_value < 7:
-        return None
-    return [
-        ConditionEffect(
-            condition=ConditionType.PRONE,
-            mode=ConditionApplicationMode.TARGET_SAVE,
-            savingThrow=AbilityType.STRENGTH,
-            saveDcAbility=AbilityType.INTELLIGENCE,
-            description="After Psionic Strike deals damage, Telekinetic Thrust can knock the target prone on a failed Strength save.",
-        )
-    ]
+        return FeatureMechanics(activatedEffects=[damage])
+    return FeatureMechanics(activatedEffects=[SequenceEffect([
+        damage,
+        saving_throw_effect(
+            AbilityType.STRENGTH,
+            AbilityType.INTELLIGENCE,
+            ApplyEffect(ConditionChangeEffect(ConditionType.PRONE, ConditionOperation.ADD)),
+        ),
+    ])])
 
 
 def arcane_shot_description(arcane_shot: ArcaneShotType, fighter_level_value: int) -> str:
@@ -2142,25 +2153,17 @@ def rune_ability_description(rune: RuneType) -> str:
     return descriptions[rune]
 
 
-def rune_condition_effects(rune: RuneType) -> list[ConditionEffect] | None:
+def rune_mechanics(rune: RuneType) -> FeatureMechanics | None:
     if rune != RuneType.STONE_RUNE:
         return None
-    return [
-        ConditionEffect(
-            condition=ConditionType.CHARMED,
-            mode=ConditionApplicationMode.TARGET_SAVE,
-            savingThrow=AbilityType.WISDOM,
-            saveDcAbility=AbilityType.CONSTITUTION,
-            description="On a failed Wisdom save, the target is charmed by Stone Rune for 1 minute.",
-        ),
-        ConditionEffect(
-            condition=ConditionType.INCAPACITATED,
-            mode=ConditionApplicationMode.TARGET_SAVE,
-            savingThrow=AbilityType.WISDOM,
-            saveDcAbility=AbilityType.CONSTITUTION,
-            description="On a failed Wisdom save, the target is incapacitated by Stone Rune for 1 minute.",
-        ),
-    ]
+    return FeatureMechanics(activatedEffects=[saving_throw_effect(
+        AbilityType.WISDOM,
+        AbilityType.CONSTITUTION,
+        SequenceEffect([
+            ApplyEffect(ConditionChangeEffect(ConditionType.CHARMED, ConditionOperation.ADD)),
+            ApplyEffect(ConditionChangeEffect(ConditionType.INCAPACITATED, ConditionOperation.ADD)),
+        ]),
+    )])
 
 
 def rune_roll_actions(rune: RuneType) -> list[RollAction] | None:
@@ -2176,15 +2179,14 @@ def rune_roll_actions(rune: RuneType) -> list[RollAction] | None:
             source=enum_label(FighterSubclassType.RUNE_KNIGHT),
             resolution=RollResolutionMode.APPLY_DAMAGE,
             damageType=DamageType.FIRE,
-            conditionEffects=[
-                ConditionEffect(
-                    condition=ConditionType.RESTRAINED,
-                    mode=ConditionApplicationMode.TARGET_SAVE,
-                    savingThrow=AbilityType.STRENGTH,
-                    saveDcAbility=AbilityType.CONSTITUTION,
-                    description="On a failed Strength save, the target is restrained by fiery shackles.",
-                )
-            ],
+            mechanics=FeatureMechanics(activatedEffects=[SequenceEffect([
+                ApplyEffect(DamageEffect(FixedAmount(0), DamageType.FIRE)),
+                saving_throw_effect(
+                    AbilityType.STRENGTH,
+                    AbilityType.CONSTITUTION,
+                    ApplyEffect(ConditionChangeEffect(ConditionType.RESTRAINED, ConditionOperation.ADD)),
+                ),
+            ])]),
         )
     ]
 

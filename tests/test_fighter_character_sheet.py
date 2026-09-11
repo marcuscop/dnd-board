@@ -13,7 +13,7 @@ from dnd_board.character_sheet import (
     BattleMasterManeuverType,
     CharacterClassLevel,
     ClassType,
-    ConditionApplicationMode,
+    ConditionType,
     DamageType,
     DiceType,
     EquipmentItem,
@@ -55,9 +55,7 @@ from dnd_board.rules.feats import (
     BackgroundPrerequisiteType,
     FIGHTING_STYLE_FEATS,
     FeatCharacterFeatureType,
-    FeatEffect,
     FeatCategory,
-    FeatEffectType,
     FeatPrerequisiteType,
     FeatPrerequisite,
     GENERAL_FEATS,
@@ -65,11 +63,6 @@ from dnd_board.rules.feats import (
     GiantStrikeType,
     WeaponProficiencyType,
     armor_class_bonus,
-    armor_class_bonus_applies,
-    attack_roll_bonus_applies,
-    damage_ability_modifier_applies,
-    damage_dice_reroll_applies,
-    damage_roll_bonus_applies,
     feat_abilities,
     feat_prerequisite_label,
     feat_prerequisite_met,
@@ -104,6 +97,12 @@ from dnd_board.rules.classes.fighter.archetypes import (
 from dnd_board.rules.classes.fighter.battle_master import BATTLE_MASTER_2024_MANEUVERS, BATTLE_MASTER_MANEUVERS
 from dnd_board.rules.classes.fighter.battle_master import battle_master_features
 from dnd_board.rules.shared.combat_superiority import selected_battle_master_maneuvers
+from dnd_board.rules.shared.character_effects import (
+    added_condition_types,
+    condition_change_effects,
+    first_contested_check_effect,
+    first_saving_throw_effect,
+)
 
 
 def test_fighter_progression_resources_level_1_to_20() -> None:
@@ -177,14 +176,12 @@ def test_fighting_style_defense_does_not_apply_without_worn_armor() -> None:
     assert sheet.armorClass == 13
 
 
-def test_fighting_style_interception_adds_rollable_ability() -> None:
+def test_fighting_style_interception_adds_reactive_feature_mechanics() -> None:
     sheet = fighter_sheet(1, fighting_style=FightingStyleType.INTERCEPTION)
-    abilities = {ability.id: ability for ability in sheet.abilities}
+    features = {feature.id: feature for feature in sheet.features}
 
-    assert "interception" in abilities
-    assert abilities["interception"].activation == abilities["interception"].activation.REACTION
-    assert abilities["interception"].rollActions
-    assert abilities["interception"].rollActions[0].modifier.name == "PROFICIENCY_BONUS"
+    assert features["interception"].mechanics is not None
+    assert len(features["interception"].mechanics.interactions) == 1
 
 
 def test_all_fighting_styles_expose_sheet_entries() -> None:
@@ -209,7 +206,7 @@ def test_fighting_style_helpers_ignore_duplicate_or_missing_definitions(monkeypa
 
     monkeypatch.delitem(FIGHTING_STYLE_FEATS, FightingStyleType.DEFENSE)
     assert fighting_style_features(classes)[0].id == "interception"
-    assert feat_abilities(classes)[0].id == "interception"
+    assert feat_abilities(classes) == []
     assert armor_class_bonus(classes, [chain_mail()]) == 0
 
 
@@ -377,26 +374,6 @@ def test_epic_boon_feat_resources_and_legacy_speed_bonus_are_reflected() -> None
     assert feat_speed_bonus(feats) == 10
 
 
-def test_feat_predicates_return_false_for_unscoped_effects() -> None:
-    attack = AttackAction(
-        id="club",
-        name="Club",
-        ability=AbilityType.STRENGTH,
-        damageDiceCount=1,
-        damageDiceType=DiceType.D4,
-    )
-    unscoped_attack_bonus = FeatEffect(FeatEffectType.ATTACK_ROLL_BONUS)
-    unscoped_damage_bonus = FeatEffect(FeatEffectType.DAMAGE_ROLL_BONUS)
-    unscoped_damage_ability = FeatEffect(FeatEffectType.DAMAGE_ABILITY_MODIFIER)
-    unscoped_dice_reroll = FeatEffect(FeatEffectType.DAMAGE_DICE_REROLL)
-
-    assert attack_roll_bonus_applies(unscoped_attack_bonus, attack) is False
-    assert damage_roll_bonus_applies(unscoped_damage_bonus, [], attack) is False
-    assert damage_ability_modifier_applies(unscoped_damage_ability, attack) is False
-    assert damage_dice_reroll_applies(unscoped_dice_reroll, attack) is False
-    assert armor_class_bonus_applies(FightingStyleType.PROTECTION, []) is True
-
-
 def test_fighting_style_archery_adds_attack_roll_bonus_with_breakdown(monkeypatch) -> None:
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
     sheet = fighter_sheet_with_attacks(
@@ -434,9 +411,7 @@ def test_automatic_fighting_styles_are_modeled_as_mechanical_effects() -> None:
     }
 
     for style in automatic_styles:
-        effect_types = {effect.effectType for effect in FIGHTING_STYLE_FEATS[style].effects}
-
-        assert effect_types != {FeatEffectType.DESCRIPTION_ONLY}
+        assert FIGHTING_STYLE_FEATS[style].mechanics.passiveModifiers
 
 
 def test_fighting_style_close_quarters_shooter_adds_attack_roll_bonus_with_breakdown(monkeypatch) -> None:
@@ -755,11 +730,10 @@ def test_configured_armor_class_is_static_base_for_conditional_style_bonuses() -
 
 def test_fighting_style_superior_technique_adds_short_rest_superiority_die() -> None:
     sheet = fighter_sheet(1, fighting_style=FightingStyleType.SUPERIOR_TECHNIQUE)
-    effect_types = {effect.effectType for effect in FIGHTING_STYLE_FEATS[FightingStyleType.SUPERIOR_TECHNIQUE].effects}
     resources = {resource.id: resource for resource in sheet.resources}
     abilities = {ability.id: ability for ability in sheet.abilities}
 
-    assert effect_types == {FeatEffectType.RESOURCE}
+    assert FIGHTING_STYLE_FEATS[FightingStyleType.SUPERIOR_TECHNIQUE].mechanics.passiveModifiers == []
     assert "superiorityDice" in resources
     resource = resources["superiorityDice"]
     assert resource.currentUses == 1
@@ -818,7 +792,7 @@ def test_resource_roll_abilities_use_parent_rule_source() -> None:
 
     assert abilities["secondWindHeal"].source == "Fighter"
     assert abilities["tacticalMind"].source == "Fighter"
-    assert abilities["interception"].source == "Fighting Style"
+    assert "interception" not in abilities
 
 
 def test_battle_master_superior_technique_adds_one_scaled_superiority_die() -> None:
@@ -909,20 +883,24 @@ def test_fighter_roll_actions_encode_condition_effects() -> None:
         for action in ability.rollActions or []
     }
 
-    grappling_effect = actions[BattleMasterManeuverType.GRAPPLING_STRIKE].conditionEffects[0]
-    assert grappling_effect.condition.name == "GRAPPLED"
-    assert grappling_effect.mode == ConditionApplicationMode.SOURCE_CHECK
-    assert grappling_effect.sourceCheck == AbilityType.STRENGTH
-    assert grappling_effect.contestChecks == [AbilityType.STRENGTH, AbilityType.DEXTERITY]
-    assert actions[BattleMasterManeuverType.MENACING_ATTACK].conditionEffects[0].condition.name == "FRIGHTENED"
-    assert actions[BattleMasterManeuverType.MENACING_ATTACK].conditionEffects[0].mode == ConditionApplicationMode.TARGET_SAVE
-    assert actions[BattleMasterManeuverType.MENACING_ATTACK].conditionEffects[0].savingThrow == AbilityType.WISDOM
-    assert actions[BattleMasterManeuverType.TRIP_ATTACK].conditionEffects[0].condition.name == "PRONE"
-    assert actions[BattleMasterManeuverType.TRIP_ATTACK].conditionEffects[0].mode == ConditionApplicationMode.TARGET_SAVE
-    assert actions[BattleMasterManeuverType.TRIP_ATTACK].conditionEffects[0].savingThrow == AbilityType.STRENGTH
-    assert arcane_actions[ArcaneShotType.BEGUILING_ARROW].conditionEffects[0].condition.name == "CHARMED"
-    assert arcane_actions[ArcaneShotType.SHADOW_ARROW].conditionEffects[0].condition.name == "BLINDED"
-    assert rune_actions[FighterSubclassRollActionType.FIRE_RUNE_SHACKLES].conditionEffects[0].condition.name == "RESTRAINED"
+    grappling_action = actions[BattleMasterManeuverType.GRAPPLING_STRIKE]
+    grappling_effect = first_contested_check_effect(grappling_action.mechanics.activatedEffects[0])[1]
+    assert grappling_effect.contest.sourceCheck.ability == AbilityType.STRENGTH
+    assert [check.ability for check in grappling_effect.contest.targetChecks] == [AbilityType.STRENGTH, AbilityType.DEXTERITY]
+    assert added_condition_types(grappling_effect.onSourceWin) == [ConditionType.GRAPPLED]
+    menacing_action = actions[BattleMasterManeuverType.MENACING_ATTACK]
+    assert first_saving_throw_effect(menacing_action.mechanics.activatedEffects[0]).savingThrow.ability == AbilityType.WISDOM
+    assert added_condition_types(menacing_action.mechanics.activatedEffects[0]) == [ConditionType.FRIGHTENED]
+    trip_action = actions[BattleMasterManeuverType.TRIP_ATTACK]
+    assert first_saving_throw_effect(trip_action.mechanics.activatedEffects[0]).savingThrow.ability == AbilityType.STRENGTH
+    assert added_condition_types(trip_action.mechanics.activatedEffects[0]) == [ConditionType.PRONE]
+    beguiling = arcane_actions[ArcaneShotType.BEGUILING_ARROW]
+    shadow = arcane_actions[ArcaneShotType.SHADOW_ARROW]
+    fire_rune = rune_actions[FighterSubclassRollActionType.FIRE_RUNE_SHACKLES]
+    assert added_condition_types(beguiling.mechanics.activatedEffects[0]) == [ConditionType.CHARMED]
+    assert first_saving_throw_effect(beguiling.mechanics.activatedEffects[0]).savingThrow.ability == AbilityType.WISDOM
+    assert added_condition_types(shadow.mechanics.activatedEffects[0]) == [ConditionType.BLINDED]
+    assert added_condition_types(fire_rune.mechanics.activatedEffects[0]) == [ConditionType.RESTRAINED]
 
 
 def test_fighter_features_and_abilities_encode_condition_effects() -> None:
@@ -934,32 +912,25 @@ def test_fighter_features_and_abilities_encode_condition_effects() -> None:
         for ability in fighter_sheet(3, subclass=FighterSubclassType.RUNE_KNIGHT, runes=[RuneType.STONE_RUNE]).abilities
     }
 
-    ferocious_charger = cavalier_features["ferociousCharger"].conditionEffects[0]
-    assert ferocious_charger.condition.name == "PRONE"
-    assert ferocious_charger.mode == ConditionApplicationMode.TARGET_SAVE
-    assert ferocious_charger.savingThrow == AbilityType.STRENGTH
+    ferocious_charger = cavalier_features["ferociousCharger"].mechanics.activatedEffects[0]
+    assert added_condition_types(ferocious_charger) == [ConditionType.PRONE]
+    assert first_saving_throw_effect(ferocious_charger).savingThrow.ability == AbilityType.STRENGTH
 
-    echo_avatar_effects = {effect.condition.name: effect for effect in echo_features["echoAvatar"].conditionEffects}
-    assert echo_avatar_effects["BLINDED"].mode == ConditionApplicationMode.MANUAL
-    assert echo_avatar_effects["DEAFENED"].mode == ConditionApplicationMode.MANUAL
+    echo_avatar = echo_features["echoAvatar"].mechanics.activatedEffects[0]
+    echo_avatar_effects = condition_change_effects(echo_avatar)
+    assert {effect.condition for effect in echo_avatar_effects} == {ConditionType.BLINDED, ConditionType.DEAFENED}
+    assert all(effect.target.name == "SOURCE" for effect in echo_avatar_effects)
 
-    telekinetic_thrust = psi_features["telekineticAdept"].conditionEffects[0]
-    assert telekinetic_thrust.condition.name == "PRONE"
-    assert telekinetic_thrust.mode == ConditionApplicationMode.TARGET_SAVE
-    assert telekinetic_thrust.savingThrow == AbilityType.STRENGTH
+    telekinetic_thrust = psi_features["telekineticAdept"].mechanics.activatedEffects[0]
+    assert added_condition_types(telekinetic_thrust) == [ConditionType.PRONE]
+    assert first_saving_throw_effect(telekinetic_thrust).savingThrow.ability == AbilityType.STRENGTH
 
-    stone_rune_effects = {effect.condition.name: effect for effect in rune_abilities["stoneRune"].conditionEffects}
-    assert stone_rune_effects["CHARMED"].mode == ConditionApplicationMode.TARGET_SAVE
-    assert stone_rune_effects["INCAPACITATED"].savingThrow == AbilityType.WISDOM
+    stone_rune = rune_abilities["stoneRune"].mechanics.activatedEffects[0]
+    assert added_condition_types(stone_rune) == [ConditionType.CHARMED, ConditionType.INCAPACITATED]
+    assert first_saving_throw_effect(stone_rune).savingThrow.ability == AbilityType.WISDOM
 
 
-def test_fighter_roll_condition_effects_are_automatable() -> None:
-    automated_modes = {
-        ConditionApplicationMode.TARGET_SAVE,
-        ConditionApplicationMode.SOURCE_CHECK,
-        ConditionApplicationMode.DIRECT,
-    }
-
+def test_fighter_roll_actions_use_native_effects() -> None:
     for subclass in FighterSubclassType:
         sheet = fighter_sheet(20, subclass=subclass)
         roll_actions = [
@@ -969,7 +940,7 @@ def test_fighter_roll_condition_effects_are_automatable() -> None:
         ]
 
         for action in roll_actions:
-            assert all(effect.mode in automated_modes for effect in action.conditionEffects or [])
+            assert not hasattr(action, "conditionEffects")
 
 
 def test_battle_master_rally_roll_applies_temporary_hp_with_half_fighter_level() -> None:
@@ -1447,7 +1418,7 @@ def test_fighter_can_have_multiple_fighting_styles() -> None:
 
     assert sheet.armorClass == 17
     assert {"defense", "interception"} <= features.keys()
-    assert "interception" in abilities
+    assert "interception" not in abilities
 
 
 def fighter_sheet(

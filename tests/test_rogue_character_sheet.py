@@ -8,10 +8,14 @@ from dnd_board.character_sheet import (
     DiceType,
     PartyMember,
     PartyMemberSheet,
+    RollSource,
+    SheetSectionType,
+    SpellSaveOutcome,
     SpellId,
     SpellSource,
     TokenKind,
     build_character_sheet,
+    build_roll_action_payload,
     enum_key,
     sheet_to_dict,
     typed_json_from_value,
@@ -38,6 +42,25 @@ def test_rogue_2024_progression_features_and_abilities() -> None:
     assert abilities["sneakAttack"].rollActions[0].diceCount == 7
     assert abilities["sneakAttack"].rollActions[0].diceType == DiceType.D6
     assert {"cunningStrikePoison", "cunningStrikeTrip", "cunningStrikeDaze", "cunningStrikeKnockOut", "cunningStrikeObscure"} <= set(abilities)
+
+
+def test_cunning_strike_uses_native_effect_save_resolution() -> None:
+    sheet = rogue_sheet(5)
+    ability = next(entry for entry in sheet.abilities if entry.id == "cunningStrikePoison")
+    action = ability.rollActions[0]
+
+    roll = build_roll_action_payload(
+        sheet,
+        sheet.owner,
+        RollSource(SheetSectionType.ABILITIES, ability.id, enum_key(action.id)),
+        action,
+    )
+
+    assert not hasattr(roll, "conditionEffects")
+    assert roll.pendingEffect is not None
+    assert roll.damageSavingThrow == AbilityType.CONSTITUTION
+    assert roll.damageSaveDc == 14
+    assert roll.damageSaveOutcome == SpellSaveOutcome.NEGATES
 
 
 def test_rogue_saving_throw_proficiencies_include_slippery_mind() -> None:

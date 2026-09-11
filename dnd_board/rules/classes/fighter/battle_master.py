@@ -7,12 +7,11 @@ from dnd_board.character_sheet import (
     BattleMasterManeuverType,
     CharacterClassLevel,
     AbilityType,
-    ConditionApplicationMode,
-    ConditionEffect,
     ConditionType,
     RollModifierType,
     RollResolutionMode,
     SheetFeature,
+    SkillType,
     TimeEconomy,
     enum_key,
     enum_label,
@@ -32,6 +31,22 @@ from dnd_board.rules.shared.combat_superiority import (
     selected_battle_master_maneuvers,
     superiority_action_definitions,
     superiority_resource_source,
+)
+from dnd_board.rules.shared.effects import (
+    AbilityCheck,
+    ApplyEffect,
+    ConditionChangeEffect,
+    ConditionOperation,
+    ContestedCheck,
+    ContestedCheckEffect,
+    DifficultyClass,
+    DifficultyClassType,
+    EffectNode,
+    FeatureMechanics,
+    MovementEffect,
+    MovementType,
+    SavingThrow,
+    SavingThrowEffect,
 )
 
 
@@ -83,7 +98,20 @@ class BattleMasterManeuverDefinition:
     resolution: RollResolutionMode = RollResolutionMode.NONE
     modifier: RollModifierType = RollModifierType.NONE
     modifierAbility: AbilityType | None = None
-    conditionEffects: tuple[ConditionEffect, ...] = ()
+    mechanics: FeatureMechanics | None = None
+
+
+def maneuver_save_effect(ability: AbilityType, effect: EffectNode) -> FeatureMechanics:
+    return FeatureMechanics(activatedEffects=[SavingThrowEffect(
+        SavingThrow(
+            ability,
+            DifficultyClass(
+                DifficultyClassType.SOURCE_BEST_ABILITY,
+                abilities=[AbilityType.STRENGTH, AbilityType.DEXTERITY],
+            ),
+        ),
+        onFailure=effect,
+    )])
 
 
 @dataclass(frozen=True)
@@ -160,14 +188,6 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
         activation=TimeEconomy.SPECIAL,
         description="When you hit with a weapon attack, expend one superiority die and add it to damage. The target makes a Strength save or drops one held item of your choice at its feet.",
         resolution=RollResolutionMode.APPLY_DAMAGE,
-        conditionEffects=(
-            ConditionEffect(
-                condition=None,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.STRENGTH,
-                description="On a failed Strength save, the target drops one held item of your choice.",
-            ),
-        ),
     ),
     BattleMasterManeuverType.DISTRACTING_STRIKE: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.DISTRACTING_STRIKE,
@@ -191,28 +211,21 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
         activation=TimeEconomy.SPECIAL,
         description="When you hit with a weapon attack, expend one superiority die and add it to damage. The target makes a Wisdom save or has Disadvantage on attack rolls against targets other than you until your next turn ends.",
         resolution=RollResolutionMode.APPLY_DAMAGE,
-        conditionEffects=(
-            ConditionEffect(
-                condition=None,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.WISDOM,
-                description="On a failed Wisdom save, the target has Disadvantage on attack rolls against targets other than you until your next turn ends.",
-            ),
-        ),
     ),
     BattleMasterManeuverType.GRAPPLING_STRIKE: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.GRAPPLING_STRIKE,
         activation=TimeEconomy.BONUS_ACTION,
         description="Immediately after you hit with a melee attack on your turn, expend one superiority die and try to grapple the target as a Bonus Action. Add the die to your Strength (Athletics) check.",
-        conditionEffects=(
-            ConditionEffect(
-                condition=ConditionType.GRAPPLED,
-                mode=ConditionApplicationMode.SOURCE_CHECK,
-                sourceCheck=AbilityType.STRENGTH,
-                contestChecks=[AbilityType.STRENGTH, AbilityType.DEXTERITY],
-                description="Source makes a Strength (Athletics) check with the superiority die; target contests with Strength (Athletics) or Dexterity (Acrobatics). On success, target is grappled.",
+        mechanics=FeatureMechanics(activatedEffects=[ContestedCheckEffect(
+            ContestedCheck(
+                sourceCheck=AbilityCheck(AbilityType.STRENGTH, SkillType.ATHLETICS),
+                targetChecks=[
+                    AbilityCheck(AbilityType.STRENGTH, SkillType.ATHLETICS),
+                    AbilityCheck(AbilityType.DEXTERITY, SkillType.ACROBATICS),
+                ],
             ),
-        ),
+            onSourceWin=ApplyEffect(ConditionChangeEffect(ConditionType.GRAPPLED, ConditionOperation.ADD)),
+        )]),
     ),
     BattleMasterManeuverType.LUNGING_ATTACK: BattleMasterManeuverDefinition(
         maneuverType=BattleMasterManeuverType.LUNGING_ATTACK,
@@ -231,13 +244,9 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
         activation=TimeEconomy.SPECIAL,
         description="When you hit with a weapon attack, expend one superiority die and add it to damage. The target makes a Wisdom save or is frightened of you until your next turn ends.",
         resolution=RollResolutionMode.APPLY_DAMAGE,
-        conditionEffects=(
-            ConditionEffect(
-                condition=ConditionType.FRIGHTENED,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.WISDOM,
-                description="On a failed Wisdom save, the target is frightened of you until your next turn ends.",
-            ),
+        mechanics=maneuver_save_effect(
+            AbilityType.WISDOM,
+            ApplyEffect(ConditionChangeEffect(ConditionType.FRIGHTENED, ConditionOperation.ADD)),
         ),
     ),
     BattleMasterManeuverType.PARRY: BattleMasterManeuverDefinition(
@@ -255,13 +264,9 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
         activation=TimeEconomy.SPECIAL,
         description="When you hit with a weapon attack, expend one superiority die and add it to damage. If the target is Large or smaller, it makes a Strength save or is pushed up to 15 feet away from you.",
         resolution=RollResolutionMode.APPLY_DAMAGE,
-        conditionEffects=(
-            ConditionEffect(
-                condition=None,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.STRENGTH,
-                description="On a failed Strength save, the target is pushed up to 15 feet away from you.",
-            ),
+        mechanics=maneuver_save_effect(
+            AbilityType.STRENGTH,
+            ApplyEffect(MovementEffect(MovementType.FORCED, 15)),
         ),
     ),
     BattleMasterManeuverType.QUICK_TOSS: BattleMasterManeuverDefinition(
@@ -298,13 +303,9 @@ BATTLE_MASTER_MANEUVERS: dict[BattleMasterManeuverType, BattleMasterManeuverDefi
         activation=TimeEconomy.SPECIAL,
         description="When you hit with a weapon attack, expend one superiority die and add it to damage. If the target is Large or smaller, it makes a Strength save or falls prone.",
         resolution=RollResolutionMode.APPLY_DAMAGE,
-        conditionEffects=(
-            ConditionEffect(
-                condition=ConditionType.PRONE,
-                mode=ConditionApplicationMode.TARGET_SAVE,
-                savingThrow=AbilityType.STRENGTH,
-                description="On a failed Strength save, the target falls prone.",
-            ),
+        mechanics=maneuver_save_effect(
+            AbilityType.STRENGTH,
+            ApplyEffect(ConditionChangeEffect(ConditionType.PRONE, ConditionOperation.ADD)),
         ),
     ),
 }

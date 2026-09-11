@@ -10,9 +10,6 @@ from dnd_board.character_sheet import (
     AttackActionType,
     CharacterClassLevel,
     ClassType,
-    ConditionApplicationMode,
-    ConditionEffect,
-    ConditionRemovalTrigger,
     ConditionType,
     CreatureType,
     DamageType,
@@ -44,7 +41,6 @@ from dnd_board.character_sheet import (
     SpellDurationUnit,
     SpellId,
     SpellLineArea,
-    SpellLinkedHealingAmount,
     SpellRangeType,
     RestType,
     SpellSaveOutcome,
@@ -59,10 +55,9 @@ from dnd_board.character_sheet import (
     build_saving_throw_roll_payload,
     build_spell_attack_roll_payload,
     build_spell_condition_roll_payload,
-    build_spell_condition_save_roll_payload,
     build_spell_damage_roll_payload,
-    build_spell_damage_save_roll_payload,
     build_spell_healing_roll_payload,
+    build_spell_temporary_hit_points_roll_payload,
     build_true_strike_attack_roll_payload,
     build_true_strike_damage_roll_payload,
     resolve_roll_against_target,
@@ -86,12 +81,9 @@ from dnd_board.character_sheet import (
     sanitize_identifier,
     saving_throw_total,
     spell_area_label,
-    spell_condition_effect_at,
     spell_target_range_label,
-    spell_damage_effect_at,
     true_strike_weapon_attacks,
     shillelagh_weapon_attacks,
-    scaled_spell_effect_instance_count,
     text_list,
     to_float,
     typed_json_from_value,
@@ -104,7 +96,20 @@ from dnd_board.character_sheet import (
     condition_armor_class_bonus,
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
-from dnd_board.rules.spells import cleric_spell_entry, spell_damage_effect, spell_entry, spell_scaling, wizard_spell_entry
+from dnd_board.rules.shared.character_effects import added_condition_types, condition_change_effects
+from dnd_board.rules.shared.effects import (
+    ApplyEffect,
+    ConditionChangeEffect,
+    ConditionOperation,
+    DifficultyClass,
+    DifficultyClassType,
+    EndingConditionType,
+    FeatureMechanics,
+    SavingThrow,
+    SavingThrowEffect,
+    SequenceEffect,
+)
+from dnd_board.rules.spells import cleric_spell_entry, paladin_spell_entry, spell_damage_effect, spell_entry, spell_scaling, wizard_spell_entry
 
 
 def test_typed_party_manifest_round_trips_config_objects() -> None:
@@ -216,7 +221,7 @@ def test_spell_targeting_summaries_cover_structured_area_shapes() -> None:
     assert SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120, area=cylinder).summary == "120 ft, 10 ft radius x 20 ft cylinder"
 
 
-def test_roll_action_payloads_cover_modifier_and_condition_effect_branches(monkeypatch) -> None:
+def test_roll_action_payloads_cover_modifier_and_native_effect_branches(monkeypatch) -> None:
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 5)
     sheet = basic_sheet()
     source = RollSource(SheetSectionType.ABILITIES, "test", "test")
@@ -234,24 +239,27 @@ def test_roll_action_payloads_cover_modifier_and_condition_effect_branches(monke
             1,
             DiceType.D6,
             resolution=RollResolutionMode.NONE,
-            conditionEffects=[
-                ConditionEffect(ConditionType.PRONE, ConditionApplicationMode.DIRECT),
-                ConditionEffect(ConditionType.FRIGHTENED, ConditionApplicationMode.MANUAL),
-                ConditionEffect(ConditionType.STUNNED, ConditionApplicationMode.TARGET_SAVE, savingThrow=AbilityType.WISDOM),
-            ],
+            mechanics=FeatureMechanics(activatedEffects=[SavingThrowEffect(
+                SavingThrow(AbilityType.WISDOM, DifficultyClass(DifficultyClassType.FIXED, fixedValue=14)),
+                onFailure=SequenceEffect([
+                    ApplyEffect(ConditionChangeEffect(ConditionType.PRONE, ConditionOperation.ADD)),
+                    ApplyEffect(ConditionChangeEffect(ConditionType.STUNNED, ConditionOperation.ADD)),
+                ]),
+            )]),
         ),
     )
+    condition_roll.damageSaveSucceeded = False
     resolution = resolve_roll_against_target(condition_roll, sheet)
 
     assert proficiency_roll.modifierBreakdown[0].source == "Proficiency"
     assert strength_roll.modifierBreakdown[0].source == "Strength"
     assert class_level_roll.modifierBreakdown[0].source == "Class Level"
-    assert condition_roll.conditionEffects[2].saveDc == 14
+    assert condition_roll.damageSaveDc == 14
     assert ConditionType.PRONE in resolution.targetConditions
-    assert "Frightened requires manual resolution" in resolution.outcome
+    assert ConditionType.STUNNED in resolution.targetConditions
 
 
-def test_roll_action_condition_prerequisite_can_be_split_from_effect() -> None:
+def test_roll_action_native_save_is_embedded_in_pending_effect() -> None:
     sheet = basic_sheet()
     action = RollAction(
         AbilityType.STRENGTH,
@@ -259,18 +267,18 @@ def test_roll_action_condition_prerequisite_can_be_split_from_effect() -> None:
         1,
         DiceType.D6,
         resolution=RollResolutionMode.APPLY_DAMAGE,
-        conditionEffects=[ConditionEffect(ConditionType.PRONE, ConditionApplicationMode.TARGET_SAVE, savingThrow=AbilityType.STRENGTH, saveDc=14)],
+        mechanics=FeatureMechanics(activatedEffects=[SavingThrowEffect(
+            SavingThrow(AbilityType.STRENGTH, DifficultyClass(DifficultyClassType.FIXED, fixedValue=14)),
+            onFailure=ApplyEffect(ConditionChangeEffect(ConditionType.PRONE, ConditionOperation.ADD)),
+        )]),
     )
 
-    save_prompt = build_roll_action_payload(sheet, "player-1", RollSource(SheetSectionType.ABILITIES, "trip", "effect"), action, condition_prerequisite_only=True)
-    failed_effect = build_roll_action_payload(sheet, "player-1", RollSource(SheetSectionType.ABILITIES, "trip", "effect"), action, condition_effect_succeeded=True)
+    roll = build_roll_action_payload(sheet, "player-1", RollSource(SheetSectionType.ABILITIES, "trip", "effect"), action)
 
-    assert save_prompt.label == "Strength Save"
-    assert save_prompt.dice == []
-    assert save_prompt.conditionEffectSucceeded is None
-    assert save_prompt.conditionEffects is not None
-    assert save_prompt.conditionEffects[0].saveDc == 14
-    assert failed_effect.conditionEffectSucceeded is True
+    assert roll.label == "Strength"
+    assert roll.damageSavingThrow == AbilityType.STRENGTH
+    assert roll.damageSaveDc == 14
+    assert roll.pendingEffect is not None
 
 
 def test_active_buff_and_debuff_conditions_modify_matching_d20_rolls(monkeypatch) -> None:
@@ -353,7 +361,8 @@ def test_spell_conditions_modify_ability_checks_saves_and_damage_rolls(monkeypat
     assert ("Enlarged", 3) in [(part.source, part.value) for part in enlarged_damage.modifierBreakdown]
     assert ("Reduced", -3) in [(part.source, part.value) for part in reduced_damage.modifierBreakdown]
     assert ("Ray Of Enfeeblement", -3) in [(part.source, part.value) for part in enfeebled_damage.modifierBreakdown]
-    assert ("Ray Of Enfeeblement", -3) in [(part.source, part.value) for part in enfeebled_spell_damage.modifierBreakdown]
+    assert enfeebled_spell_damage.damageComponents is not None
+    assert ("Ray Of Enfeeblement", -3) in [(part.source, part.value) for part in enfeebled_spell_damage.damageComponents[0].modifierBreakdown]
 
 
 def test_reduced_damage_roll_keeps_minimum_one_damage(monkeypatch) -> None:
@@ -371,8 +380,8 @@ def test_reduced_damage_roll_keeps_minimum_one_damage(monkeypatch) -> None:
 
 def test_calm_emotions_immunity_blocks_charmed_and_frightened_conditions() -> None:
     target = replace(basic_sheet(), conditions=[ConditionType.CALM_EMOTIONS_IMMUNITY])
-    charmed = RollAction("charm", ConditionType.CHARMED, 0, DiceType.D4, conditionEffects=[ConditionEffect(ConditionType.CHARMED, ConditionApplicationMode.DIRECT)])
-    frightened = RollAction("fear", ConditionType.FRIGHTENED, 0, DiceType.D4, conditionEffects=[ConditionEffect(ConditionType.FRIGHTENED, ConditionApplicationMode.DIRECT)])
+    charmed = RollAction("charm", ConditionType.CHARMED, 0, DiceType.D4, mechanics=FeatureMechanics(activatedEffects=[ApplyEffect(ConditionChangeEffect(ConditionType.CHARMED, ConditionOperation.ADD))]))
+    frightened = RollAction("fear", ConditionType.FRIGHTENED, 0, DiceType.D4, mechanics=FeatureMechanics(activatedEffects=[ApplyEffect(ConditionChangeEffect(ConditionType.FRIGHTENED, ConditionOperation.ADD))]))
 
     charmed_resolution = resolve_roll_against_target(build_roll_action_payload(basic_sheet(), "player-1", RollSource(SheetSectionType.ABILITIES, "charm", "effect"), charmed), target)
     frightened_resolution = resolve_roll_against_target(build_roll_action_payload(basic_sheet(), "player-1", RollSource(SheetSectionType.ABILITIES, "fear", "effect"), frightened), target)
@@ -515,7 +524,7 @@ def test_active_damage_resistance_conditions_reduce_matching_damage_by_d4(monkey
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 3 if maximum == 4 else 8)
     attacker = basic_sheet()
     target = replace(basic_sheet(), conditions=[ConditionType.RESISTANCE_FIRE])
-    action = replace(attacker.attacks[0], damageDiceCount=1, damageDiceType=DiceType.D8, damageType=DamageType.FIRE, damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED)
+    action = replace(attacker.attacks[0], damageDiceCount=1, damageDiceType=DiceType.D8, damageType=DamageType.FIRE, damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED, mechanics=None)
 
     roll = build_damage_roll_payload(attacker, "player-1", action)
     resolution = resolve_roll_against_target(roll, target)
@@ -529,7 +538,7 @@ def test_true_damage_resistance_condition_halves_matching_damage(monkeypatch) ->
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 8)
     attacker = basic_sheet()
     target = replace(basic_sheet(), conditions=[ConditionType.RESISTANT_FIRE])
-    action = replace(attacker.attacks[0], damageDiceCount=1, damageDiceType=DiceType.D8, damageType=DamageType.FIRE, damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED)
+    action = replace(attacker.attacks[0], damageDiceCount=1, damageDiceType=DiceType.D8, damageType=DamageType.FIRE, damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED, mechanics=None)
 
     roll = build_damage_roll_payload(attacker, "player-1", action)
     resolution = resolve_roll_against_target(roll, target)
@@ -544,13 +553,13 @@ def test_protection_from_poison_adds_true_poison_resistance_and_clears_poisoned(
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 8)
     attacker = basic_sheet()
     target = replace(basic_sheet(), conditions=[ConditionType.PROTECTION_FROM_POISON, ConditionType.POISONED])
-    action = replace(attacker.attacks[0], damageDiceCount=1, damageDiceType=DiceType.D8, damageType=DamageType.POISON, damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED)
+    action = replace(attacker.attacks[0], damageDiceCount=1, damageDiceType=DiceType.D8, damageType=DamageType.POISON, damageAbilityModifier=AttackDamageAbilityModifierMode.EXCLUDED, mechanics=None)
     protection_roll = RollAction(
         id=SpellId.PROTECTION_FROM_POISON,
         name=SpellId.PROTECTION_FROM_POISON,
         diceCount=0,
         diceType=DiceType.D4,
-        conditionEffects=[ConditionEffect(ConditionType.PROTECTION_FROM_POISON, ConditionApplicationMode.DIRECT)],
+        mechanics=spell_entry(SpellId.PROTECTION_FROM_POISON).mechanics,
     )
 
     damage_roll = build_damage_roll_payload(attacker, "player-1", action)
@@ -593,7 +602,7 @@ def test_creature_type_limited_condition_only_applies_to_matching_targets() -> N
 
     assert roll.targetCreatureTypes == [CreatureType.HUMANOID]
     assert resolution.targetConditions == []
-    assert resolution.outcome == "rolls 0; has no effect; target is not Humanoid"
+    assert resolution.outcome == "has no effect; target is not Humanoid"
 
 
 def test_true_strike_uses_spellcasting_ability_with_proficient_weapon_and_scaling_bonus(monkeypatch) -> None:
@@ -825,12 +834,11 @@ def test_resolution_branches_cover_miss_heal_temp_hp_and_defense_text(monkeypatc
     assert mixed_resolution.targetHp.current == 18
     assert mixed_resolution.outcome == "deals 12 damage (Bludgeoning 2 after successful save, resistance; Cold 10 after successful save, vulnerability)"
 
-    passed_rider_roll = replace(
-        typed_damage_roll,
-        damageSaveOutcome=SpellSaveOutcome.HALF_DAMAGE,
-        damageSaveSucceeded=True,
-        conditionEffects=[ConditionEffect(condition=ConditionType.PRONE, mode=ConditionApplicationMode.DIRECT)],
+    rider = SavingThrowEffect(
+        SavingThrow(AbilityType.DEXTERITY, DifficultyClass(DifficultyClassType.FIXED, fixedValue=14)),
+        onFailure=ApplyEffect(ConditionChangeEffect(ConditionType.PRONE, ConditionOperation.ADD)),
     )
+    passed_rider_roll = replace(typed_damage_roll, damageSaveOutcome=SpellSaveOutcome.HALF_DAMAGE, damageSaveSucceeded=True, pendingEffect=rider)
     failed_rider_roll = replace(passed_rider_roll, damageSaveSucceeded=False)
     assert ConditionType.PRONE not in resolve_roll_against_target(passed_rider_roll, target).targetConditions
     assert ConditionType.PRONE in resolve_roll_against_target(failed_rider_roll, target).targetConditions
@@ -845,6 +853,227 @@ def test_resolution_branches_cover_miss_heal_temp_hp_and_defense_text(monkeypatc
 
     ability_check = build_ability_check_roll_payload(sheet, "player-1", AbilityType.STRENGTH)
     assert ability_check.label == "Strength Check"
+
+
+def test_burning_hands_damage_uses_save_branch_and_slot_scaled_roll(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    assert burning_hands is not None
+    sheet = spell_sheet(3, [burning_hands])
+    target = basic_sheet()
+    target.hp = HitPoints(current=30, max=30, temporary=0)
+    damage_roll = replace(
+        build_spell_damage_roll_payload(sheet, "player-1", burning_hands, spell_slot_level=2),
+        damageSaveSucceeded=True,
+    )
+
+    resolution = resolve_roll_against_target(damage_roll, target)
+
+    assert damage_roll.die == "4d6"
+    assert damage_roll.total == 16
+    assert resolution.targetHp.current == 22
+    assert resolution.outcome == "deals 8 damage after successful save"
+
+
+def test_wrathful_smite_save_only_controls_frightened_rider(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
+    wrathful_smite = paladin_spell_entry(SpellId.WRATHFUL_SMITE)
+    assert wrathful_smite is not None
+    caster = spell_sheet(3, [wrathful_smite])
+    target = replace(basic_sheet(), hp=HitPoints(current=30, max=30, temporary=0))
+
+    passed_roll = replace(
+        build_spell_damage_roll_payload(caster, "player-1", wrathful_smite),
+        damageSaveSucceeded=True,
+    )
+    failed_roll = replace(passed_roll, damageSaveSucceeded=False)
+    passed = resolve_roll_against_target(passed_roll, target, caster)
+    failed = resolve_roll_against_target(failed_roll, target, caster)
+
+    assert passed_roll.damageSaveOutcome == SpellSaveOutcome.PARTIAL
+    assert passed.targetHp.current == 26
+    assert ConditionType.FRIGHTENED not in passed.targetConditions
+    assert failed.targetHp.current == 26
+    assert ConditionType.FRIGHTENED in failed.targetConditions
+
+
+def test_direct_cure_wounds_and_color_spray_execute_through_effect_context(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
+    cure_wounds = spell_entry(SpellId.CURE_WOUNDS)
+    color_spray = wizard_spell_entry(SpellId.COLOR_SPRAY)
+    assert cure_wounds is not None
+    assert color_spray is not None
+    caster = spell_sheet(3, [cure_wounds, color_spray])
+
+    healing_roll = build_spell_healing_roll_payload(caster, "player-1", cure_wounds, spell_slot_level=2)
+    wounded_target = basic_sheet()
+    wounded_target.hp = HitPoints(current=1, max=20, temporary=0)
+    healing_resolution = resolve_roll_against_target(healing_roll, wounded_target)
+
+    assert healing_roll.die == "4d8"
+    assert healing_roll.total == 19
+    assert healing_resolution.targetHp.current == 20
+    assert healing_resolution.outcome == "heals 19 hit points"
+
+    condition_roll = build_spell_condition_roll_payload(caster, "player-1", color_spray)
+    failed_resolution = resolve_roll_against_target(replace(condition_roll, damageSaveSucceeded=False), basic_sheet())
+    passed_resolution = resolve_roll_against_target(replace(condition_roll, damageSaveSucceeded=True), basic_sheet())
+
+    assert ConditionType.BLINDED in failed_resolution.targetConditions
+    assert ConditionType.BLINDED not in passed_resolution.targetConditions
+
+
+def test_direct_healing_word_and_false_life_scale_and_apply(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
+    healing_word = spell_entry(SpellId.HEALING_WORD)
+    false_life = wizard_spell_entry(SpellId.FALSE_LIFE)
+    assert healing_word is not None
+    assert false_life is not None
+    caster = spell_sheet(3, [healing_word, false_life])
+
+    healing_roll = build_spell_healing_roll_payload(caster, "player-1", healing_word, spell_slot_level=2)
+    temporary_roll = build_spell_temporary_hit_points_roll_payload(caster, "player-1", false_life, spell_slot_level=2)
+    wounded_target = basic_sheet()
+    wounded_target.hp = HitPoints(current=1, max=30, temporary=0)
+
+    healing_resolution = resolve_roll_against_target(healing_roll, wounded_target)
+    temporary_resolution = resolve_roll_against_target(temporary_roll, wounded_target)
+    source_resolution = resolve_roll_against_target(temporary_roll, caster)
+
+    assert healing_roll.die == "4d4"
+    assert healing_roll.total == 19
+    assert healing_resolution.targetHp.current == 20
+    assert temporary_roll.die == "2d4"
+    assert temporary_roll.total == 17
+    assert temporary_resolution.targetHp.temporary == 0
+    assert temporary_resolution.outcome == "has no effect; effect targets its source"
+    assert source_resolution.targetHp.temporary == 17
+
+
+def test_direct_protection_from_poison_removes_poison_and_adds_resistance() -> None:
+    protection = spell_entry(SpellId.PROTECTION_FROM_POISON)
+    assert protection is not None
+    caster = spell_sheet(3, [protection])
+    target = basic_sheet()
+    target.conditions = [ConditionType.POISONED]
+
+    roll = build_spell_condition_roll_payload(caster, "player-1", protection)
+    resolution = resolve_roll_against_target(roll, target)
+
+    assert ConditionType.POISONED not in resolution.targetConditions
+    assert ConditionType.PROTECTION_FROM_POISON in resolution.targetConditions
+    assert resolution.sheetUpdates is not None
+    assert resolution.sheetUpdates[0].damageResistances == [DamageType.POISON]
+    assert "gains resistance to Poison damage" in resolution.outcome
+
+
+def test_direct_protection_from_energy_uses_selected_typed_damage_choice() -> None:
+    protection = spell_entry(SpellId.PROTECTION_FROM_ENERGY)
+    assert protection is not None
+    caster = spell_sheet(5, [protection])
+    target = basic_sheet()
+
+    roll = build_spell_condition_roll_payload(caster, "player-1", protection, choice_index=2)
+    resolution = resolve_roll_against_target(roll, target)
+
+    assert ConditionType.RESISTANT_FIRE in resolution.targetConditions
+    assert resolution.sheetUpdates is not None
+    assert resolution.sheetUpdates[0].damageResistances == [DamageType.FIRE]
+    with pytest.raises(ValueError, match="Spell effect choice not found"):
+        build_spell_condition_roll_payload(caster, "player-1", protection, choice_index=5)
+
+
+def test_direct_aid_increases_maximum_and_current_hit_points_with_slot_scaling() -> None:
+    aid = spell_entry(SpellId.AID)
+    assert aid is not None
+    caster = spell_sheet(5, [aid])
+    target = basic_sheet()
+    target.hp = HitPoints(current=7, max=20, temporary=2)
+
+    roll = build_spell_healing_roll_payload(caster, "player-1", aid, spell_slot_level=3)
+    resolution = resolve_roll_against_target(roll, target)
+
+    assert roll.die == "0d4"
+    assert roll.total == 10
+    assert resolution.targetHp == HitPoints(current=17, max=30, temporary=2)
+    assert resolution.sheetUpdates is not None
+    assert [applied.amount for applied in resolution.sheetUpdates[0].appliedEffects or []] == [10, 10]
+    assert resolution.outcome == "increases Hit Point maximum by 10; heals 10 hit points"
+
+
+def test_direct_thunderwave_applies_movement_only_after_failed_save(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
+    thunderwave = spell_entry(SpellId.THUNDERWAVE)
+    assert thunderwave is not None
+    caster = spell_sheet(3, [thunderwave])
+    target = basic_sheet()
+    target.hp = HitPoints(current=30, max=30, temporary=0)
+    roll = build_spell_damage_roll_payload(caster, "player-1", thunderwave, spell_slot_level=2)
+
+    failed = resolve_roll_against_target(replace(roll, damageSaveSucceeded=False), target)
+    succeeded = resolve_roll_against_target(replace(roll, damageSaveSucceeded=True), target)
+
+    assert roll.die == "3d8"
+    assert roll.total == 12
+    assert failed.targetHp.current == 18
+    assert "is pushed 10 feet" in failed.outcome
+    assert succeeded.targetHp.current == 24
+    assert "is pushed" not in succeeded.outcome
+
+
+def test_direct_vampiric_touch_heals_source_from_damage_after_resistance(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 15 if maximum == 20 else 3)
+    vampiric_touch = spell_entry(SpellId.VAMPIRIC_TOUCH)
+    assert vampiric_touch is not None
+    caster = spell_sheet(5, [vampiric_touch])
+    caster.hp = HitPoints(current=10, max=30, temporary=0)
+    target = basic_sheet()
+    target.hp = HitPoints(current=30, max=30, temporary=0)
+    target.damageResistances = [DamageType.NECROTIC]
+
+    roll = build_spell_damage_roll_payload(caster, "player-1", vampiric_touch, spell_slot_level=4)
+    resolution = resolve_roll_against_target(roll, target, caster)
+
+    assert roll.die == "d20"
+    assert roll.damageComponents is not None
+    assert roll.damageComponents[0].die == "4d6"
+    assert roll.damageComponents[0].total == 12
+    assert resolution.targetHp.current == 24
+    assert resolution.sheetUpdates is not None
+    source_update = next(update for update in resolution.sheetUpdates if update.sheetId == caster.id)
+    assert source_update.hp == HitPoints(current=13, max=30, temporary=0)
+    assert "heals 3 hit points" in resolution.outcome
+
+
+def test_direct_vampiric_touch_skips_damage_on_miss_and_doubles_damage_dice_on_critical(monkeypatch) -> None:
+    vampiric_touch = spell_entry(SpellId.VAMPIRIC_TOUCH)
+    assert vampiric_touch is not None
+    caster = spell_sheet(5, [vampiric_touch])
+    caster.hp = HitPoints(current=10, max=30, temporary=0)
+    target = basic_sheet()
+    target.hp = HitPoints(current=30, max=30, temporary=0)
+
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 1 if maximum == 20 else 2)
+    miss_roll = build_spell_damage_roll_payload(caster, "player-1", vampiric_touch, spell_slot_level=3)
+    miss = resolve_roll_against_target(miss_roll, target, caster)
+
+    assert miss.outcome == "misses"
+    assert miss.targetHp == target.hp
+    assert miss.sheetUpdates is not None
+    assert len(miss.sheetUpdates) == 1
+
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 20 if maximum == 20 else 2)
+    critical_roll = build_spell_damage_roll_payload(caster, "player-1", vampiric_touch, spell_slot_level=3)
+    critical = resolve_roll_against_target(critical_roll, target, caster)
+
+    assert critical.roll.criticalHit is True
+    assert critical.roll.damageComponents is not None
+    assert critical.roll.damageComponents[0].die == "6d6"
+    assert critical.roll.damageComponents[0].total == 12
+    assert critical.targetHp.current == 18
+    source_update = next(update for update in critical.sheetUpdates or [] if update.sheetId == caster.id)
+    assert source_update.hp == HitPoints(current=16, max=30, temporary=0)
+    assert critical.outcome.startswith("critically hits; deals 12 damage")
 
 
 def test_fire_bolt_spell_rolls_use_spellcasting_and_cantrip_scaling(monkeypatch) -> None:
@@ -865,9 +1094,11 @@ def test_fire_bolt_spell_rolls_use_spellcasting_and_cantrip_scaling(monkeypatch)
         assert damage_roll.source.section == SheetSectionType.SPELLS
         assert damage_roll.source.sourceId == "fireBolt"
         assert damage_roll.source.actionId == "damage-0"
-        assert damage_roll.label == "Spell Damage"
-        assert damage_roll.die == expected_die
-        assert damage_roll.total == expected_total
+        assert damage_roll.label == "Fire Bolt"
+        assert damage_roll.die == "d20"
+        assert damage_roll.damageComponents is not None
+        assert damage_roll.damageComponents[0].die == expected_die
+        assert damage_roll.damageComponents[0].total == expected_total
         assert damage_roll.damageType == DamageType.FIRE
 
     attack_roll = build_spell_attack_roll_payload(spell_sheet(1, [fire_bolt]), "player-1", fire_bolt)
@@ -881,12 +1112,13 @@ def test_fire_bolt_spell_rolls_use_spellcasting_and_cantrip_scaling(monkeypatch)
     assert [(part.source, part.value) for part in attack_roll.modifierBreakdown] == [("Intelligence", 3), ("Proficiency", 2)]
     assert attack_roll.damageType == DamageType.FIRE
 
-    assert spell_damage_effect_at(fire_bolt, -1) is None
-    assert spell_damage_effect_at(replace(fire_bolt, effects=None), 0) is None
     with pytest.raises(ValueError, match="Spell damage effect not found"):
         build_spell_damage_roll_payload(spell_sheet(1, [fire_bolt]), "player-1", fire_bolt, effect_index=1)
 
-    unscaled_spell = replace(fire_bolt, effects=[spell_damage_effect(2, DiceType.D6, DamageType.FORCE)])
+    unscaled_spell = replace(
+        fire_bolt,
+        mechanics=FeatureMechanics(activatedEffects=[spell_damage_effect(2, DiceType.D6, DamageType.FORCE)]),
+    )
     unscaled_roll = build_spell_damage_roll_payload(spell_sheet(20, [unscaled_spell]), "player-1", unscaled_spell)
 
     assert unscaled_roll.die == "2d6"
@@ -894,16 +1126,18 @@ def test_fire_bolt_spell_rolls_use_spellcasting_and_cantrip_scaling(monkeypatch)
 
     boosted_spell = replace(
         fire_bolt,
-        effects=[
-            spell_damage_effect(
-                1,
-                DiceType.D6,
-                DamageType.FORCE,
-                static_bonus=2,
-                bonus_ability=AbilityType.INTELLIGENCE,
-                scaling=[spell_scaling(SpellScalingType.SPELL_SLOT_LEVEL, dice_count=1, dice_type=DiceType.D6)],
-            )
-        ],
+        mechanics=FeatureMechanics(
+            activatedEffects=[
+                spell_damage_effect(
+                    1,
+                    DiceType.D6,
+                    DamageType.FORCE,
+                    static_bonus=2,
+                    bonus_ability=AbilityType.INTELLIGENCE,
+                    scaling=[spell_scaling(SpellScalingType.SPELL_SLOT_LEVEL, dice_count=1, dice_type=DiceType.D6)],
+                )
+            ]
+        ),
     )
     boosted_roll = build_spell_damage_roll_payload(spell_sheet(20, [boosted_spell]), "player-1", boosted_spell)
 
@@ -911,6 +1145,23 @@ def test_fire_bolt_spell_rolls_use_spellcasting_and_cantrip_scaling(monkeypatch)
     assert boosted_roll.modifier == 5
     assert boosted_roll.total == 8
     assert [(part.source, part.value) for part in boosted_roll.modifierBreakdown] == [("Spell", 2), ("Intelligence", 3)]
+
+
+def test_chromatic_orb_uses_selected_typed_damage_choice(monkeypatch) -> None:
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4 if maximum == 8 else 12)
+    chromatic_orb = wizard_spell_entry(SpellId.CHROMATIC_ORB)
+    assert chromatic_orb is not None
+    sheet = spell_sheet(5, [chromatic_orb])
+
+    roll = build_spell_damage_roll_payload(sheet, "player-1", chromatic_orb, spell_slot_level=2, choice_index=2)
+
+    assert roll.label == "Chromatic Orb"
+    assert roll.damageType == DamageType.FIRE
+    assert roll.damageComponents is not None
+    assert roll.damageComponents[0].die == "4d8"
+    assert roll.damageComponents[0].total == 16
+    with pytest.raises(ValueError, match="Spell effect choice not found"):
+        build_spell_damage_roll_payload(sheet, "player-1", chromatic_orb, choice_index=6)
 
 
 def test_burning_hands_spell_damage_scales_by_spell_slot(monkeypatch) -> None:
@@ -936,22 +1187,18 @@ def test_burning_hands_spell_damage_scales_by_spell_slot(monkeypatch) -> None:
     assert {resource.spellSlotLevel for resource in sheet.resources if resource.spellSlotLevel is not None} == {1, 2, 3}
 
 
-def test_spell_damage_save_prompt_splits_save_from_damage() -> None:
+def test_spell_damage_roll_carries_its_save_and_effect_tree() -> None:
     burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
     assert burning_hands is not None
     sheet = spell_sheet(1, [burning_hands])
 
-    save_roll = build_spell_damage_save_roll_payload(sheet, "player-1", burning_hands)
-    failed_damage = build_spell_damage_roll_payload(sheet, "player-1", burning_hands, damage_save_succeeded=False)
-    passed_damage = build_spell_damage_roll_payload(sheet, "player-1", burning_hands, damage_save_succeeded=True)
+    damage = build_spell_damage_roll_payload(sheet, "player-1", burning_hands)
 
-    assert save_roll.resolution == RollResolutionMode.NONE
-    assert save_roll.label == "Dexterity Save"
-    assert save_roll.dice == []
-    assert save_roll.damageSavingThrow == AbilityType.DEXTERITY
-    assert save_roll.damageSaveDc == 13
-    assert failed_damage.damageSaveSucceeded is False
-    assert passed_damage.damageSaveSucceeded is True
+    assert damage.resolution == RollResolutionMode.APPLY_DAMAGE
+    assert damage.damageSavingThrow == AbilityType.DEXTERITY
+    assert damage.damageSaveDc == 13
+    assert damage.damageSaveSucceeded is None
+    assert damage.pendingEffect is not None
 
 
 def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypatch) -> None:
@@ -1017,8 +1264,7 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     flame_strike_roll = build_spell_damage_roll_payload(spell_sheet(9, [flame_strike]), "player-1", flame_strike, spell_slot_level=6)
     divine_smite_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=0, spell_slot_level=3)
     divine_smite_bonus_roll = build_spell_damage_roll_payload(spell_sheet(5, [divine_smite]), "player-1", divine_smite, effect_index=1)
-    ice_target_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=0)
-    ice_blast_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=1, spell_slot_level=2)
+    ice_target_roll = build_spell_damage_roll_payload(spell_sheet(5, [ice_knife]), "player-1", ice_knife, effect_index=0, spell_slot_level=2)
     missile_roll = build_spell_damage_roll_payload(spell_sheet(5, [magic_missile]), "player-1", magic_missile, spell_slot_level=3, instance_index=4)
     mass_cure_roll = build_spell_healing_roll_payload(spell_sheet(9, [mass_cure_wounds]), "player-1", mass_cure_wounds, spell_slot_level=6)
     mass_healing_roll = build_spell_healing_roll_payload(spell_sheet(5, [mass_healing_word]), "player-1", mass_healing_word, spell_slot_level=4)
@@ -1057,20 +1303,22 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert conjure_barrage_roll.damageSavingThrow == AbilityType.DEXTERITY
     assert conjure_barrage_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
 
-    assert guiding_roll.die == "6d6"
-    assert guiding_roll.total == 18
+    assert guiding_roll.die == "d20"
+    assert guiding_roll.damageComponents is not None
+    assert guiding_roll.damageComponents[0].die == "6d6"
+    assert guiding_roll.damageComponents[0].total == 18
     assert guiding_roll.damageType == DamageType.RADIANT
 
     assert eldritch_roll.source.actionId == "damage-0-instance-2"
-    assert eldritch_roll.label == "Beam 3 Damage"
-    assert eldritch_roll.die == "1d10"
-    assert eldritch_roll.total == 3
+    assert eldritch_roll.label == "Eldritch Blast"
+    assert eldritch_roll.die == "d20"
+    assert eldritch_roll.damageComponents is not None
+    assert eldritch_roll.damageComponents[0].die == "1d10"
+    assert eldritch_roll.damageComponents[0].total == 3
     assert eldritch_roll.damageType == DamageType.FORCE
-    assert eldritch_blast.effects is not None
-    assert scaled_spell_effect_instance_count(eldritch_blast.effects[0], spell_sheet(1, [eldritch_blast]), eldritch_blast.level) == 1
-    assert scaled_spell_effect_instance_count(eldritch_blast.effects[0], spell_sheet(5, [eldritch_blast]), eldritch_blast.level) == 2
-    assert scaled_spell_effect_instance_count(eldritch_blast.effects[0], spell_sheet(11, [eldritch_blast]), eldritch_blast.level) == 3
-    assert scaled_spell_effect_instance_count(eldritch_blast.effects[0], spell_sheet(17, [eldritch_blast]), eldritch_blast.level) == 4
+    build_spell_damage_roll_payload(spell_sheet(1, [eldritch_blast]), "player-1", eldritch_blast, instance_index=0)
+    build_spell_damage_roll_payload(spell_sheet(5, [eldritch_blast]), "player-1", eldritch_blast, instance_index=1)
+    build_spell_damage_roll_payload(spell_sheet(17, [eldritch_blast]), "player-1", eldritch_blast, instance_index=3)
     with pytest.raises(ValueError, match="Spell damage instance not found"):
         build_spell_damage_roll_payload(spell_sheet(11, [eldritch_blast]), "player-1", eldritch_blast, instance_index=3)
 
@@ -1113,14 +1361,14 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert divine_smite_bonus_roll.damageType == DamageType.RADIANT
     assert divine_smite_bonus_roll.targetCreatureTypes == [CreatureType.FIEND, CreatureType.UNDEAD]
 
-    assert ice_target_roll.label == "Target Damage"
-    assert ice_target_roll.die == "1d10"
+    assert ice_target_roll.label == "Ice Knife"
+    assert ice_target_roll.die == "d20"
     assert ice_target_roll.damageType == DamageType.PIERCING
-    assert ice_blast_roll.label == "Blast Damage"
-    assert ice_blast_roll.die == "3d6"
-    assert ice_blast_roll.damageType == DamageType.COLD
-    assert ice_blast_roll.damageSavingThrow == AbilityType.DEXTERITY
-    assert ice_blast_roll.damageSaveOutcome == SpellSaveOutcome.NEGATES
+    assert ice_target_roll.damageComponents is not None
+    assert [component.die for component in ice_target_roll.damageComponents] == ["1d10", "3d6"]
+    assert [component.damageType for component in ice_target_roll.damageComponents] == [DamageType.PIERCING, DamageType.COLD]
+    assert ice_target_roll.damageSavingThrow == AbilityType.DEXTERITY
+    assert ice_target_roll.damageSaveOutcome == SpellSaveOutcome.PARTIAL
 
     assert missile_roll.source.actionId == "damage-0-slot-3-instance-4"
     assert missile_roll.label == "Dart 5 Damage"
@@ -1129,8 +1377,7 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert missile_roll.total == 4
     assert missile_roll.damageType == DamageType.FORCE
     assert [(part.source, part.value) for part in missile_roll.modifierBreakdown] == [("Spell", 1)]
-    assert magic_missile.effects is not None
-    assert scaled_spell_effect_instance_count(magic_missile.effects[0], spell_sheet(5, [magic_missile]), magic_missile.level, 3) == 5
+    assert magic_missile.mechanics is not None
 
     assert mass_cure_roll.die == "6d8"
     assert mass_cure_roll.total == 21
@@ -1143,37 +1390,39 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert prayer_roll.die == "4d8"
     assert prayer_roll.total == 15
     assert prayer_roll.resolution == RollResolutionMode.HEAL_SELF
-    assert prayer_roll.restType == RestType.SHORT_REST
+    assert prayer_roll.pendingEffect is not None
 
     assert shatter_roll.damageSavingThrow == AbilityType.CONSTITUTION
     assert shatter_roll.damageSaveDisadvantageCreatureTypes == [CreatureType.CONSTRUCT]
     with pytest.raises(ValueError, match="Spell damage instance not found"):
         build_spell_damage_roll_payload(spell_sheet(5, [magic_missile]), "player-1", magic_missile, spell_slot_level=3, instance_index=5)
 
-    assert ray_roll.die == "4d8"
-    assert ray_roll.total == 12
+    assert ray_roll.die == "d20"
+    assert ray_roll.damageComponents is not None
+    assert ray_roll.damageComponents[0].die == "4d8"
+    assert ray_roll.damageComponents[0].total == 12
     assert ray_roll.damageType == DamageType.POISON
-    assert ray_roll.conditionEffects is not None
-    assert ray_roll.conditionEffects[0].condition == ConditionType.POISONED
-    assert ray_roll.conditionEffects[0].mode == ConditionApplicationMode.DIRECT
+    assert ray_roll.pendingEffect is not None
 
-    assert searing_orb_roll.die == "5d4"
-    assert searing_orb_roll.total == 15
+    assert searing_orb_roll.die == "d20"
+    assert searing_orb_roll.damageComponents is not None
+    assert searing_orb_roll.damageComponents[0].die == "5d4"
+    assert searing_orb_roll.damageComponents[0].total == 15
     assert searing_orb_roll.damageType == DamageType.RADIANT
-    assert searing_orb_roll.damageSavingThrow is None
-    assert searing_orb_roll.conditionEffects is None
+    assert searing_orb_roll.damageSavingThrow == AbilityType.CONSTITUTION
+    assert searing_orb_roll.pendingEffect is not None
 
     assert thunderwave_roll.die == "3d8"
     assert thunderwave_roll.total == 9
     assert thunderwave_roll.damageType == DamageType.THUNDER
     assert thunderwave_roll.damageSavingThrow == AbilityType.CONSTITUTION
     assert thunderwave_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
-    assert vampiric_roll.label == "Touch Damage"
-    assert vampiric_roll.die == "4d6"
-    assert vampiric_roll.total == 12
+    assert vampiric_roll.label == "Vampiric Touch"
+    assert vampiric_roll.die == "d20"
+    assert vampiric_roll.damageComponents is not None
+    assert vampiric_roll.damageComponents[0].die == "4d6"
+    assert vampiric_roll.damageComponents[0].total == 12
     assert vampiric_roll.damageType == DamageType.NECROTIC
-    assert vampiric_roll.sourceHealing is not None
-    assert vampiric_roll.sourceHealing.amount == SpellLinkedHealingAmount.HALF_DAMAGE_DEALT
     assert wind_wall_roll.die == "4d8"
     assert wind_wall_roll.total == 12
     assert wind_wall_roll.damageType == DamageType.BLUDGEONING
@@ -1181,9 +1430,11 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert wind_wall_roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
 
     assert steel_wind_roll.source.actionId == "damage-0-instance-4"
-    assert steel_wind_roll.label == "Target 5 Damage"
-    assert steel_wind_roll.die == "6d10"
-    assert steel_wind_roll.total == 18
+    assert steel_wind_roll.label == "Steel Wind Strike"
+    assert steel_wind_roll.die == "d20"
+    assert steel_wind_roll.damageComponents is not None
+    assert steel_wind_roll.damageComponents[0].die == "6d10"
+    assert steel_wind_roll.damageComponents[0].total == 18
     assert steel_wind_roll.damageType == DamageType.FORCE
 
     assert destructive_wave_roll.label == "Necrotic Wave Damage"
@@ -1191,8 +1442,7 @@ def test_additional_spell_damage_rolls_use_saves_conditions_and_scaling(monkeypa
     assert destructive_wave_roll.damageComponents is not None
     assert [component.damageType for component in destructive_wave_roll.damageComponents] == [DamageType.THUNDER, DamageType.NECROTIC]
     assert destructive_wave_roll.damageSavingThrow == AbilityType.CONSTITUTION
-    assert destructive_wave_roll.conditionEffects is not None
-    assert destructive_wave_roll.conditionEffects[0].condition == ConditionType.PRONE
+    assert added_condition_types(destructive_wave_roll.pendingEffect) == [ConditionType.PRONE]
 
 
 def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None:
@@ -1215,13 +1465,13 @@ def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None
 
     sheet = spell_sheet(5, [tasha])
     effect_roll = build_spell_condition_roll_payload(sheet, "player-1", tasha)
-    save_roll = build_spell_condition_save_roll_payload(sheet, "player-1", tasha)
     command_roll = build_spell_condition_roll_payload(spell_sheet(5, [command]), "player-1", command, effect_index=3)
     bless_roll = build_spell_condition_roll_payload(spell_sheet(5, [bless]), "player-1", bless)
     blinding_roll = build_spell_condition_roll_payload(spell_sheet(5, [blinding_smite]), "player-1", blinding_smite)
     fear_roll = build_spell_condition_roll_payload(spell_sheet(5, [fear]), "player-1", fear)
     hypnotic_roll = build_spell_condition_roll_payload(spell_sheet(5, [hypnotic_pattern]), "player-1", hypnotic_pattern)
-    searing_orb_roll = build_spell_condition_roll_payload(spell_sheet(5, [searing_orb]), "player-1", searing_orb)
+    with pytest.raises(ValueError, match="Spell condition effect not found"):
+        build_spell_condition_roll_payload(spell_sheet(5, [searing_orb]), "player-1", searing_orb)
     stinking_cloud_roll = build_spell_condition_roll_payload(spell_sheet(5, [stinking_cloud]), "player-1", stinking_cloud)
 
     assert effect_roll.source.section == SheetSectionType.SPELLS
@@ -1229,60 +1479,34 @@ def test_tashas_hideous_laughter_spell_effect_roll_uses_wisdom_save_dc() -> None
     assert effect_roll.source.actionId == "condition-0"
     assert effect_roll.label == "Spell Effect"
     assert effect_roll.dice == []
-    assert effect_roll.conditionEffects is not None
-    assert [effect.condition for effect in effect_roll.conditionEffects] == [ConditionType.PRONE, ConditionType.INCAPACITATED]
-    assert {effect.mode for effect in effect_roll.conditionEffects} == {ConditionApplicationMode.TARGET_SAVE}
-    assert {effect.savingThrow for effect in effect_roll.conditionEffects} == {AbilityType.WISDOM}
-    assert {effect.saveDc for effect in effect_roll.conditionEffects} == {14}
-    assert {effect.removalTrigger for effect in effect_roll.conditionEffects} == {ConditionRemovalTrigger.AFTER_TAKING_DAMAGE}
-    assert {effect.removalSavingThrow for effect in effect_roll.conditionEffects} == {AbilityType.WISDOM}
-    assert {effect.removalSaveDc for effect in effect_roll.conditionEffects} == {14}
-    assert {effect.removalAdvantage for effect in effect_roll.conditionEffects} == {True}
-    assert save_roll.source.actionId == "condition-save-0"
-    assert save_roll.label == "Wisdom Save"
-    assert save_roll.dice == []
-    assert save_roll.conditionEffects is not None
-    assert [effect.condition for effect in save_roll.conditionEffects] == [ConditionType.PRONE, ConditionType.INCAPACITATED]
-    assert command_roll.label == "Grovel Effect"
-    assert command_roll.conditionEffects is not None
-    assert [effect.condition for effect in command_roll.conditionEffects] == [ConditionType.COMMAND_GROVEL, ConditionType.PRONE]
-    assert {effect.savingThrow for effect in command_roll.conditionEffects} == {AbilityType.WISDOM}
-    assert bless_roll.label == "Bless Effect"
-    assert bless_roll.conditionEffects is not None
-    assert [effect.condition for effect in bless_roll.conditionEffects] == [ConditionType.BLESSED]
-    assert {effect.mode for effect in bless_roll.conditionEffects} == {ConditionApplicationMode.DIRECT}
-    assert {effect.savingThrow for effect in bless_roll.conditionEffects} == {None}
-    assert blinding_roll.label == "Blind Effect"
-    assert blinding_roll.conditionEffects is not None
-    assert blinding_roll.conditionEffects[0].condition == ConditionType.BLINDED
-    assert blinding_roll.conditionEffects[0].savingThrow == AbilityType.CONSTITUTION
-    assert blinding_roll.conditionEffects[0].saveDc == 14
-    assert fear_roll.label == "Fear Effect"
-    assert fear_roll.conditionEffects is not None
-    assert fear_roll.conditionEffects[0].condition == ConditionType.FRIGHTENED
-    assert fear_roll.conditionEffects[0].savingThrow == AbilityType.WISDOM
-    assert hypnotic_roll.label == "Pattern Effect"
-    assert hypnotic_roll.conditionEffects is not None
-    assert [effect.condition for effect in hypnotic_roll.conditionEffects] == [ConditionType.CHARMED, ConditionType.INCAPACITATED]
-    assert {effect.savingThrow for effect in hypnotic_roll.conditionEffects} == {AbilityType.WISDOM}
-    assert {effect.removalTrigger for effect in hypnotic_roll.conditionEffects} == {ConditionRemovalTrigger.AFTER_TAKING_DAMAGE}
-    assert searing_orb_roll.label == "Blind Effect"
-    assert searing_orb_roll.conditionEffects is not None
-    assert searing_orb_roll.conditionEffects[0].condition == ConditionType.BLINDED
-    assert searing_orb_roll.conditionEffects[0].mode == ConditionApplicationMode.TARGET_SAVE
-    assert searing_orb_roll.conditionEffects[0].savingThrow == AbilityType.CONSTITUTION
-    assert searing_orb_roll.conditionEffects[0].saveDc == 14
-    assert stinking_cloud_roll.label == "Nauseate Effect"
-    assert stinking_cloud_roll.conditionEffects is not None
-    assert stinking_cloud_roll.conditionEffects[0].condition == ConditionType.POISONED
-    assert stinking_cloud_roll.conditionEffects[0].mode == ConditionApplicationMode.TARGET_SAVE
-    assert stinking_cloud_roll.conditionEffects[0].savingThrow == AbilityType.CONSTITUTION
-    assert stinking_cloud_roll.conditionEffects[0].saveDc == 14
+    assert effect_roll.damageSavingThrow == AbilityType.WISDOM
+    assert effect_roll.damageSaveDc == 14
+    assert effect_roll.pendingEffect is not None
+    assert added_condition_types(effect_roll.pendingEffect) == [ConditionType.PRONE, ConditionType.INCAPACITATED]
+    tasha_changes = condition_change_effects(effect_roll.pendingEffect)
+    assert all(change.endingConditions[0].endingCondition == EndingConditionType.TARGET_TAKES_DAMAGE for change in tasha_changes)
+    assert all(change.endingConditions[0].advantage for change in tasha_changes)
+    assert command_roll.label == "Grovel"
+    assert added_condition_types(command_roll.pendingEffect) == [ConditionType.COMMAND_GROVEL, ConditionType.PRONE]
+    assert command_roll.damageSavingThrow == AbilityType.WISDOM
+    assert bless_roll.label == "Bless"
+    assert added_condition_types(bless_roll.pendingEffect) == [ConditionType.BLESSED]
+    assert bless_roll.damageSavingThrow is None
+    assert blinding_roll.label == "Blind"
+    assert added_condition_types(blinding_roll.pendingEffect) == [ConditionType.BLINDED]
+    assert blinding_roll.damageSavingThrow == AbilityType.CONSTITUTION
+    assert blinding_roll.damageSaveDc == 14
+    assert fear_roll.label == "Fear"
+    assert added_condition_types(fear_roll.pendingEffect) == [ConditionType.FRIGHTENED]
+    assert fear_roll.damageSavingThrow == AbilityType.WISDOM
+    assert hypnotic_roll.label == "Pattern"
+    assert added_condition_types(hypnotic_roll.pendingEffect) == [ConditionType.CHARMED, ConditionType.INCAPACITATED]
+    assert hypnotic_roll.damageSavingThrow == AbilityType.WISDOM
+    assert stinking_cloud_roll.label == "Nauseate"
+    assert added_condition_types(stinking_cloud_roll.pendingEffect) == [ConditionType.POISONED]
+    assert stinking_cloud_roll.damageSavingThrow == AbilityType.CONSTITUTION
+    assert stinking_cloud_roll.damageSaveDc == 14
 
-    assert spell_condition_effect_at(tasha, -1) is None
-    assert spell_condition_effect_at(replace(tasha, effects=None), 0) is None
-    with pytest.raises(ValueError, match="Spell condition effect not found"):
-        build_spell_condition_roll_payload(sheet, "player-1", replace(tasha, effects=[]))
 
 
 def test_typed_json_and_formatter_edge_cases(monkeypatch) -> None:

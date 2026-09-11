@@ -15,11 +15,11 @@ from dnd_board.character_sheet import (
     RollModifierType,
     RollAction,
     RollResolutionMode,
-    ConditionEffect,
     TimeEconomy,
     enum_key,
     enum_label,
 )
+from dnd_board.rules.shared.effects import FeatureMechanics
 
 
 class BattleMasterResourceType(Enum):
@@ -49,7 +49,7 @@ class SuperiorityActionDefinition:
     modifier: RollModifierType = RollModifierType.NONE
     modifierAbility: AbilityType | None = None
     staticModifier: int = 0
-    conditionEffects: tuple[ConditionEffect, ...] = ()
+    mechanics: FeatureMechanics | None = None
 
 
 @dataclass(frozen=True)
@@ -99,7 +99,7 @@ def combat_superiority_resource(classes: list[CharacterClassLevel]) -> ResourceT
                 description=definition.description,
                 activation=definition.activation,
                 source=enum_label(definition.source),
-                conditionEffects=list(definition.conditionEffects) or None,
+                mechanics=definition.mechanics,
             )
             for definition in superiority_action_definitions(classes)
         ],
@@ -182,7 +182,7 @@ def superiority_action_definitions(classes: list[CharacterClassLevel]) -> list[S
                 modifier=definition.modifier,
                 modifierAbility=definition.modifierAbility,
                 staticModifier=(fighter.level // 2 if definition.maneuverType == BattleMasterManeuverType.RALLY and fighter is not None else 0),
-                conditionEffects=definition.conditionEffects,
+                mechanics=definition.mechanics,
             )
             for definition in (BATTLE_MASTER_MANEUVERS[maneuver] for maneuver in selected_battle_master_maneuvers(classes))
         )

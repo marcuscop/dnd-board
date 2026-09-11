@@ -7,8 +7,6 @@ from dnd_board.character_sheet import (
     AbilityType,
     CharacterClassLevel,
     ClassType,
-    ConditionApplicationMode,
-    ConditionEffect,
     ConditionType,
     DamageType,
     DiceType,
@@ -23,6 +21,27 @@ from dnd_board.character_sheet import (
     enum_label,
 )
 from dnd_board.rules.sources import RuleSource, rule_source_label
+from dnd_board.rules.shared.effects import (
+    ApplyEffect,
+    AttackerIsVisiblePredicate,
+    ConditionChangeEffect,
+    ConditionOperation,
+    DifficultyClass,
+    DifficultyClassType,
+    FeatureMechanics,
+    Interaction,
+    InteractionDecision,
+    InteractionDecisionType,
+    InteractionTiming,
+    ModifyPendingDamage,
+    PendingDamageModificationType,
+    PromptResponder,
+    ResolutionEventType,
+    SavingThrow,
+    SavingThrowEffect,
+    SourceIsAttackPredicate,
+    TargetIsOwnerPredicate,
+)
 
 
 class RogueFeatureType(Enum):
@@ -239,16 +258,27 @@ def cunning_strike_abilities(include_devious: bool) -> list[SheetAbility]:
             source=enum_label(ClassType.ROGUE),
             activation=TimeEconomy.SPECIAL,
             description=description,
-            conditionEffects=[
-                ConditionEffect(
-                    condition=condition,
-                    mode=ConditionApplicationMode.TARGET_SAVE,
-                    savingThrow=saving_throw,
-                    saveDcAbility=AbilityType.DEXTERITY,
-                    description=description,
-                )
-            ]
-            if saving_throw is not None
+            rollActions=[RollAction(
+                id=ability_type,
+                name=ability_type,
+                diceCount=0,
+                diceType=DiceType.D20,
+                activation=TimeEconomy.SPECIAL,
+                source=enum_label(ClassType.ROGUE),
+                description=description,
+                mechanics=FeatureMechanics(activatedEffects=[SavingThrowEffect(
+                    SavingThrow(
+                        saving_throw,
+                        DifficultyClass(DifficultyClassType.SOURCE_ABILITY, ability=AbilityType.DEXTERITY),
+                    ),
+                    onFailure=(
+                        ApplyEffect(ConditionChangeEffect(condition, ConditionOperation.ADD))
+                        if condition is not None
+                        else None
+                    ),
+                )]),
+            )]
+            if saving_throw is not None and condition is not None
             else None,
         )
         for ability_type, saving_throw, condition, description in definitions
@@ -283,6 +313,21 @@ def feature_for_type(feature_type: RogueFeatureType, progression: RogueProgressi
         source=enum_label(ClassType.ROGUE),
         activation=feature_activation(feature_type),
         description=descriptions[feature_type],
+        mechanics=uncanny_dodge_mechanics() if feature_type == RogueFeatureType.UNCANNY_DODGE else None,
+    )
+
+
+def uncanny_dodge_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(
+        interactions=[
+            Interaction(
+                trigger=ResolutionEventType.DAMAGE_PENDING,
+                timing=InteractionTiming.BEFORE_EVENT,
+                decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+                predicates=[TargetIsOwnerPredicate(), SourceIsAttackPredicate(), AttackerIsVisiblePredicate()],
+                operations=[ModifyPendingDamage(PendingDamageModificationType.MULTIPLY, 1, 2)],
+            )
+        ]
     )
 
 

@@ -5,7 +5,11 @@ from dataclasses import dataclass, field, fields, is_dataclass, replace
 from enum import Enum, auto
 from time import time_ns
 from types import SimpleNamespace, UnionType
-from typing import Any, Union, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin, get_type_hints
+
+if TYPE_CHECKING:
+    from dnd_board.rules.shared.effects import ActiveOngoingEffect, ActiveScheduledEffect, AppliedEffectResult, CalculationType, DiceAmount, EffectNode, EffectNodeId, EffectResolutionInputs, FeatureMechanics, Interaction, ModifierOperation
+    from dnd_board.rules.shared.character_effects import ResolvedCharacterEffect
 
 
 class TokenKind(Enum):
@@ -28,16 +32,23 @@ class RollLogEntryType(Enum):
 
 
 class ResolutionInterceptorType(Enum):
-    COUNTERSPELL = auto()
-    INDOMITABLE = auto()
-    MAGE_SLAYER = auto()
-    UNCANNY_DODGE = auto()
+    CANCEL_ACTION = auto()
+    REROLL_SAVING_THROW = auto()
+    REPLACE_ROLL_OUTCOME = auto()
+    MODIFY_PENDING_DAMAGE = auto()
+    MODIFY_ROLL = auto()
+    PREVENT_CONDITION = auto()
+    MODIFY_ACTION = auto()
+    APPLY_EFFECT = auto()
+    SCHEDULE_EFFECT = auto()
 
 
 class ResolutionInterceptorTrigger(Enum):
     BEFORE_SPELL_RESOLVES = auto()
+    BEFORE_ATTACK_RESOLVES = auto()
     BEFORE_FAILED_SAVE_FINALIZES = auto()
     BEFORE_DAMAGE_APPLIED = auto()
+    BEFORE_CONDITION_APPLIED = auto()
 
 
 class RollModifierType(Enum):
@@ -114,6 +125,7 @@ class TypedJsonPrimitiveType(Enum):
     FLOAT = "float"
     BOOLEAN = "bool"
     LIST = "list"
+    TUPLE = "tuple"
     DICTIONARY = "dict"
 
 
@@ -677,19 +689,6 @@ class SpellAttackType(Enum):
     RANGED_SPELL_ATTACK = auto()
 
 
-class SpellEffectKind(Enum):
-    DAMAGE = auto()
-    HEALING = auto()
-    TEMPORARY_HIT_POINTS = auto()
-    CONDITION = auto()
-    DEFENSE = auto()
-    MOVEMENT = auto()
-    SUMMONING = auto()
-    TRANSFORMATION = auto()
-    UTILITY = auto()
-    SPECIAL = auto()
-
-
 class SpellEffectTrigger(Enum):
     ON_CAST = auto()
     ON_HIT = auto()
@@ -717,10 +716,6 @@ class SpellSaveOutcome(Enum):
     HALF_DAMAGE = auto()
     PARTIAL = auto()
     SPECIAL = auto()
-
-
-class SpellLinkedHealingAmount(Enum):
-    HALF_DAMAGE_DEALT = auto()
 
 
 class SpellScalingType(Enum):
@@ -906,26 +901,10 @@ class ConditionType(Enum):
     ZONE_OF_TRUTH = auto()
 
 
-class ConditionApplicationMode(Enum):
-    TARGET_SAVE = auto()
-    SOURCE_CHECK = auto()
-    DIRECT = auto()
-    MANUAL = auto()
-
-
 class ConditionDuration(Enum):
     MANUAL = auto()
     UNTIL_SHORT_REST = auto()
     UNTIL_LONG_REST = auto()
-
-
-class ConditionRemovalTrigger(Enum):
-    AFTER_TAKING_DAMAGE = auto()
-
-
-class RollModifierEffectOperation(Enum):
-    ADD = auto()
-    SUBTRACT = auto()
 
 
 class RollModifierEffectTarget(Enum):
@@ -1048,26 +1027,6 @@ class RestType(Enum):
 
 
 @dataclass(frozen=True)
-class SpellEffectDice:
-    diceCount: int
-    diceType: DiceType
-    staticBonus: int = 0
-    bonusAbility: AbilityType | None = None
-    bonusSpellcastingAbility: bool = False
-
-    @api_field
-    def dice(self) -> str:
-        return dice_formula(self.diceCount, self.diceType)
-
-
-@dataclass(frozen=True)
-class SpellDamageEffect:
-    dice: SpellEffectDice
-    damageType: DamageType
-    scaling: list[SpellScaling] | None = None
-
-
-@dataclass(frozen=True)
 class RollDamageComponent:
     damageType: DamageType
     dice: list[int]
@@ -1076,46 +1035,7 @@ class RollDamageComponent:
     modifier: int
     modifierBreakdown: list[RollModifierBreakdown]
     total: int
-
-
-@dataclass(frozen=True)
-class SpellHealingEffect:
-    dice: SpellEffectDice
-
-
-@dataclass(frozen=True)
-class SpellSourceHealingEffect:
-    amount: SpellLinkedHealingAmount
-
-
-class SpellMaxHitPointReductionMode(Enum):
-    DAMAGE_TAKEN = auto()
-
-
-@dataclass(frozen=True)
-class SpellMaxHitPointReduction:
-    mode: SpellMaxHitPointReductionMode
-    reset: RestType = RestType.LONG_REST
-
-
-@dataclass(frozen=True)
-class SpellConditionEffect:
-    condition: ConditionType
-    duration: ConditionDuration = ConditionDuration.MANUAL
-    savingThrow: AbilityType | None = None
-    saveEnds: bool = False
-    removalTrigger: ConditionRemovalTrigger | None = None
-    removalAdvantage: bool = False
-
-
-@dataclass(frozen=True)
-class SpellRollModifierEffect:
-    condition: ConditionType
-    operation: RollModifierEffectOperation
-    targets: list[RollModifierEffectTarget]
-    dice: SpellEffectDice | None = None
-    staticBonus: int = 0
-    description: str = ""
+    effectNodeIds: list[EffectNodeId] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1130,36 +1050,10 @@ class SpellSavingThrow:
 @dataclass(frozen=True)
 class SpellScaling:
     scalingType: SpellScalingType
-    additionalDice: SpellEffectDice | None = None
+    additionalDice: DiceAmount | None = None
     additionalStaticBonus: int = 0
     additionalInstances: int = 0
     interval: int = 1
-    description: str = ""
-
-
-@dataclass(frozen=True)
-class SpellEffect:
-    kind: SpellEffectKind
-    trigger: SpellEffectTrigger = SpellEffectTrigger.ON_CAST
-    target: SpellEffectTarget = SpellEffectTarget.TARGET
-    attack: SpellAttackType = SpellAttackType.NONE
-    targetCreatureTypes: list[CreatureType] | None = None
-    savingThrow: SpellSavingThrow | None = None
-    damage: SpellDamageEffect | None = None
-    damageComponents: list[SpellDamageEffect] | None = None
-    healing: SpellHealingEffect | None = None
-    sourceHealing: SpellSourceHealingEffect | None = None
-    maxHitPointIncrease: SpellEffectDice | None = None
-    maxHitPointReduction: SpellMaxHitPointReduction | None = None
-    temporaryHitPoints: SpellEffectDice | None = None
-    conditions: list[SpellConditionEffect] | None = None
-    conditionRemovals: list[ConditionType] | None = None
-    rollModifier: SpellRollModifierEffect | None = None
-    scaling: list[SpellScaling] | None = None
-    restType: RestType | None = None
-    instances: int = 1
-    instanceLabel: str = ""
-    actionLabel: str = ""
     description: str = ""
 
 
@@ -1261,23 +1155,6 @@ class HitPoints:
     temporary: int
 
 
-@dataclass(frozen=True)
-class ConditionEffect:
-    condition: ConditionType | None
-    mode: ConditionApplicationMode
-    savingThrow: AbilityType | None = None
-    saveDcAbility: AbilityType | None = None
-    saveDc: int | None = None
-    sourceCheck: AbilityType | None = None
-    contestChecks: list[AbilityType] | None = None
-    duration: ConditionDuration = ConditionDuration.MANUAL
-    removalTrigger: ConditionRemovalTrigger | None = None
-    removalSavingThrow: AbilityType | None = None
-    removalSaveDc: int | None = None
-    removalAdvantage: bool = False
-    description: str = ""
-
-
 @dataclass
 class AttackAction:
     id: str
@@ -1297,6 +1174,7 @@ class AttackAction:
     attackType: AttackActionType = AttackActionType.STANDARD
     properties: list[WeaponProperty] | None = None
     activeSpellConditions: list[SpellId] | None = None
+    mechanics: FeatureMechanics | None = None
 
     @api_field
     def damageDie(self) -> str:
@@ -1318,7 +1196,7 @@ class RollAction:
     activation: TimeEconomy | None = None
     source: str | None = None
     damageType: DamageType | None = None
-    conditionEffects: list[ConditionEffect] | None = None
+    mechanics: FeatureMechanics | None = None
 
     @api_field
     def dice(self) -> str:
@@ -1397,6 +1275,7 @@ class ResourceTracker:
     rollActions: list[RollAction] | None = None
     source: str | None = None
     spellSlotLevel: int | None = None
+    mechanics: FeatureMechanics | None = None
 
 
 @dataclass
@@ -1408,7 +1287,7 @@ class SheetAbility:
     description: str
     resourceId: str | None = None
     rollActions: list[RollAction] | None = None
-    conditionEffects: list[ConditionEffect] | None = None
+    mechanics: FeatureMechanics | None = None
 
 
 @dataclass
@@ -1419,7 +1298,7 @@ class SheetFeature:
     activation: TimeEconomy
     description: str
     rollActions: list[RollAction] | None = None
-    conditionEffects: list[ConditionEffect] | None = None
+    mechanics: FeatureMechanics | None = None
 
 
 @dataclass(frozen=True)
@@ -1444,8 +1323,8 @@ class SpellEntry:
     concentration: bool = False
     ritual: bool = False
     castingDuration: SpellDuration | None = None
-    effects: list[SpellEffect] | None = None
     status: SpellStatus = field(default_factory=SpellStatus)
+    mechanics: FeatureMechanics | None = None
 
     @api_field
     def castingTimeLabel(self) -> str:
@@ -1600,6 +1479,8 @@ class CharacterSheet:
     equipment: list[EquipmentItem]
     purse: Purse = field(default_factory=Purse)
     activeConcentration: ActiveConcentrationStatus | None = None
+    ongoingEffects: list[ActiveOngoingEffect] = field(default_factory=list)
+    suppressedConditions: list[ConditionType] = field(default_factory=list)
 
 
 @dataclass
@@ -1632,14 +1513,10 @@ class RollPayload:
     damageSaveDisadvantageCreatureTypes: list[CreatureType] | None = None
     damageSaveForcedFailureCreatureTypes: list[CreatureType] | None = None
     targetCreatureTypes: list[CreatureType] | None = None
-    sourceHealing: SpellSourceHealingEffect | None = None
-    maxHitPointIncrease: SpellEffectDice | None = None
-    maxHitPointReduction: SpellMaxHitPointReduction | None = None
-    conditionEffects: list[ConditionEffect] | None = None
-    conditionEffectSucceeded: bool | None = None
-    conditionRemovals: list[ConditionType] | None = None
-    restType: RestType | None = None
     resourceSpent: RollResourceSpend | None = None
+    pendingEffect: EffectNode | None = None
+    effectInputs: EffectResolutionInputs | None = None
+    criticalHit: bool | None = None
 
 
 @dataclass
@@ -1648,6 +1525,21 @@ class RollResourceSpend:
     resourceName: str
     remainingUses: int
     maxUses: int
+
+
+@dataclass
+class CharacterStateUpdate:
+    sheetId: str
+    tokenId: str
+    hp: HitPoints | None = None
+    conditions: list[ConditionType] | None = None
+    damageResistances: list[DamageType] | None = None
+    damageVulnerabilities: list[DamageType] | None = None
+    damageImmunities: list[DamageType] | None = None
+    appliedEffects: list[AppliedEffectResult] | None = None
+    scheduledEffects: list[ActiveScheduledEffect] | None = None
+    ongoingEffects: list[ActiveOngoingEffect] | None = None
+    suppressedConditions: list[ConditionType] | None = None
 
 
 @dataclass
@@ -1664,6 +1556,7 @@ class RollResolution:
     createdAt: int
     responseRolls: list[RollPayload] | None = None
     concentrationUpdates: list[ActiveConcentrationUpdate] | None = None
+    sheetUpdates: list[CharacterStateUpdate] | None = None
 
 
 @dataclass
@@ -1685,8 +1578,11 @@ class ResolutionInterceptorPrompt:
     useLabel: str
     declineLabel: str
     createdAt: int
+    interaction: Interaction
     ignoredInterceptors: list[str] = field(default_factory=list)
+    resourceId: str | None = None
     responseRolls: list[RollPayload] | None = None
+    effectExecutionId: int | None = None
 
 
 @dataclass
@@ -1798,6 +1694,7 @@ def build_character_sheet(
     armor_class += default_armor_class_bonus(classes, equipment)
     attacks = sheet_config.attacks if sheet_config and sheet_config.attacks else default_attacks(kind)
     attacks = default_feat_attacks(classes, equipment, attacks)
+    attacks = [attack_action_with_default_mechanics(attack) for attack in attacks]
     max_hp += default_feat_hit_point_bonus(configured_feats, total_level)
     speed = (sheet_config.speed if sheet_config and sheet_config.speed is not None else 30) + default_feat_speed_bonus(configured_feats)
 
@@ -1887,6 +1784,11 @@ def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
 
 def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
     action = effective_attack_action(sheet, action)
+    direct_damage = None
+    if action.mechanics is not None:
+        from dnd_board.rules.shared.character_effects import direct_damage_effect_at
+
+        direct_damage = direct_damage_effect_at(action.mechanics, 0)
     ability_score = getattr(sheet.abilityScores, enum_key(action.ability))
     modifier_breakdown = []
     if action.damageAbilityModifier == AttackDamageAbilityModifierMode.INCLUDED:
@@ -1898,18 +1800,28 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         modifier_breakdown.append(RollModifierBreakdown(source=f"{action.name} Damage Bonus", value=action.damageBonus))
     modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.DAMAGE_ROLL))
     modifier = sum(part.value for part in modifier_breakdown)
-    count = action.damageDiceCount
-    sides = action.damageDiceType.value
+    from dnd_board.rules.shared.effects import DiceAmount
+
+    damage_amount = direct_damage.amount if direct_damage is not None else None
+    if direct_damage is not None and not isinstance(damage_amount, DiceAmount):
+        raise ValueError("Attack damage must use a dice amount before it is rolled")
+    count = damage_amount.diceCount if isinstance(damage_amount, DiceAmount) else action.damageDiceCount
+    dice_type = damage_amount.diceType if isinstance(damage_amount, DiceAmount) else action.damageDiceType
+    static_bonus = damage_amount.staticBonus if isinstance(damage_amount, DiceAmount) else 0
+    sides = dice_type.value
     dice = [random.randint(1, sides) for _ in range(count)]
     if uses_great_weapon_fighting(sheet.classes, action):
         dice = [max(3, roll) for roll in dice]
         modifier_breakdown.append(RollModifierBreakdown(source="Great Weapon Fighting", value=0, description="Treated weapon damage dice of 1 or 2 as 3."))
+    modifier += static_bonus
     damage_total = sum(dice) + modifier
-    if ConditionType.REDUCED in sheet.conditions and damage_total < 1:
-        floor_bonus = 1 - damage_total
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(ConditionType.REDUCED), value=floor_bonus, description="Reduced damage can't be reduced below 1."))
+    minimum_damage = active_minimum_modifier(sheet, RollModifierEffectTarget.DAMAGE_ROLL)
+    if minimum_damage is not None and damage_total < minimum_damage[1]:
+        source_label, minimum = minimum_damage
+        floor_bonus = minimum - damage_total
+        modifier_breakdown.append(RollModifierBreakdown(source=source_label, value=floor_bonus, description=f"{source_label} damage can't be reduced below {minimum}."))
         modifier += floor_bonus
-        damage_total = 1
+        damage_total = minimum
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -1922,13 +1834,88 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
         label="Damage Roll",
         iconUrl=None,
         dice=dice,
-        diceType=action.damageDiceType,
-        die=damage_die_formula(action),
+        diceType=dice_type,
+        die=dice_formula(count, dice_type),
         modifier=modifier,
         modifierBreakdown=modifier_breakdown,
         total=damage_total,
         createdAt=created_at,
-        damageType=action.damageType,
+        damageType=direct_damage.damageType if direct_damage is not None else action.damageType,
+        pendingEffect=direct_attack_pending_effect(action, damage_total),
+    )
+
+
+def build_combined_attack_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
+    action = effective_attack_action(sheet, action)
+    attack_roll = build_attack_roll_payload(sheet, roller, action)
+    damage_roll = build_damage_roll_payload(sheet, roller, action)
+    pending_effect = None
+    effect_inputs = None
+    effect_node_ids = []
+    if action.mechanics is not None:
+        from dnd_board.rules.shared.character_effects import damage_effect_nodes
+        from dnd_board.rules.shared.effects import EffectAmountInput, EffectResolutionInputs
+
+        pending_effect = action.mechanics.activatedEffects[0]
+        damage_nodes = damage_effect_nodes(pending_effect)
+        if damage_nodes:
+            effect_node_ids = [damage_nodes[0][0]]
+            effect_inputs = EffectResolutionInputs(amounts=[EffectAmountInput(effect_node_ids[0], damage_roll.total)])
+    damage_component = RollDamageComponent(
+        damageType=damage_roll.damageType or action.damageType,
+        dice=damage_roll.dice,
+        diceType=damage_roll.diceType,
+        die=damage_roll.die,
+        modifier=damage_roll.modifier,
+        modifierBreakdown=damage_roll.modifierBreakdown,
+        total=damage_roll.total,
+        effectNodeIds=effect_node_ids,
+    )
+    return replace(
+        attack_roll,
+        label=action.name,
+        damageType=damage_component.damageType,
+        damageComponents=[damage_component],
+        pendingEffect=pending_effect,
+        effectInputs=effect_inputs,
+    )
+
+
+def direct_attack_pending_effect(action: AttackAction, damage_total: int) -> EffectNode | None:
+    if action.mechanics is None:
+        return None
+    from dnd_board.rules.shared.character_effects import resolved_damage_effect_node
+    from dnd_board.rules.shared.effects import AttackRollEffect
+
+    root = action.mechanics.activatedEffects[0]
+    pending = root.onHit if isinstance(root, AttackRollEffect) else root
+    return resolved_damage_effect_node(pending, damage_total) if pending is not None else None
+
+
+def attack_action_with_default_mechanics(action: AttackAction) -> AttackAction:
+    if action.mechanics is not None:
+        return action
+    from dnd_board.rules.shared.effects import (
+        ApplyEffect,
+        AttackRoll,
+        AttackRollEffect,
+        AttackRollType,
+        DamageEffect,
+        DiceAmount,
+        FeatureMechanics,
+    )
+
+    return replace(
+        action,
+        mechanics=FeatureMechanics(activatedEffects=[
+            AttackRollEffect(
+                attack=AttackRoll(AttackRollType.WEAPON, ability=action.ability),
+                onHit=ApplyEffect(DamageEffect(
+                    amount=DiceAmount(action.damageDiceCount, action.damageDiceType),
+                    damageType=action.damageType,
+                )),
+            )
+        ]),
     )
 
 
@@ -2030,13 +2017,25 @@ def build_true_strike_damage_roll_payload(sheet: CharacterSheet, roller: str, sp
 
 
 def true_strike_radiant_bonus_component(sheet: CharacterSheet, spell: SpellEntry) -> RollDamageComponent | None:
-    effect = spell_damage_effect_at(spell, 0)
-    if effect is None or effect.damage is None:
+    if spell.mechanics is None:
         return None
-    component = spell_damage_roll_component(sheet, spell, effect.damage, effect.scaling, None)
-    if component.dice:
-        return component
-    return None
+    from dnd_board.rules.shared.character_effects import direct_damage_effect_at, roll_effect_amount
+
+    effect = direct_damage_effect_at(spell.mechanics, 0)
+    if effect is None:
+        return None
+    dice, dice_type, modifier_breakdown, total = roll_effect_amount(effect.amount, effect.scaling, sheet, spell, None)
+    if not dice:
+        return None
+    return RollDamageComponent(
+        damageType=effect.damageType,
+        dice=dice,
+        diceType=dice_type,
+        die=dice_formula(len(dice), dice_type),
+        modifier=sum(part.value for part in modifier_breakdown),
+        modifierBreakdown=modifier_breakdown,
+        total=total,
+    )
 
 
 SHILLELAGH_WEAPON_IDS: tuple[str, ...] = ("club", "quarterstaff")
@@ -2062,14 +2061,15 @@ def shillelagh_applies_to_attack(sheet: CharacterSheet, action: AttackAction) ->
 
 
 def shillelagh_attack_action(sheet: CharacterSheet, action: AttackAction) -> AttackAction:
-    return replace(
+    return attack_action_with_default_mechanics(replace(
         action,
         ability=shillelagh_casting_ability(sheet),
         damageDiceCount=shillelagh_damage_dice_count(sheet),
         damageDiceType=shillelagh_damage_dice_type(sheet),
         damageType=DamageType.FORCE,
         activeSpellConditions=unique_spell_ids([*(action.activeSpellConditions or []), SpellId.SHILLELAGH]),
-    )
+        mechanics=None,
+    ))
 
 
 def shillelagh_casting_ability(sheet: CharacterSheet) -> AbilityType:
@@ -2145,142 +2145,35 @@ def build_spell_damage_roll_payload(
     spell_slot_level: int | None = None,
     instance_index: int | None = None,
     damage_save_succeeded: bool | None = None,
+    choice_index: int | None = None,
 ) -> RollPayload:
-    effect = spell_damage_effect_at(spell, effect_index)
-    if effect is None or effect.damage is None:
-        raise ValueError("Spell damage effect not found")
+    if spell.mechanics is None:
+        raise ValueError("Spell has no mechanics")
+    from dnd_board.rules.shared.character_effects import build_direct_spell_damage_roll_payload
 
-    instance_count = scaled_spell_effect_instance_count(effect, sheet, spell.level, spell_slot_level)
-    if instance_index is not None and (instance_index < 0 or instance_index >= instance_count):
-        raise ValueError("Spell damage instance not found")
-    active_instance_index = instance_index if instance_index is not None else 0
-    damage_components = [
-        spell_damage_roll_component(sheet, spell, component, component.scaling or effect.scaling, spell_slot_level)
-        for component in (effect.damageComponents or [effect.damage])
-    ]
-    spell_damage_modifiers = active_spell_damage_roll_modifier_breakdown(sheet)
-    if spell_damage_modifiers:
-        primary = damage_components[0]
-        modifier = primary.modifier + sum(part.value for part in spell_damage_modifiers)
-        damage_components[0] = replace(
-            primary,
-            modifier=modifier,
-            modifierBreakdown=[*primary.modifierBreakdown, *spell_damage_modifiers],
-            total=sum(primary.dice) + modifier,
-        )
-    primary_component = damage_components[0]
-    dice = [roll for component in damage_components for roll in component.dice]
-    modifier_breakdown = [part for component in damage_components for part in component.modifierBreakdown]
-    modifier = sum(component.modifier for component in damage_components)
-    created_at = time_ns()
-    return RollPayload(
-        id=f"roll-{created_at}",
-        sheetId=sheet.id,
-        tokenId=sheet.tokenId,
-        roller=roller,
-        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=spell_damage_action_id(effect_index, spell_slot_level, active_instance_index if instance_count > 1 else None)),
-        sourceLabel=enum_label(spell.name),
-        resolution=RollResolutionMode.APPLY_DAMAGE,
-        label=spell_damage_roll_label(effect, active_instance_index, instance_count),
-        iconUrl=None,
-        dice=dice,
-        diceType=primary_component.diceType,
-        die="+".join(component.die for component in damage_components),
-        modifier=modifier,
-        modifierBreakdown=modifier_breakdown,
-        total=sum(component.total for component in damage_components),
-        createdAt=created_at,
-        damageType=primary_component.damageType,
-        damageComponents=damage_components if len(damage_components) > 1 else None,
-        damageSavingThrow=effect.savingThrow.ability if effect.savingThrow is not None else None,
-        damageSaveDc=spell_save_dc(sheet, spell) if effect.savingThrow is not None else None,
-        damageSaveOutcome=effect.savingThrow.outcome if effect.savingThrow is not None else None,
-        damageSaveSucceeded=damage_save_succeeded,
-        damageSaveDisadvantageCreatureTypes=effect.savingThrow.disadvantageCreatureTypes if effect.savingThrow is not None else None,
-        damageSaveForcedFailureCreatureTypes=effect.savingThrow.forcedFailureCreatureTypes if effect.savingThrow is not None else None,
-        targetCreatureTypes=effect.targetCreatureTypes,
-        sourceHealing=effect.sourceHealing,
-        maxHitPointReduction=effect.maxHitPointReduction,
-        conditionEffects=spell_damage_condition_effects(effect, sheet, spell),
-        restType=effect.restType,
+    return build_direct_spell_damage_roll_payload(
+        sheet,
+        roller,
+        spell,
+        effect_index,
+        spell_slot_level,
+        instance_index,
+        damage_save_succeeded,
+        choice_index,
     )
 
 
-def build_spell_damage_save_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, effect_index: int = 0) -> RollPayload:
-    effect = spell_damage_effect_at(spell, effect_index)
-    if effect is None or effect.savingThrow is None:
-        raise ValueError("Spell damage save effect not found")
-    created_at = time_ns()
-    return RollPayload(
-        id=f"roll-{created_at}",
-        sheetId=sheet.id,
-        tokenId=sheet.tokenId,
-        roller=roller,
-        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=f"damage-save-{effect_index}"),
-        sourceLabel=enum_label(spell.name),
-        resolution=RollResolutionMode.NONE,
-        label=f"{enum_label(effect.savingThrow.ability)} Save",
-        iconUrl=None,
-        dice=[],
-        diceType=DiceType.D20,
-        die=enum_key(DiceType.D20),
-        modifier=0,
-        modifierBreakdown=[],
-        total=0,
-        createdAt=created_at,
-        damageSavingThrow=effect.savingThrow.ability,
-        damageSaveDc=spell_save_dc(sheet, spell),
-        damageSaveOutcome=effect.savingThrow.outcome,
-        damageSaveDisadvantageCreatureTypes=effect.savingThrow.disadvantageCreatureTypes,
-        damageSaveForcedFailureCreatureTypes=effect.savingThrow.forcedFailureCreatureTypes,
-        targetCreatureTypes=effect.targetCreatureTypes,
-    )
 
 
-def spell_damage_roll_component(
-    sheet: CharacterSheet,
-    spell: SpellEntry,
-    damage: SpellDamageEffect,
-    scaling: list[SpellScaling] | None,
-    spell_slot_level: int | None,
-) -> RollDamageComponent:
-    dice_count = scaled_spell_effect_dice_count(damage.dice.diceCount, scaling, sheet, spell.level, spell_slot_level)
-    dice_type = damage.dice.diceType
-    dice = [random.randint(1, dice_type.value) for _ in range(dice_count)]
-    modifier_breakdown = []
-    static_bonus = damage.dice.staticBonus
-    if static_bonus:
-        modifier_breakdown.append(RollModifierBreakdown(source="Spell", value=static_bonus))
-    if damage.dice.bonusAbility is not None:
-        ability_score = getattr(sheet.abilityScores, enum_key(damage.dice.bonusAbility))
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(damage.dice.bonusAbility), value=ability_modifier(ability_score)))
-    if damage.dice.bonusSpellcastingAbility:
-        casting_ability = spell_casting_ability(sheet, spell)
-        ability_score = getattr(sheet.abilityScores, enum_key(casting_ability))
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(casting_ability), value=ability_modifier(ability_score)))
-    scaled_static_bonus = scaled_spell_effect_static_bonus(damage.dice.staticBonus, scaling, spell.level, spell_slot_level)
-    if scaled_static_bonus != damage.dice.staticBonus:
-        modifier_breakdown.append(RollModifierBreakdown(source="Spell Slot", value=scaled_static_bonus - damage.dice.staticBonus))
-    modifier = sum(part.value for part in modifier_breakdown)
-    return RollDamageComponent(
-        damageType=damage.damageType,
-        dice=dice,
-        diceType=dice_type,
-        die=dice_formula(dice_count, dice_type),
-        modifier=modifier,
-        modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + modifier,
-    )
+
 
 
 def active_spell_damage_roll_modifier_breakdown(sheet: CharacterSheet) -> list[RollModifierBreakdown]:
-    if ConditionType.RAY_OF_ENFEEBLEMENT not in sheet.conditions:
-        return []
-    effect = ACTIVE_CONDITION_ROLL_MODIFIERS[ConditionType.RAY_OF_ENFEEBLEMENT]
-    value = sum(random.randint(1, effect.dice.diceType.value) for _ in range(effect.dice.diceCount)) if effect.dice is not None else effect.staticBonus
-    if effect.operation == RollModifierEffectOperation.SUBTRACT:
-        value = -value
-    return [RollModifierBreakdown(source=enum_label(ConditionType.RAY_OF_ENFEEBLEMENT), value=value, description=effect.description)]
+    return [
+        entry
+        for entry in active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.DAMAGE_ROLL)
+        if entry.source == enum_label(ConditionType.RAY_OF_ENFEEBLEMENT)
+    ]
 
 
 def build_spell_healing_roll_payload(
@@ -2290,50 +2183,12 @@ def build_spell_healing_roll_payload(
     effect_index: int = 0,
     spell_slot_level: int | None = None,
 ) -> RollPayload:
-    effect = spell_healing_effect_at(spell, effect_index)
-    if effect is None or effect.healing is None:
-        raise ValueError("Spell healing effect not found")
+    if spell.mechanics is None:
+        raise ValueError("Spell has no mechanics")
+    from dnd_board.rules.shared.character_effects import build_direct_spell_healing_roll_payload
 
-    dice_count = scaled_spell_effect_dice_count(effect.healing.dice.diceCount, effect.scaling, sheet, spell.level, spell_slot_level)
-    dice_type = effect.healing.dice.diceType
-    dice = [random.randint(1, dice_type.value) for _ in range(dice_count)]
-    modifier_breakdown = []
-    static_bonus = effect.healing.dice.staticBonus
-    if static_bonus:
-        modifier_breakdown.append(RollModifierBreakdown(source="Spell", value=static_bonus))
-    if effect.healing.dice.bonusAbility is not None:
-        ability_score = getattr(sheet.abilityScores, enum_key(effect.healing.dice.bonusAbility))
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(effect.healing.dice.bonusAbility), value=ability_modifier(ability_score)))
-    if effect.healing.dice.bonusSpellcastingAbility:
-        casting_ability = spell_casting_ability(sheet, spell)
-        ability_score = getattr(sheet.abilityScores, enum_key(casting_ability))
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(casting_ability), value=ability_modifier(ability_score)))
-    scaled_static_bonus = scaled_spell_effect_static_bonus(effect.healing.dice.staticBonus, effect.scaling, spell.level, spell_slot_level)
-    if scaled_static_bonus != effect.healing.dice.staticBonus:
-        modifier_breakdown.append(RollModifierBreakdown(source="Spell Slot", value=scaled_static_bonus - effect.healing.dice.staticBonus))
-    modifier = sum(part.value for part in modifier_breakdown)
-    created_at = time_ns()
-    return RollPayload(
-        id=f"roll-{created_at}",
-        sheetId=sheet.id,
-        tokenId=sheet.tokenId,
-        roller=roller,
-        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=spell_healing_action_id(effect_index, spell_slot_level)),
-        sourceLabel=enum_label(spell.name),
-        resolution=RollResolutionMode.HEAL_SELF,
-        label=spell_healing_roll_label(effect),
-        iconUrl=None,
-        dice=dice,
-        diceType=dice_type,
-        die=dice_formula(dice_count, dice_type),
-        modifier=modifier,
-        modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + modifier,
-        createdAt=created_at,
-        conditionRemovals=effect.conditionRemovals,
-        maxHitPointIncrease=effect.maxHitPointIncrease,
-        restType=effect.restType,
-    )
+    return build_direct_spell_healing_roll_payload(sheet, roller, spell, effect_index, spell_slot_level)
+
 
 
 def build_spell_temporary_hit_points_roll_payload(
@@ -2343,163 +2198,37 @@ def build_spell_temporary_hit_points_roll_payload(
     effect_index: int = 0,
     spell_slot_level: int | None = None,
 ) -> RollPayload:
-    effect = spell_temporary_hit_points_effect_at(spell, effect_index)
-    if effect is None or effect.temporaryHitPoints is None:
-        raise ValueError("Spell temporary hit points effect not found")
+    if spell.mechanics is None:
+        raise ValueError("Spell has no mechanics")
+    from dnd_board.rules.shared.character_effects import build_direct_spell_temporary_hit_points_roll_payload
 
-    dice_count = scaled_spell_effect_dice_count(effect.temporaryHitPoints.diceCount, effect.scaling, sheet, spell.level, spell_slot_level)
-    dice_type = effect.temporaryHitPoints.diceType
-    dice = [random.randint(1, dice_type.value) for _ in range(dice_count)]
-    modifier_breakdown = []
-    static_bonus = effect.temporaryHitPoints.staticBonus
-    if static_bonus:
-        modifier_breakdown.append(RollModifierBreakdown(source="Spell", value=static_bonus))
-    if effect.temporaryHitPoints.bonusAbility is not None:
-        ability_score = getattr(sheet.abilityScores, enum_key(effect.temporaryHitPoints.bonusAbility))
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(effect.temporaryHitPoints.bonusAbility), value=ability_modifier(ability_score)))
-    if effect.temporaryHitPoints.bonusSpellcastingAbility:
-        casting_ability = spell_casting_ability(sheet, spell)
-        ability_score = getattr(sheet.abilityScores, enum_key(casting_ability))
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(casting_ability), value=ability_modifier(ability_score)))
-    scaled_static_bonus = scaled_spell_effect_static_bonus(effect.temporaryHitPoints.staticBonus, effect.scaling, spell.level, spell_slot_level)
-    if scaled_static_bonus != effect.temporaryHitPoints.staticBonus:
-        modifier_breakdown.append(RollModifierBreakdown(source="Spell Slot", value=scaled_static_bonus - effect.temporaryHitPoints.staticBonus))
-    modifier = sum(part.value for part in modifier_breakdown)
-    created_at = time_ns()
-    return RollPayload(
-        id=f"roll-{created_at}",
-        sheetId=sheet.id,
-        tokenId=sheet.tokenId,
-        roller=roller,
-        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=f"temporary-hit-points-{effect_index}"),
-        sourceLabel=enum_label(spell.name),
-        resolution=RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS,
-        label=effect.actionLabel or "Temporary Hit Points",
-        iconUrl=None,
-        dice=dice,
-        diceType=dice_type,
-        die=dice_formula(dice_count, dice_type),
-        modifier=modifier,
-        modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + modifier,
-        createdAt=created_at,
-        conditionEffects=spell_damage_condition_effects(effect, sheet, spell),
-    )
+    return build_direct_spell_temporary_hit_points_roll_payload(sheet, roller, spell, effect_index, spell_slot_level)
 
 
-def build_spell_condition_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, effect_index: int = 0, condition_effect_succeeded: bool | None = None) -> RollPayload:
-    effect = spell_condition_effect_at(spell, effect_index)
-    if effect is None or not effect.conditions:
-        raise ValueError("Spell condition effect not found")
-    casting_ability = spell_casting_ability(sheet, spell) if effect.savingThrow is not None else None
-    save_dc = spell_save_dc(sheet, spell) if effect.savingThrow is not None else None
-    condition_effects = [
-        ConditionEffect(
-            condition=condition.condition,
-            mode=ConditionApplicationMode.TARGET_SAVE if effect.savingThrow is not None else ConditionApplicationMode.DIRECT,
-            savingThrow=effect.savingThrow.ability if effect.savingThrow is not None else None,
-            saveDcAbility=casting_ability,
-            saveDc=save_dc,
-            duration=condition.duration,
-            removalTrigger=condition.removalTrigger,
-            removalSavingThrow=effect.savingThrow.ability if condition.removalTrigger is not None and effect.savingThrow is not None else None,
-            removalSaveDc=save_dc if condition.removalTrigger is not None else None,
-            removalAdvantage=condition.removalAdvantage,
-            description=effect.description,
-        )
-        for condition in effect.conditions
-    ]
-    created_at = time_ns()
-    return RollPayload(
-        id=f"roll-{created_at}",
-        sheetId=sheet.id,
-        tokenId=sheet.tokenId,
-        roller=roller,
-        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=spell_condition_action_id(effect_index)),
-        sourceLabel=enum_label(spell.name),
-        resolution=RollResolutionMode.NONE,
-        label=f"{effect.actionLabel} Effect" if effect.actionLabel else "Spell Effect",
-        iconUrl=None,
-        dice=[],
-        diceType=DiceType.D20,
-        die="",
-        modifier=0,
-        modifierBreakdown=[],
-        total=0,
-        createdAt=created_at,
-        targetCreatureTypes=effect.targetCreatureTypes,
-        conditionEffects=condition_effects,
-        conditionEffectSucceeded=condition_effect_succeeded,
-        conditionRemovals=effect.conditionRemovals,
-    )
+
+def build_spell_condition_roll_payload(
+    sheet: CharacterSheet,
+    roller: str,
+    spell: SpellEntry,
+    effect_index: int = 0,
+    choice_index: int | None = None,
+) -> RollPayload:
+    if spell.mechanics is None:
+        raise ValueError("Spell has no mechanics")
+    from dnd_board.rules.shared.character_effects import build_direct_spell_condition_roll_payload
+
+    return build_direct_spell_condition_roll_payload(sheet, roller, spell, effect_index, choice_index)
 
 
-def build_spell_condition_save_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, effect_index: int = 0) -> RollPayload:
-    effect = spell_condition_effect_at(spell, effect_index)
-    if effect is None or not effect.conditions:
-        raise ValueError("Spell condition effect not found")
-    condition_effects = spell_damage_condition_effects(effect, sheet, spell)
-    if not condition_effects or not any(condition.mode in {ConditionApplicationMode.TARGET_SAVE, ConditionApplicationMode.SOURCE_CHECK} for condition in condition_effects):
-        raise ValueError("Spell condition save/check effect not found")
-    first = condition_effects[0]
-    label = f"{enum_label(first.savingThrow)} Save" if first.mode == ConditionApplicationMode.TARGET_SAVE and first.savingThrow is not None else "Contest Check"
-    created_at = time_ns()
-    return RollPayload(
-        id=f"roll-{created_at}",
-        sheetId=sheet.id,
-        tokenId=sheet.tokenId,
-        roller=roller,
-        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=f"condition-save-{effect_index}"),
-        sourceLabel=enum_label(spell.name),
-        resolution=RollResolutionMode.NONE,
-        label=label,
-        iconUrl=None,
-        dice=[],
-        diceType=DiceType.D20,
-        die=enum_key(DiceType.D20),
-        modifier=0,
-        modifierBreakdown=[],
-        total=0,
-        createdAt=created_at,
-        targetCreatureTypes=effect.targetCreatureTypes,
-        conditionEffects=condition_effects,
-    )
 
 
-def spell_damage_effect_at(spell: SpellEntry, effect_index: int) -> SpellEffect | None:
-    if effect_index < 0 or spell.effects is None:
-        return None
-    damage_effects = [effect for effect in spell.effects if effect.kind == SpellEffectKind.DAMAGE and effect.damage is not None]
-    if effect_index >= len(damage_effects):
-        return None
-    return damage_effects[effect_index]
 
 
-def spell_healing_effect_at(spell: SpellEntry, effect_index: int) -> SpellEffect | None:
-    if effect_index < 0 or spell.effects is None:
-        return None
-    healing_effects = [effect for effect in spell.effects if effect.kind == SpellEffectKind.HEALING and effect.healing is not None]
-    if effect_index >= len(healing_effects):
-        return None
-    return healing_effects[effect_index]
 
 
-def spell_temporary_hit_points_effect_at(spell: SpellEntry, effect_index: int) -> SpellEffect | None:
-    if effect_index < 0 or spell.effects is None:
-        return None
-    temporary_hit_points_effects = [effect for effect in spell.effects if effect.kind == SpellEffectKind.TEMPORARY_HIT_POINTS and effect.temporaryHitPoints is not None]
-    if effect_index >= len(temporary_hit_points_effects):
-        return None
-    return temporary_hit_points_effects[effect_index]
 
 
-def spell_condition_effect_at(spell: SpellEntry, effect_index: int) -> SpellEffect | None:
-    if effect_index < 0 or spell.effects is None:
-        return None
-    condition_effects = [effect for effect in spell.effects if effect.kind == SpellEffectKind.CONDITION and effect.conditions]
-    if effect_index >= len(condition_effects):
-        return None
-    return condition_effects[effect_index]
+
 
 
 def spell_damage_action_id(effect_index: int, spell_slot_level: int | None = None, instance_index: int | None = None) -> str:
@@ -2513,49 +2242,23 @@ def spell_healing_action_id(effect_index: int, spell_slot_level: int | None = No
     return f"healing-{effect_index}{slot_suffix}"
 
 
-def spell_damage_roll_label(effect: SpellEffect, instance_index: int, instance_count: int) -> str:
-    prefix = effect.actionLabel or "Spell"
-    if instance_count <= 1:
-        return f"{prefix} Damage"
-    return f"{effect.instanceLabel or 'Instance'} {instance_index + 1} Damage"
 
 
-def spell_healing_roll_label(effect: SpellEffect) -> str:
-    return f"{effect.actionLabel} Healing" if effect.actionLabel else "Healing"
 
 
 def spell_condition_action_id(effect_index: int) -> str:
     return f"condition-{effect_index}"
 
 
-def spell_damage_condition_effects(effect: SpellEffect, sheet: CharacterSheet, spell: SpellEntry) -> list[ConditionEffect] | None:
-    if not effect.conditions:
-        return None
-    condition_effects = []
-    for condition in effect.conditions:
-        saving_throw = condition.savingThrow or (effect.savingThrow.ability if effect.savingThrow is not None else None)
-        save_dc = spell_save_dc(sheet, spell) if saving_throw is not None else None
-        condition_effects.append(
-            ConditionEffect(
-                condition=condition.condition,
-                mode=ConditionApplicationMode.TARGET_SAVE if saving_throw is not None else ConditionApplicationMode.DIRECT,
-                savingThrow=saving_throw,
-                saveDcAbility=spell_casting_ability(sheet, spell) if saving_throw is not None else None,
-                saveDc=save_dc,
-                duration=condition.duration,
-                removalTrigger=condition.removalTrigger,
-                removalSavingThrow=saving_throw if condition.removalTrigger is not None else None,
-                removalSaveDc=save_dc if condition.removalTrigger is not None else None,
-                removalAdvantage=condition.removalAdvantage,
-                description=effect.description,
-            )
-        )
-    return condition_effects
 
 
 def first_spell_damage_type(spell: SpellEntry) -> DamageType | None:
-    effect = spell_damage_effect_at(spell, 0)
-    return effect.damage.damageType if effect is not None and effect.damage is not None else None
+    if spell.mechanics is None:
+        return None
+    from dnd_board.rules.shared.character_effects import direct_damage_effect_at
+
+    direct_damage = direct_damage_effect_at(spell.mechanics, 0)
+    return direct_damage.damageType if direct_damage is not None else None
 
 
 def spell_save_dc(sheet: CharacterSheet, spell: SpellEntry) -> int:
@@ -2592,61 +2295,16 @@ def spell_casting_ability(sheet: CharacterSheet, spell: SpellEntry) -> AbilityTy
     raise ValueError("Spell casting ability not found")
 
 
-def scaled_spell_effect_dice_count(
-    base_count: int,
-    scaling: list[SpellScaling] | None,
-    sheet: CharacterSheet,
-    spell_level: int = 0,
-    spell_slot_level: int | None = None,
-) -> int:
-    if not scaling:
-        return base_count
-    total = base_count
-    total_level = sum(character_class.level for character_class in sheet.classes) or 1
-    for rule in scaling:
-        if rule.scalingType == SpellScalingType.CANTRIP_LEVEL and rule.additionalDice is not None:
-            total += sum(1 for level in (5, 11, 17) if total_level >= level) * rule.additionalDice.diceCount
-        if rule.scalingType == SpellScalingType.SPELL_SLOT_LEVEL and rule.additionalDice is not None and spell_slot_level is not None:
-            total += max(0, spell_slot_level - spell_level) // rule.interval * rule.additionalDice.diceCount
-    return total
 
 
-def scaled_spell_effect_static_bonus(
-    base_bonus: int,
-    scaling: list[SpellScaling] | None,
-    spell_level: int = 0,
-    spell_slot_level: int | None = None,
-) -> int:
-    if not scaling:
-        return base_bonus
-    total = base_bonus
-    for rule in scaling:
-        if rule.scalingType == SpellScalingType.SPELL_SLOT_LEVEL and spell_slot_level is not None:
-            total += max(0, spell_slot_level - spell_level) // rule.interval * rule.additionalStaticBonus
-    return total
 
 
-def scaled_spell_effect_instance_count(
-    effect: SpellEffect,
-    sheet: CharacterSheet | None = None,
-    spell_level: int = 0,
-    spell_slot_level: int | None = None,
-) -> int:
-    total = max(1, effect.instances)
-    total_level = sum(character_class.level for character_class in sheet.classes) if sheet is not None else 1
-    total_level = total_level or 1
-    for rule in effect.scaling or []:
-        if rule.scalingType == SpellScalingType.CANTRIP_LEVEL:
-            total += sum(1 for level in (5, 11, 17) if total_level >= level) * rule.additionalInstances
-        if rule.scalingType == SpellScalingType.SPELL_SLOT_LEVEL and spell_slot_level is not None:
-            total += max(0, spell_slot_level - spell_level) // rule.interval * rule.additionalInstances
-    return total
 
 
 def build_ability_check_roll_payload(sheet: CharacterSheet, roller: str, ability: AbilityType) -> RollPayload:
     ability_score = getattr(sheet.abilityScores, enum_key(ability))
     modifier_breakdown = [RollModifierBreakdown(source=enum_label(ability), value=ability_modifier(ability_score))]
-    modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.ABILITY_CHECK))
+    modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.ABILITY_CHECK, ability))
     modifier_breakdown.extend(exhaustion_d20_modifier_breakdown(sheet))
     advantage_conditions = condition_ability_check_advantage_conditions(sheet, ability)
     disadvantage_conditions = condition_ability_check_disadvantage_conditions(sheet, ability)
@@ -2672,10 +2330,8 @@ def build_saving_throw_roll_payload(sheet: CharacterSheet, roller: str, ability:
         modifier_breakdown = [RollModifierBreakdown(source=enum_label(ability), value=ability_modifier_value)]
         if save.proficient:
             modifier_breakdown.append(RollModifierBreakdown(source="Proficiency", value=sheet.proficiencyBonus))
-    if ability == AbilityType.DEXTERITY and ConditionType.SLOWED in sheet.conditions:
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(ConditionType.SLOWED), value=-2, description="Subtract 2 from Dexterity saving throws."))
     modifier_breakdown.extend(cover_saving_throw_bonus_breakdown(sheet.conditions, ability))
-    modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.SAVING_THROW))
+    modifier_breakdown.extend(active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.SAVING_THROW, ability))
     modifier_breakdown.extend(exhaustion_d20_modifier_breakdown(sheet))
     advantage_conditions = condition_saving_throw_advantage_conditions(sheet, ability)
     disadvantage_conditions = condition_saving_throw_disadvantage_conditions(sheet, ability)
@@ -2692,66 +2348,6 @@ def build_saving_throw_roll_payload(sheet: CharacterSheet, roller: str, ability:
         advantage_conditions=advantage_conditions,
         disadvantage_conditions=disadvantage_conditions,
     )
-
-
-ACTIVE_CONDITION_ROLL_MODIFIERS: dict[ConditionType, SpellRollModifierEffect] = {
-    ConditionType.BANE: SpellRollModifierEffect(
-        condition=ConditionType.BANE,
-        operation=RollModifierEffectOperation.SUBTRACT,
-        targets=[RollModifierEffectTarget.ATTACK_ROLL, RollModifierEffectTarget.SAVING_THROW],
-        dice=SpellEffectDice(1, DiceType.D4),
-        description="Subtract 1d4 from attack rolls and saving throws.",
-    ),
-    ConditionType.BLESSED: SpellRollModifierEffect(
-        condition=ConditionType.BLESSED,
-        operation=RollModifierEffectOperation.ADD,
-        targets=[RollModifierEffectTarget.ATTACK_ROLL, RollModifierEffectTarget.SAVING_THROW],
-        dice=SpellEffectDice(1, DiceType.D4),
-        description="Add 1d4 to attack rolls and saving throws.",
-    ),
-    ConditionType.GUIDANCE: SpellRollModifierEffect(
-        condition=ConditionType.GUIDANCE,
-        operation=RollModifierEffectOperation.ADD,
-        targets=[RollModifierEffectTarget.ABILITY_CHECK],
-        dice=SpellEffectDice(1, DiceType.D4),
-        description="Add 1d4 to an ability check.",
-    ),
-    ConditionType.SYNAPTIC_STATIC: SpellRollModifierEffect(
-        condition=ConditionType.SYNAPTIC_STATIC,
-        operation=RollModifierEffectOperation.SUBTRACT,
-        targets=[RollModifierEffectTarget.ATTACK_ROLL, RollModifierEffectTarget.ABILITY_CHECK, RollModifierEffectTarget.CONCENTRATION_SAVE],
-        dice=SpellEffectDice(1, DiceType.D6),
-        description="Subtract 1d6 from attack rolls, ability checks, and concentration saving throws.",
-    ),
-    ConditionType.WARDING_BOND: SpellRollModifierEffect(
-        condition=ConditionType.WARDING_BOND,
-        operation=RollModifierEffectOperation.ADD,
-        targets=[RollModifierEffectTarget.SAVING_THROW],
-        staticBonus=1,
-        description="Add 1 to saving throws from Warding Bond.",
-    ),
-    ConditionType.ENLARGED: SpellRollModifierEffect(
-        condition=ConditionType.ENLARGED,
-        operation=RollModifierEffectOperation.ADD,
-        targets=[RollModifierEffectTarget.DAMAGE_ROLL],
-        dice=SpellEffectDice(1, DiceType.D4),
-        description="Add 1d4 to weapon and Unarmed Strike damage rolls while Enlarged.",
-    ),
-    ConditionType.RAY_OF_ENFEEBLEMENT: SpellRollModifierEffect(
-        condition=ConditionType.RAY_OF_ENFEEBLEMENT,
-        operation=RollModifierEffectOperation.SUBTRACT,
-        targets=[RollModifierEffectTarget.DAMAGE_ROLL],
-        dice=SpellEffectDice(1, DiceType.D8),
-        description="Subtract 1d8 from damage rolls while enfeebled.",
-    ),
-    ConditionType.REDUCED: SpellRollModifierEffect(
-        condition=ConditionType.REDUCED,
-        operation=RollModifierEffectOperation.SUBTRACT,
-        targets=[RollModifierEffectTarget.DAMAGE_ROLL],
-        dice=SpellEffectDice(1, DiceType.D4),
-        description="Subtract 1d4 from weapon and Unarmed Strike damage rolls while Reduced.",
-    ),
-}
 
 
 DAMAGE_RESISTANCE_CONDITIONS: dict[ConditionType, DamageType] = {
@@ -2771,36 +2367,76 @@ DAMAGE_RESISTANCE_CONDITIONS: dict[ConditionType, DamageType] = {
 }
 
 
-TRUE_DAMAGE_RESISTANCE_CONDITIONS: dict[ConditionType, DamageType] = {
-    ConditionType.RESISTANT_ACID: DamageType.ACID,
-    ConditionType.RESISTANT_BLUDGEONING: DamageType.BLUDGEONING,
-    ConditionType.RESISTANT_COLD: DamageType.COLD,
-    ConditionType.RESISTANT_FIRE: DamageType.FIRE,
-    ConditionType.RESISTANT_FORCE: DamageType.FORCE,
-    ConditionType.RESISTANT_LIGHTNING: DamageType.LIGHTNING,
-    ConditionType.RESISTANT_NECROTIC: DamageType.NECROTIC,
-    ConditionType.RESISTANT_PIERCING: DamageType.PIERCING,
-    ConditionType.RESISTANT_POISON: DamageType.POISON,
-    ConditionType.RESISTANT_PSYCHIC: DamageType.PSYCHIC,
-    ConditionType.RESISTANT_RADIANT: DamageType.RADIANT,
-    ConditionType.RESISTANT_SLASHING: DamageType.SLASHING,
-    ConditionType.RESISTANT_THUNDER: DamageType.THUNDER,
-}
+def active_roll_modifier_breakdown(
+    sheet: CharacterSheet,
+    target: RollModifierEffectTarget,
+    ability: AbilityType | None = None,
+) -> list[RollModifierBreakdown]:
+    from dnd_board.rules.shared.character_effects import active_ongoing_modifiers
+    from dnd_board.rules.shared.condition_effects import condition_modifiers
+    from dnd_board.rules.shared.effects import CalculationType, DiceAmount, FixedAmount, ModifierOperation
 
-
-def active_roll_modifier_breakdown(sheet: CharacterSheet, target: RollModifierEffectTarget) -> list[RollModifierBreakdown]:
+    calculations = {
+        RollModifierEffectTarget.ATTACK_ROLL: CalculationType.ATTACK_ROLL,
+        RollModifierEffectTarget.DAMAGE_ROLL: CalculationType.DAMAGE_ROLL,
+        RollModifierEffectTarget.SAVING_THROW: CalculationType.SAVING_THROW,
+        RollModifierEffectTarget.ABILITY_CHECK: CalculationType.ABILITY_CHECK,
+        RollModifierEffectTarget.CONCENTRATION_SAVE: CalculationType.CONCENTRATION_SAVE,
+        RollModifierEffectTarget.ARMOR_CLASS: CalculationType.ARMOR_CLASS,
+    }
     modifiers: list[RollModifierBreakdown] = []
-    for condition in sheet.conditions:
-        effect = ACTIVE_CONDITION_ROLL_MODIFIERS.get(condition)
-        if effect is None or target not in effect.targets:
+    entries = [
+        (enum_label(condition), effect)
+    for condition, effect in condition_modifiers(sheet.conditions, calculations[target], ability=ability, explicit_suppressions=sheet.suppressedConditions)
+    ] + [
+        (active.sourceLabel, effect)
+        for active, effect in active_ongoing_modifiers(sheet, calculations[target], ability=ability)
+    ]
+    for source_label, effect in entries:
+        if effect.operation not in {ModifierOperation.ADD, ModifierOperation.SUBTRACT}:
             continue
-        value = effect.staticBonus
-        if effect.dice is not None:
-            value += sum(random.randint(1, effect.dice.diceType.value) for _ in range(effect.dice.diceCount))
-        if effect.operation == RollModifierEffectOperation.SUBTRACT:
+        value = effect.amount.value if isinstance(effect.amount, FixedAmount) else 0
+        if isinstance(effect.amount, DiceAmount):
+            value += effect.amount.staticBonus + sum(random.randint(1, effect.amount.diceType.value) for _ in range(effect.amount.diceCount))
+        if effect.operation == ModifierOperation.SUBTRACT:
             value = -value
-        modifiers.append(RollModifierBreakdown(source=enum_label(condition), value=value, description=effect.description))
+        modifiers.append(RollModifierBreakdown(source=source_label, value=value, description=effect.description))
     return modifiers
+
+
+def active_minimum_modifier(
+    sheet: CharacterSheet,
+    target: RollModifierEffectTarget,
+) -> tuple[str, int] | None:
+    from dnd_board.rules.shared.character_effects import active_ongoing_modifiers
+    from dnd_board.rules.shared.condition_effects import condition_modifiers
+    from dnd_board.rules.shared.effects import CalculationType, FixedAmount, ModifierOperation
+
+    calculations = {
+        RollModifierEffectTarget.ATTACK_ROLL: CalculationType.ATTACK_ROLL,
+        RollModifierEffectTarget.DAMAGE_ROLL: CalculationType.DAMAGE_ROLL,
+        RollModifierEffectTarget.SAVING_THROW: CalculationType.SAVING_THROW,
+        RollModifierEffectTarget.ABILITY_CHECK: CalculationType.ABILITY_CHECK,
+        RollModifierEffectTarget.CONCENTRATION_SAVE: CalculationType.CONCENTRATION_SAVE,
+        RollModifierEffectTarget.ARMOR_CLASS: CalculationType.ARMOR_CLASS,
+    }
+    entries = [
+        (enum_label(condition), modifier)
+        for condition, modifier in condition_modifiers(
+            sheet.conditions,
+            calculations[target],
+            explicit_suppressions=sheet.suppressedConditions,
+        )
+    ] + [
+        (active.sourceLabel, modifier)
+        for active, modifier in active_ongoing_modifiers(sheet, calculations[target])
+    ]
+    minimums = [
+        (source, modifier.amount.value)
+        for source, modifier in entries
+        if modifier.operation == ModifierOperation.MINIMUM and isinstance(modifier.amount, FixedAmount)
+    ]
+    return max(minimums, key=lambda entry: entry[1]) if minimums else None
 
 
 def exhaustion_d20_modifier_breakdown(sheet: CharacterSheet) -> list[RollModifierBreakdown]:
@@ -2816,202 +2452,197 @@ def exhaustion_d20_modifier_breakdown(sheet: CharacterSheet) -> list[RollModifie
     ]
 
 
-CONDITION_SAVING_THROW_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
-    ConditionType.ENLARGED: {AbilityType.STRENGTH},
-    ConditionType.HASTED: {AbilityType.DEXTERITY},
-}
-
-CONDITION_SAVING_THROW_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
-    ConditionType.RAY_OF_ENFEEBLEMENT: {AbilityType.STRENGTH},
-    ConditionType.REDUCED: {AbilityType.STRENGTH},
-    ConditionType.RESTRAINED: {AbilityType.DEXTERITY},
-}
-
-CONDITION_SAVING_THROW_FORCED_FAILURES: dict[ConditionType, set[AbilityType] | None] = {
-    ConditionType.PARALYZED: {AbilityType.STRENGTH, AbilityType.DEXTERITY},
-    ConditionType.PETRIFIED: {AbilityType.STRENGTH, AbilityType.DEXTERITY},
-    ConditionType.STUNNED: {AbilityType.STRENGTH, AbilityType.DEXTERITY},
-    ConditionType.UNCONSCIOUS: {AbilityType.STRENGTH, AbilityType.DEXTERITY},
-}
-
-CONDITION_OUTGOING_ATTACK_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
-    ConditionType.HEAVILY_OBSCURED: None,
-    ConditionType.INVISIBLE: None,
-}
-
-CONDITION_OUTGOING_ATTACK_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
-    ConditionType.BLINDED: None,
-    ConditionType.FRIGHTENED: None,
-    ConditionType.PHANTASMAL_KILLER: None,
-    ConditionType.POISONED: None,
-    ConditionType.PRONE: None,
-    ConditionType.RESTRAINED: None,
-}
-
-CONDITION_INCOMING_ATTACK_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
-    ConditionType.BLINDED: None,
-    ConditionType.FAERIE_FIRE: None,
-    ConditionType.PARALYZED: None,
-    ConditionType.PETRIFIED: None,
-    ConditionType.RESTRAINED: None,
-    ConditionType.STUNNED: None,
-    ConditionType.UNCONSCIOUS: None,
-}
-
-CONDITION_INCOMING_ATTACK_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
-    ConditionType.BLURRED: None,
-    ConditionType.HEAVILY_OBSCURED: None,
-    ConditionType.INVISIBLE: None,
-}
-
-CONDITION_ABILITY_CHECK_DISADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
-    ConditionType.FRIGHTENED: None,
-    ConditionType.PHANTASMAL_KILLER: None,
-    ConditionType.POISONED: None,
-    ConditionType.RAY_OF_ENFEEBLEMENT: {AbilityType.STRENGTH},
-    ConditionType.REDUCED: {AbilityType.STRENGTH},
-}
-
-CONDITION_ABILITY_CHECK_ADVANTAGES: dict[ConditionType, set[AbilityType] | None] = {
-    ConditionType.ENHANCE_ABILITY_CHARISMA: {AbilityType.CHARISMA},
-    ConditionType.ENHANCE_ABILITY_DEXTERITY: {AbilityType.DEXTERITY},
-    ConditionType.ENHANCE_ABILITY_INTELLIGENCE: {AbilityType.INTELLIGENCE},
-    ConditionType.ENHANCE_ABILITY_STRENGTH: {AbilityType.STRENGTH},
-    ConditionType.ENHANCE_ABILITY_WISDOM: {AbilityType.WISDOM},
-    ConditionType.ENLARGED: {AbilityType.STRENGTH},
-}
-
-
-def condition_saving_throw_advantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
-    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_SAVING_THROW_ADVANTAGES)
+def condition_saving_throw_advantage_conditions(
+    sheet: CharacterSheet,
+    ability: AbilityType,
+    pending_conditions: list[ConditionType] | None = None,
+) -> list[ConditionType]:
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    return modifier_conditions(
+        sheet.conditions,
+        CalculationType.SAVING_THROW,
+        ModifierOperation.ADVANTAGE,
+        ability=ability,
+        explicit_suppressions=sheet.suppressedConditions,
+        pending_conditions=pending_conditions,
+    )
 
 
 def condition_saving_throw_disadvantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
-    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_SAVING_THROW_DISADVANTAGES)
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    return modifier_conditions(sheet.conditions, CalculationType.SAVING_THROW, ModifierOperation.DISADVANTAGE, ability=ability, explicit_suppressions=sheet.suppressedConditions)
 
 
 def condition_saving_throw_forced_failure_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
-    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_SAVING_THROW_FORCED_FAILURES)
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    return modifier_conditions(sheet.conditions, CalculationType.SAVING_THROW, ModifierOperation.FORCE_FAILURE, ability=ability, explicit_suppressions=sheet.suppressedConditions)
 
 
 def condition_outgoing_attack_advantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
-    return condition_roll_conditions(sheet.conditions, CONDITION_OUTGOING_ATTACK_ADVANTAGES)
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    return modifier_conditions(sheet.conditions, CalculationType.ATTACK_ROLL, ModifierOperation.ADVANTAGE, explicit_suppressions=sheet.suppressedConditions)
 
 
 def condition_outgoing_attack_disadvantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
-    return condition_roll_conditions(sheet.conditions, CONDITION_OUTGOING_ATTACK_DISADVANTAGES)
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    return modifier_conditions(sheet.conditions, CalculationType.ATTACK_ROLL, ModifierOperation.DISADVANTAGE, explicit_suppressions=sheet.suppressedConditions)
 
 
 def condition_incoming_attack_advantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
-    return condition_roll_conditions(sheet.conditions, CONDITION_INCOMING_ATTACK_ADVANTAGES)
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    return modifier_conditions(sheet.conditions, CalculationType.ATTACK_ROLL, ModifierOperation.ADVANTAGE, against_owner=True, explicit_suppressions=sheet.suppressedConditions)
 
 
 def condition_incoming_attack_disadvantage_conditions(sheet: CharacterSheet) -> list[ConditionType]:
-    return condition_roll_conditions(sheet.conditions, CONDITION_INCOMING_ATTACK_DISADVANTAGES)
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    return modifier_conditions(sheet.conditions, CalculationType.ATTACK_ROLL, ModifierOperation.DISADVANTAGE, against_owner=True, explicit_suppressions=sheet.suppressedConditions)
 
 
 def condition_ability_check_disadvantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
-    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_ABILITY_CHECK_DISADVANTAGES)
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    return modifier_conditions(sheet.conditions, CalculationType.ABILITY_CHECK, ModifierOperation.DISADVANTAGE, ability=ability, explicit_suppressions=sheet.suppressedConditions)
 
 
 def condition_ability_check_advantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
-    return condition_saving_throw_roll_conditions(sheet.conditions, ability, CONDITION_ABILITY_CHECK_ADVANTAGES)
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    return modifier_conditions(sheet.conditions, CalculationType.ABILITY_CHECK, ModifierOperation.ADVANTAGE, ability=ability, explicit_suppressions=sheet.suppressedConditions)
 
 
-def condition_roll_conditions(
+def modifier_conditions(
     conditions: list[ConditionType],
-    rule_map: dict[ConditionType, set[AbilityType] | None],
+    calculation: CalculationType,
+    operation: ModifierOperation,
+    *,
+    ability: AbilityType | None = None,
+    against_owner: bool = False,
+    explicit_suppressions: list[ConditionType] | None = None,
+    pending_conditions: list[ConditionType] | None = None,
 ) -> list[ConditionType]:
-    return [condition for condition in conditions if condition in rule_map]
+    from dnd_board.rules.shared.condition_effects import condition_modifiers
+    from dnd_board.rules.shared.effects import ModifierScope
 
-
-def condition_saving_throw_roll_conditions(
-    conditions: list[ConditionType],
-    ability: AbilityType,
-    rule_map: dict[ConditionType, set[AbilityType] | None],
-) -> list[ConditionType]:
-    matching: list[ConditionType] = []
-    for condition in conditions:
-        abilities = rule_map.get(condition)
-        if abilities is None and condition in rule_map:
-            matching.append(condition)
-        elif abilities is not None and ability in abilities:
-            matching.append(condition)
-    return matching
-
-
-CONDITION_ARMOR_CLASS_BONUSES: dict[ConditionType, int] = {
-    ConditionType.HALF_COVER: 2,
-    ConditionType.HASTED: 2,
-    ConditionType.SHIELDED: 5,
-    ConditionType.SHIELD_OF_FAITH: 2,
-    ConditionType.SLOWED: -2,
-    ConditionType.THREE_QUARTERS_COVER: 5,
-    ConditionType.WARDING_BOND: 1,
-}
+    scope = ModifierScope.AGAINST_OWNER if against_owner else ModifierScope.OWNER
+    return [
+        condition
+        for condition, entry in condition_modifiers(
+            conditions,
+            calculation,
+            scope=scope,
+            ability=ability,
+            explicit_suppressions=explicit_suppressions,
+            pending_conditions=pending_conditions,
+        )
+        if entry.operation == operation
+    ]
 
 
 def condition_armor_class_bonus(conditions: list[ConditionType]) -> int:
-    return sum(CONDITION_ARMOR_CLASS_BONUSES.get(condition, 0) for condition in conditions)
+    from dnd_board.rules.shared.condition_effects import condition_modifiers
+    from dnd_board.rules.shared.effects import CalculationType, FixedAmount, ModifierOperation
 
-
-COVER_DEXTERITY_SAVE_BONUSES: dict[ConditionType, int] = {
-    ConditionType.HALF_COVER: 2,
-    ConditionType.THREE_QUARTERS_COVER: 5,
-}
+    total = 0
+    for _condition, entry in condition_modifiers(conditions, CalculationType.ARMOR_CLASS):
+        if not isinstance(entry.amount, FixedAmount):
+            continue
+        total += entry.amount.value if entry.operation == ModifierOperation.ADD else -entry.amount.value
+    return total
 
 
 def cover_saving_throw_bonus_breakdown(conditions: list[ConditionType], ability: AbilityType) -> list[RollModifierBreakdown]:
     if ability != AbilityType.DEXTERITY:
         return []
+    cover_bonuses = {ConditionType.HALF_COVER: 2, ConditionType.THREE_QUARTERS_COVER: 5}
     return [
         RollModifierBreakdown(
             source=enum_label(condition),
             value=bonus,
             description=f"Add {bonus} to Dexterity saving throws from cover.",
         )
-        for condition, bonus in COVER_DEXTERITY_SAVE_BONUSES.items()
+        for condition, bonus in cover_bonuses.items()
         if condition in conditions
     ]
 
 
 def condition_adjusted_armor_class(sheet: CharacterSheet) -> int:
-    bonus = condition_armor_class_bonus(sheet.conditions)
-    armor_class = sheet.armorClass + bonus
-    if ConditionType.MAGE_ARMOR in sheet.conditions and not worn_armor(sheet.equipment):
-        mage_armor_class = 13 + ability_modifier(sheet.abilityScores.dexterity) + equipped_shield_bonus(sheet.equipment) + bonus
-        armor_class = max(armor_class, mage_armor_class)
-    if ConditionType.BARKSKIN in sheet.conditions:
-        armor_class = max(armor_class, 17)
+    from dnd_board.rules.shared.character_effects import active_ongoing_modifiers
+    from dnd_board.rules.shared.condition_effects import condition_modifiers
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation, OwnerWearsArmorPredicate
+
+    entries = [
+        (enum_label(condition), modifier)
+        for condition, modifier in condition_modifiers(sheet.conditions, CalculationType.ARMOR_CLASS, explicit_suppressions=sheet.suppressedConditions)
+    ] + [
+        (active.sourceLabel, modifier)
+        for active, modifier in active_ongoing_modifiers(sheet, CalculationType.ARMOR_CLASS)
+    ]
+    armor_class = sheet.armorClass
+    for _condition, entry in entries:
+        if any(
+            isinstance(predicate, OwnerWearsArmorPredicate)
+            and bool(worn_armor(sheet.equipment)) != predicate.expected
+            for predicate in entry.predicates
+        ):
+            continue
+        amount = condition_modifier_amount(sheet, entry.amount)
+        if entry.operation == ModifierOperation.MINIMUM:
+            armor_class = max(armor_class, amount)
+        elif entry.operation == ModifierOperation.SET:
+            armor_class = amount
+    for _condition, entry in entries:
+        amount = condition_modifier_amount(sheet, entry.amount)
+        if entry.operation == ModifierOperation.ADD:
+            armor_class += amount
+        elif entry.operation == ModifierOperation.SUBTRACT:
+            armor_class -= amount
     return armor_class
+
+
+def condition_modifier_amount(sheet: CharacterSheet, amount: object) -> int:
+    from dnd_board.rules.shared.effects import AmountCalculation, CalculatedAmount, CombinedAmount, FixedAmount
+
+    if isinstance(amount, FixedAmount):
+        return amount.value
+    if isinstance(amount, CombinedAmount):
+        return sum(condition_modifier_amount(sheet, part) for part in amount.amounts)
+    if isinstance(amount, CalculatedAmount):
+        if amount.calculation == AmountCalculation.SOURCE_ABILITY_MODIFIER and amount.ability is not None:
+            return ability_modifier(getattr(sheet.abilityScores, enum_key(amount.ability))) * amount.multiplier
+        if amount.calculation == AmountCalculation.SOURCE_EQUIPPED_SHIELD_ARMOR_CLASS:
+            return equipped_shield_bonus(sheet.equipment) * amount.multiplier
+    return 0
 
 
 def condition_adjusted_speed(speed: int, conditions: list[ConditionType]) -> int:
     return condition_adjusted_speed_for_exhaustion(speed, conditions, 1 if ConditionType.EXHAUSTION in conditions else 0)
 
 
-def condition_adjusted_speed_for_exhaustion(speed: int, conditions: list[ConditionType], exhaustion_level: int) -> int:
+def condition_adjusted_speed_for_exhaustion(
+    speed: int,
+    conditions: list[ConditionType],
+    exhaustion_level: int,
+    ongoing_effects: list[ActiveOngoingEffect] | None = None,
+    suppressed_conditions: list[ConditionType] | None = None,
+) -> int:
+    from dnd_board.rules.shared.condition_effects import condition_modifiers
+    from dnd_board.rules.shared.effects import CalculationType, FixedAmount, ModifierOperation
+
+    entries = list(condition_modifiers(conditions, CalculationType.SPEED, explicit_suppressions=suppressed_conditions))
+    entries.extend(
+        (active.sourceLabel, modifier)
+        for active in ongoing_effects or []
+        for modifier in active.effect.modifiers
+        if modifier.calculation == CalculationType.SPEED
+    )
     adjusted = speed
-    if ConditionType.HASTED in conditions:
-        adjusted *= 2
-    if ConditionType.SLOWED in conditions:
-        adjusted = max(0, adjusted // 2)
-    if ConditionType.LONGSTRIDER in conditions:
-        adjusted += 10
+    for _condition, entry in entries:
+        if entry.operation == ModifierOperation.MULTIPLY:
+            adjusted = adjusted * entry.numerator // entry.denominator
+    for _condition, entry in entries:
+        if isinstance(entry.amount, FixedAmount) and entry.operation == ModifierOperation.ADD:
+            adjusted += entry.amount.value
     if exhaustion_level > 0:
         adjusted = max(0, adjusted - 5 * min(exhaustion_level, 6))
-    if any(
-        condition in conditions
-        for condition in (
-            ConditionType.GRAPPLED,
-            ConditionType.DEAD,
-            ConditionType.PARALYZED,
-            ConditionType.PETRIFIED,
-            ConditionType.RESTRAINED,
-            ConditionType.STUNNED,
-            ConditionType.UNCONSCIOUS,
-        )
-    ):
+    if any(entry.operation == ModifierOperation.SET and isinstance(entry.amount, FixedAmount) and entry.amount.value == 0 for _condition, entry in entries):
         adjusted = 0
     return adjusted
 
@@ -3080,17 +2711,41 @@ def build_roll_action_payload(
     source: RollSource,
     action: RollAction,
     source_label: str | None = None,
-    condition_effect_succeeded: bool | None = None,
-    condition_prerequisite_only: bool = False,
 ) -> RollPayload:
-    condition_effects = roll_condition_effects(sheet, action)
-    dice = [] if condition_prerequisite_only else [random.randint(1, action.diceType.value) for _ in range(action.diceCount)]
+    dice = [random.randint(1, action.diceType.value) for _ in range(action.diceCount)]
     modifier = roll_action_modifier(sheet, action)
     modifier_breakdown = []
-    if modifier and not condition_prerequisite_only:
+    if modifier:
         modifier_breakdown.append(RollModifierBreakdown(source=roll_action_modifier_label(action), value=modifier))
-    label = roll_action_condition_prerequisite_label(condition_effects) if condition_prerequisite_only else enum_label(action.name)
+    label = enum_label(action.name)
     created_at = time_ns()
+    pending_effect = None
+    damage_saving_throw = None
+    damage_save_dc = None
+    damage_save_outcome = None
+    if action.mechanics is not None and action.mechanics.activatedEffects:
+        from dnd_board.rules.shared.character_effects import (
+            direct_damage_effect_at,
+            direct_damage_save_outcome,
+            first_saving_throw_effect,
+            resolved_amount_effect_node,
+        )
+
+        pending_effect = action.mechanics.activatedEffects[0]
+        if pending_effect is not None:
+            pending_effect = resolved_amount_effect_node(pending_effect, sum(dice) + modifier)
+            from dnd_board.rules.shared.effects import ApplyEffect, DamageEffect, FixedAmount, SequenceEffect
+
+            if action.resolution == RollResolutionMode.APPLY_DAMAGE and direct_damage_effect_at(action.mechanics, 0) is None:
+                pending_effect = SequenceEffect([
+                    ApplyEffect(DamageEffect(FixedAmount(sum(dice) + modifier), action.damageType)),
+                    pending_effect,
+                ])
+            saving_throw_effect = first_saving_throw_effect(pending_effect)
+            if saving_throw_effect is not None:
+                damage_saving_throw = saving_throw_effect.savingThrow.ability
+                damage_save_dc = effect_saving_throw_dc(sheet, saving_throw_effect.savingThrow)
+                damage_save_outcome = direct_damage_save_outcome(pending_effect, saving_throw_effect)
     return RollPayload(
         id=f"roll-{created_at}",
         sheetId=sheet.id,
@@ -3098,56 +2753,53 @@ def build_roll_action_payload(
         roller=roller,
         source=source,
         sourceLabel=source_label or enum_label(action.name),
-        resolution=RollResolutionMode.NONE if condition_prerequisite_only else action.resolution,
+        resolution=action.resolution,
         label=label,
         iconUrl=None,
         dice=dice,
-        diceType=DiceType.D20 if condition_prerequisite_only else action.diceType,
-        die=enum_key(DiceType.D20) if condition_prerequisite_only else dice_formula(action.diceCount, action.diceType),
-        modifier=0 if condition_prerequisite_only else modifier,
+        diceType=action.diceType,
+        die=dice_formula(action.diceCount, action.diceType),
+        modifier=modifier,
         modifierBreakdown=modifier_breakdown,
-        total=sum(dice) + (0 if condition_prerequisite_only else modifier),
+        total=sum(dice) + modifier,
         createdAt=created_at,
         damageType=action.damageType,
-        conditionEffects=condition_effects,
-        conditionEffectSucceeded=condition_effect_succeeded,
+        damageSavingThrow=damage_saving_throw,
+        damageSaveDc=damage_save_dc,
+        damageSaveOutcome=damage_save_outcome,
+        pendingEffect=pending_effect,
     )
 
 
-def roll_action_condition_prerequisite_label(condition_effects: list[ConditionEffect] | None) -> str:
-    first = next((effect for effect in condition_effects or [] if effect.mode in {ConditionApplicationMode.TARGET_SAVE, ConditionApplicationMode.SOURCE_CHECK}), None)
-    if first is None:
-        return "Check"
-    if first.mode == ConditionApplicationMode.TARGET_SAVE and first.savingThrow is not None:
-        return f"{enum_label(first.savingThrow)} Save"
-    return "Contest Check"
+def effect_saving_throw_dc(sheet: CharacterSheet, saving_throw: SavingThrow) -> int:
+    from dnd_board.rules.shared.effects import DifficultyClassType
 
-
-def roll_condition_effects(sheet: CharacterSheet, action: RollAction) -> list[ConditionEffect] | None:
-    if not action.conditionEffects:
-        return None
-    return [
-        ConditionEffect(
-            condition=effect.condition,
-            mode=effect.mode,
-            savingThrow=effect.savingThrow,
-            saveDcAbility=effect.saveDcAbility,
-            saveDc=condition_effect_save_dc(sheet, effect),
-            sourceCheck=effect.sourceCheck,
-            contestChecks=effect.contestChecks,
-            duration=effect.duration,
-            description=effect.description,
+    difficulty_class = saving_throw.difficultyClass
+    if difficulty_class.calculation == DifficultyClassType.FIXED:
+        assert difficulty_class.fixedValue is not None
+        return difficulty_class.fixedValue
+    if difficulty_class.calculation == DifficultyClassType.SOURCE_ABILITY:
+        assert difficulty_class.ability is not None
+        score = getattr(sheet.abilityScores, enum_key(difficulty_class.ability))
+        return 8 + sheet.proficiencyBonus + ability_modifier(score)
+    if difficulty_class.calculation == DifficultyClassType.SOURCE_BEST_ABILITY:
+        score = max(
+            getattr(sheet.abilityScores, enum_key(ability))
+            for ability in difficulty_class.abilities
         )
-        for effect in action.conditionEffects
-    ]
-
-
-def condition_effect_save_dc(sheet: CharacterSheet, effect: ConditionEffect) -> int | None:
-    if effect.mode != ConditionApplicationMode.TARGET_SAVE:
-        return None
-    dc_ability = effect.saveDcAbility or strongest_save_dc_ability(sheet)
-    ability_score = getattr(sheet.abilityScores, enum_key(dc_ability))
-    return 8 + sheet.proficiencyBonus + ability_modifier(ability_score)
+        return 8 + sheet.proficiencyBonus + ability_modifier(score)
+    casting_abilities = list(dict.fromkeys(
+        spell.status.castingAbility
+        for spell in [*sheet.spells, *sheet.spellbook]
+        if spell.status.castingAbility is not None
+    ))
+    if not casting_abilities:
+        raise ValueError("A spell save DC requires a casting ability")
+    casting_ability = max(
+        casting_abilities,
+        key=lambda ability: ability_modifier(getattr(sheet.abilityScores, enum_key(ability))),
+    )
+    return 8 + sheet.proficiencyBonus + ability_modifier(getattr(sheet.abilityScores, enum_key(casting_ability)))
 
 
 def strongest_save_dc_ability(sheet: CharacterSheet) -> AbilityType:
@@ -3177,11 +2829,32 @@ def roll_action_modifier_label(action: RollAction) -> str:
     return "Modifier"
 
 
-def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> RollResolution:
-    roll = attack_roll_with_target_condition_modifiers(roll, target)
+def resolve_roll_against_target(
+    roll: RollPayload,
+    target: CharacterSheet,
+    source: CharacterSheet | None = None,
+    effect_resolution: ResolvedCharacterEffect | None = None,
+) -> RollResolution:
+    if effect_resolution is None:
+        roll = attack_roll_with_target_condition_modifiers(roll, target)
+        roll = attack_roll_with_critical_damage(roll)
     target_conditions = list(target.conditions)
     damage_blocked_by_creature_type = False
-    if roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
+    if roll.pendingEffect is not None and target_creature_type_matches(roll, target):
+        from dnd_board.rules.shared.character_effects import effect_targets_only_source, execute_pending_character_effect
+
+        if effect_targets_only_source(roll.pendingEffect) and target.id != roll.sheetId:
+            target_hp = target.hp
+            outcome = "has no effect; effect targets its source"
+        else:
+            effect_resolution = effect_resolution or execute_pending_character_effect(roll, target, source)
+            target_hp = effect_resolution.hitPoints
+            target_conditions = effect_resolution.conditions
+            outcome = effect_resolution.outcome
+    elif roll.pendingEffect is not None and not target_creature_type_matches(roll, target):
+        target_hp = target.hp
+        outcome = f"has no effect; target is not {creature_type_list_label(roll.targetCreatureTypes or [])}"
+    elif roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
         outcome = "hits" if roll.total >= target.armorClass else "misses"
         target_hp = target.hp
     elif roll.resolution == RollResolutionMode.APPLY_DAMAGE:
@@ -3213,14 +2886,6 @@ def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> Ro
         target_hp = target.hp
         outcome = f"rolls {roll.total}"
 
-    condition_blocked_by_creature_type = bool(roll.conditionEffects) and not target_creature_type_matches(roll, target)
-    if condition_blocked_by_creature_type:
-        outcome = f"{outcome}; has no effect; target is not {creature_type_list_label(roll.targetCreatureTypes or [])}"
-    condition_outcomes = [] if damage_blocked_by_creature_type or condition_blocked_by_creature_type else resolve_condition_effects(roll, target)
-    if condition_outcomes:
-        target_conditions = apply_condition_outcomes(target_conditions, condition_outcomes)
-        outcome = f"{outcome}; {'; '.join(condition_outcomes)}"
-
     return RollResolution(
         id=f"resolution-{time_ns()}",
         roll=roll,
@@ -3232,7 +2897,59 @@ def resolve_roll_against_target(roll: RollPayload, target: CharacterSheet) -> Ro
         targetConditions=target_conditions,
         outcome=outcome,
         createdAt=time_ns(),
+        sheetUpdates=character_effect_sheet_updates(effect_resolution, target) if effect_resolution is not None else None,
     )
+
+
+def character_effect_sheet_updates(
+    resolution: ResolvedCharacterEffect,
+    primary_target: CharacterSheet,
+) -> list[CharacterStateUpdate]:
+    updates: list[CharacterStateUpdate] = []
+    for participant in resolution.participants:
+        sheet = participant.sheet
+        state = participant.state
+        is_primary_target = sheet.id == primary_target.id
+        changed = (
+            state.hitPoints != sheet.hp
+            or state.conditions != sheet.conditions
+            or state.suppressedConditions != sheet.suppressedConditions
+            or state.damageResistances != sheet.damageResistances
+            or state.damageVulnerabilities != sheet.damageVulnerabilities
+            or state.damageImmunities != sheet.damageImmunities
+            or state.ongoingEffects != sheet.ongoingEffects
+        )
+        if not is_primary_target and not changed:
+            continue
+        applied_effects = [
+            applied for applied in resolution.appliedEffects
+            if (
+                (applied.bindings is None and is_primary_target)
+                or (applied.bindings is not None and applied.bindings.targetSheetId == sheet.id)
+            )
+        ]
+        scheduled_effects = [
+            active for active in resolution.scheduledEffects
+            if active.targetSheetId == sheet.id
+        ]
+        updates.append(CharacterStateUpdate(
+            sheetId=sheet.id,
+            tokenId=sheet.tokenId,
+            hp=state.hitPoints,
+            conditions=state.conditions,
+            damageResistances=state.damageResistances,
+            damageVulnerabilities=state.damageVulnerabilities,
+            damageImmunities=state.damageImmunities,
+            appliedEffects=applied_effects or None,
+            scheduledEffects=scheduled_effects or None,
+            ongoingEffects=state.ongoingEffects if state.ongoingEffects != sheet.ongoingEffects else None,
+            suppressedConditions=(
+                state.suppressedConditions
+                if state.suppressedConditions != sheet.suppressedConditions
+                else None
+            ),
+        ))
+    return updates
 
 
 def attack_roll_with_target_condition_modifiers(roll: RollPayload, target: CharacterSheet) -> RollPayload:
@@ -3266,17 +2983,69 @@ def attack_roll_with_target_condition_modifiers(roll: RollPayload, target: Chara
     )
 
 
-def target_incoming_attack_modifier_breakdown(target: CharacterSheet) -> list[RollModifierBreakdown]:
-    if ConditionType.BLADE_WARD not in target.conditions:
-        return []
-    penalty = random.randint(1, DiceType.D4.value)
-    return [
-        RollModifierBreakdown(
-            source=enum_label(ConditionType.BLADE_WARD),
-            value=-penalty,
-            description="Subtract 1d4 from attack rolls against the warded target.",
+def attack_roll_with_critical_damage(roll: RollPayload) -> RollPayload:
+    if (
+        roll.resolution != RollResolutionMode.ATTACK_VS_ARMOR_CLASS
+        or not roll.damageComponents
+        or roll.pendingEffect is None
+    ):
+        return roll
+    natural_roll = max(roll.dice) if roll.die == "2d20kh1" else min(roll.dice) if roll.die == "2d20kl1" else roll.dice[0]
+    if natural_roll != 20:
+        return roll
+    components = []
+    amount_inputs = list(roll.effectInputs.amounts) if roll.effectInputs is not None else []
+    for component in roll.damageComponents:
+        critical_dice = [random.randint(1, component.diceType.value) for _ in component.dice]
+        critical_component = replace(
+            component,
+            dice=[*component.dice, *critical_dice],
+            die=dice_formula(len(component.dice) * 2, component.diceType),
+            total=component.total + sum(critical_dice),
         )
+        components.append(critical_component)
+        if component.effectNodeIds:
+            from dnd_board.rules.shared.effects import EffectAmountInput
+
+            amount_inputs = [entry for entry in amount_inputs if entry.effectNodeId not in component.effectNodeIds]
+            amount_inputs.extend(EffectAmountInput(node_id, critical_component.total) for node_id in component.effectNodeIds)
+
+    return replace(
+        roll,
+        damageComponents=components,
+        effectInputs=replace(roll.effectInputs, amounts=amount_inputs) if roll.effectInputs is not None else None,
+        criticalHit=True,
+    )
+
+
+def target_incoming_attack_modifier_breakdown(target: CharacterSheet) -> list[RollModifierBreakdown]:
+    from dnd_board.rules.shared.character_effects import active_ongoing_modifiers
+    from dnd_board.rules.shared.condition_effects import condition_modifiers
+    from dnd_board.rules.shared.effects import CalculationType, DiceAmount, FixedAmount, ModifierOperation, ModifierScope
+
+    entries = [
+        (enum_label(condition), modifier)
+        for condition, modifier in condition_modifiers(
+            target.conditions,
+            CalculationType.ATTACK_ROLL,
+            scope=ModifierScope.AGAINST_OWNER,
+            explicit_suppressions=target.suppressedConditions,
+        )
+    ] + [
+        (active.sourceLabel, modifier)
+        for active, modifier in active_ongoing_modifiers(target, CalculationType.ATTACK_ROLL, scope=ModifierScope.AGAINST_OWNER)
     ]
+    breakdown: list[RollModifierBreakdown] = []
+    for source_label, modifier in entries:
+        if modifier.operation not in {ModifierOperation.ADD, ModifierOperation.SUBTRACT}:
+            continue
+        value = modifier.amount.value if isinstance(modifier.amount, FixedAmount) else 0
+        if isinstance(modifier.amount, DiceAmount):
+            value = modifier.amount.staticBonus + sum(random.randint(1, modifier.amount.diceType.value) for _ in range(modifier.amount.diceCount))
+        if modifier.operation == ModifierOperation.SUBTRACT:
+            value = -value
+        breakdown.append(RollModifierBreakdown(source_label, value, modifier.description))
+    return breakdown
 
 
 def unique_conditions(conditions: list[ConditionType]) -> list[ConditionType]:
@@ -3319,28 +3088,10 @@ def creature_type_list_label(creature_types: list[CreatureType]) -> str:
     return f"{', '.join(labels[:-1])}, or {labels[-1]}"
 
 
-def resolve_condition_effects(roll: RollPayload, target: CharacterSheet) -> list[str]:
-    if roll.damageSaveSucceeded:
-        return []
-    outcomes: list[str] = []
-    for effect in roll.conditionEffects or []:
-        if effect.mode == ConditionApplicationMode.DIRECT and effect.condition is not None:
-            if condition_immunity_blocks(target, effect.condition):
-                outcomes.append(f"{target.name} resists {enum_label(effect.condition)}")
-                continue
-            if effect.condition == ConditionType.POISONED and ConditionType.PROTECTION_FROM_POISON in target.conditions:
-                outcomes.append(f"{target.name} resists {enum_label(effect.condition)} due to {enum_label(ConditionType.PROTECTION_FROM_POISON)}")
-                continue
-            outcomes.append(f"{target.name} gains {enum_label(effect.condition)}")
-        elif effect.mode == ConditionApplicationMode.MANUAL and effect.condition is not None:
-            outcomes.append(f"{enum_label(effect.condition)} requires manual resolution")
-    return outcomes
-
-
 def condition_immunity_blocks(target: CharacterSheet, condition: ConditionType) -> bool:
-    if ConditionType.CALM_EMOTIONS_IMMUNITY in target.conditions and condition in {ConditionType.CHARMED, ConditionType.FRIGHTENED}:
-        return True
-    return condition == ConditionType.FRIGHTENED and ConditionType.HEROISM in target.conditions
+    from dnd_board.rules.shared.condition_effects import prevented_conditions
+
+    return condition in prevented_conditions(target.conditions, target.suppressedConditions)
 
 
 def damage_after_defenses(damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0) -> int:
@@ -3361,27 +3112,14 @@ def effective_damage_resistances(target: CharacterSheet) -> set[DamageType]:
 
 
 def effective_damage_resistance_list(target: CharacterSheet) -> list[DamageType]:
+    from dnd_board.rules.shared.condition_effects import condition_damage_resistances
+
     resistances = set(target.damageResistances)
     ordered_resistances = list(target.damageResistances)
-    if ConditionType.PETRIFIED in target.conditions:
-        for damage_type in DamageType:
-            resistances.add(damage_type)
-            if damage_type not in ordered_resistances:
-                ordered_resistances.append(damage_type)
-    if ConditionType.WARDING_BOND in target.conditions:
-        for damage_type in DamageType:
-            resistances.add(damage_type)
-            if damage_type not in ordered_resistances:
-                ordered_resistances.append(damage_type)
-    if ConditionType.PROTECTION_FROM_POISON in target.conditions:
-        resistances.add(DamageType.POISON)
-        if DamageType.POISON not in ordered_resistances:
-            ordered_resistances.append(DamageType.POISON)
-    for condition, damage_type in TRUE_DAMAGE_RESISTANCE_CONDITIONS.items():
-        if condition in target.conditions:
-            resistances.add(damage_type)
-            if damage_type not in ordered_resistances:
-                ordered_resistances.append(damage_type)
+    for damage_type in condition_damage_resistances(target.conditions, target.suppressedConditions):
+        resistances.add(damage_type)
+        if damage_type not in ordered_resistances:
+            ordered_resistances.append(damage_type)
     return [damage_type for damage_type in ordered_resistances if damage_type in resistances]
 
 
@@ -3559,6 +3297,8 @@ def default_save_proficiencies(classes: list[CharacterClassLevel]) -> list[Abili
 
 
 def default_attacks(kind: TokenKind) -> list[AttackAction]:
+    from dnd_board.rules.shared.effects import ApplyEffect, AttackRoll, AttackRollEffect, AttackRollType, DamageEffect, DiceAmount, FeatureMechanics
+
     return [
         AttackAction(
             id="main-hand",
@@ -3567,6 +3307,16 @@ def default_attacks(kind: TokenKind) -> list[AttackAction]:
             damageDiceCount=1,
             damageDiceType=DiceType.D8,
             properties=[],
+            mechanics=(
+                FeatureMechanics(
+                    activatedEffects=[AttackRollEffect(
+                        attack=AttackRoll(AttackRollType.WEAPON, ability=AbilityType.STRENGTH),
+                        onHit=ApplyEffect(DamageEffect(DiceAmount(1, DiceType.D8), DamageType.SLASHING)),
+                    )]
+                )
+                if kind == TokenKind.ASSET
+                else None
+            ),
         )
     ]
 
@@ -3627,6 +3377,7 @@ def apply_resource_overrides(resources: list[ResourceTracker], overrides: dict[s
             rollActions=resource.rollActions,
             source=resource.source,
             spellSlotLevel=resource.spellSlotLevel,
+            mechanics=resource.mechanics,
         )
         for resource in resources
     ]
@@ -3801,6 +3552,16 @@ def typed_json_to_value(node: Any, expected_type: Any = Any) -> Any:
         if type_allows_none(expected_item_type):
             return converted_items
         return [item for item in converted_items if item is not None]
+    if type_name == typed_json_primitive_type_key(TypedJsonPrimitiveType.TUPLE):
+        expected_item_type = Any
+        if get_origin(expected_type) is tuple:
+            expected_args = get_args(expected_type)
+            expected_item_type = expected_args[0] if expected_args else Any
+        items = node.get(ITEMS_KEY)
+        if not isinstance(items, list):
+            return None
+        converted_items = [typed_json_to_value(item, expected_item_type) for item in items]
+        return tuple(item for item in converted_items if item is not None)
     if type_name.startswith(typed_json_primitive_type_key(TypedJsonPrimitiveType.DICTIONARY)):
         expected_value_type = Any
         if get_origin(expected_type) is dict:
@@ -3873,9 +3634,21 @@ def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> An
     if not isinstance(raw_fields, dict):
         return None
 
-    type_hints = get_type_hints(model_type)
+    from dnd_board.rules.shared.effects import AppliedEffectResult, EffectNode, FeatureMechanics, Interaction
+
+    type_hints = get_type_hints(
+        model_type,
+        localns={
+            "AppliedEffectResult": AppliedEffectResult,
+            "EffectNode": EffectNode,
+            "FeatureMechanics": FeatureMechanics,
+            "Interaction": Interaction,
+        },
+    )
     kwargs: dict[str, Any] = {}
     for field in fields(model_type):
+        if not field.init:
+            continue
         if field.name not in raw_fields:
             continue
         raw_value = raw_fields[field.name]
@@ -3922,6 +3695,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
     from dnd_board.rules.classes.wizard.archetypes import WizardSubclassFeatureType, WizardSubclassResourceType
     from dnd_board.rules.classes.wizard.base import WizardFeatureType, WizardResourceType, WizardSubclassType
     from dnd_board.rules.shared.combat_superiority import BattleMasterResourceType, MonsterHunterSuperiorityActionType, ScoutSuperiorityActionType
+    from dnd_board.rules.shared.effects import effect_model_types
 
     return {
         type_.__name__: type_
@@ -3948,10 +3722,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             DamageType,
             DiceType,
             ConditionType,
-            ConditionApplicationMode,
             ConditionDuration,
-            ConditionRemovalTrigger,
-            ConditionEffect,
             EquipmentSlot,
             EquipmentType,
             EquipmentItem,
@@ -3979,7 +3750,6 @@ def typed_json_registry() -> dict[str, type[Any]]:
             RollLogEntry,
             RollLogEntryType,
             RollModifierBreakdown,
-            RollModifierEffectOperation,
             RollModifierEffectTarget,
             RollModifierType,
             RollResolutionMode,
@@ -3995,29 +3765,18 @@ def typed_json_registry() -> dict[str, type[Any]]:
             SpellConeArea,
             SpellCubeArea,
             SpellCylinderArea,
-            SpellConditionEffect,
-            SpellDamageEffect,
             SpellDuration,
             SpellDurationUnit,
-            SpellEffect,
-            SpellEffectDice,
-            SpellEffectKind,
             SpellEffectTarget,
             SpellEffectTrigger,
-            SpellHealingEffect,
             SpellEntry,
             SpellId,
             SpellLineArea,
-            SpellLinkedHealingAmount,
-            SpellMaxHitPointReduction,
-            SpellMaxHitPointReductionMode,
             SpellNoArea,
             SpellRadiusArea,
             SpellRangeType,
-            SpellRollModifierEffect,
             SpellSavingThrow,
             SpellSaveOutcome,
-            SpellSourceHealingEffect,
             SpellScaling,
             SpellScalingType,
             SpellSchool,
@@ -4035,6 +3794,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             WizardSubclassFeatureType,
             WizardSubclassResourceType,
             WizardSubclassType,
+            *effect_model_types(),
         ]
     }
 
@@ -4046,6 +3806,8 @@ def typed_json_from_value(value: Any) -> dict[str, Any]:
         return {TYPE_KEY: value.__class__.__name__, VALUE_KEY: value.name}
     if isinstance(value, list):
         return {TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.LIST), ITEMS_KEY: [typed_json_from_value(item) for item in value]}
+    if isinstance(value, tuple):
+        return {TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.TUPLE), ITEMS_KEY: [typed_json_from_value(item) for item in value]}
     if isinstance(value, dict):
         return {
             TYPE_KEY: typed_json_primitive_type_key(TypedJsonPrimitiveType.DICTIONARY),
@@ -4099,6 +3861,8 @@ def serialize_value(value: Any) -> Any:
     if isinstance(value, Enum):
         return enum_key(value)
     if isinstance(value, list):
+        return [serialize_value(item) for item in value]
+    if isinstance(value, tuple):
         return [serialize_value(item) for item in value]
     if isinstance(value, dict):
         return {key: serialize_value(item) for key, item in value.items()}

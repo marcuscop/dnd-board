@@ -11,8 +11,6 @@ from dnd_board.character_sheet import (
     AttackKind,
     AttackRangeType,
     CharacterClassLevel,
-    ConditionApplicationMode,
-    ConditionEffect,
     ConditionType,
     DamageType,
     DiceType,
@@ -42,6 +40,17 @@ from dnd_board.character_sheet import (
     proficiency_bonus_for_level,
 )
 from dnd_board.rules.classes.rogue.base import RogueSubclassType, rogue_subclass_label
+from dnd_board.rules.shared.effects import (
+    ApplyEffect,
+    ConditionChangeEffect,
+    ConditionOperation,
+    DifficultyClass,
+    DifficultyClassType,
+    EffectNode,
+    FeatureMechanics,
+    SavingThrow,
+    SavingThrowEffect,
+)
 
 
 class ArcaneTricksterFeatureType(Enum):
@@ -164,7 +173,18 @@ class SubclassFeatureProgression:
     minimum_level: int
     activation: TimeEconomy
     description: str
-    conditionEffects: tuple[ConditionEffect, ...] = ()
+    mechanics: FeatureMechanics | None = None
+
+
+def rogue_feature_save_effect(condition: ConditionType, ability: AbilityType) -> FeatureMechanics:
+    effect: EffectNode = SavingThrowEffect(
+        SavingThrow(
+            ability,
+            DifficultyClass(DifficultyClassType.SOURCE_ABILITY, ability=AbilityType.DEXTERITY),
+        ),
+        onFailure=ApplyEffect(ConditionChangeEffect(condition, ConditionOperation.ADD)),
+    )
+    return FeatureMechanics(activatedEffects=[effect])
 
 
 @dataclass(frozen=True)
@@ -210,7 +230,7 @@ SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
     SubclassFeatureProgression(RogueSubclassType.ASSASSIN, AssassinFeatureType.ASSASSINS_TOOLS, 3, TimeEconomy.PASSIVE, "Gain a Disguise Kit and Poisoner's Kit and proficiency with them."),
     SubclassFeatureProgression(RogueSubclassType.ASSASSIN, AssassinFeatureType.INFILTRATION_EXPERTISE, 9, TimeEconomy.PASSIVE, "Mimic another person's speech or handwriting after 1 hour of study, and Steady Aim no longer reduces your Speed to 0."),
     SubclassFeatureProgression(RogueSubclassType.ASSASSIN, AssassinFeatureType.ENVENOM_WEAPONS, 13, TimeEconomy.SPECIAL, "When you use Poison from Cunning Strike, the target also takes 2d6 Poison damage whenever it fails the save, ignoring Poison Resistance."),
-    SubclassFeatureProgression(RogueSubclassType.ASSASSIN, AssassinFeatureType.DEATH_STRIKE, 17, TimeEconomy.SPECIAL, "When your Sneak Attack hits in the first combat round, the target makes a Constitution save or the attack's damage is doubled.", (ConditionEffect(None, ConditionApplicationMode.TARGET_SAVE, savingThrow=AbilityType.CONSTITUTION, saveDcAbility=AbilityType.DEXTERITY, description="On a failed Constitution save, double the attack's damage."),)),
+    SubclassFeatureProgression(RogueSubclassType.ASSASSIN, AssassinFeatureType.DEATH_STRIKE, 17, TimeEconomy.SPECIAL, "When your Sneak Attack hits in the first combat round, the target makes a Constitution save or the attack's damage is doubled."),
     SubclassFeatureProgression(RogueSubclassType.PHANTOM, PhantomFeatureType.WAILS_FROM_THE_GRAVE, 3, TimeEconomy.SPECIAL, "After Sneak Attack damage on your turn, deal Necrotic damage to a second creature within 30 feet of the first. Tracked as a resource."),
     SubclassFeatureProgression(RogueSubclassType.PHANTOM, PhantomFeatureType.WHISPERS_OF_THE_DEAD, 3, TimeEconomy.PASSIVE, "After each Short or Long Rest, gain one skill or tool proficiency you lack until you choose another with this feature."),
     SubclassFeatureProgression(RogueSubclassType.PHANTOM, PhantomFeatureType.TOKENS_OF_THE_DEPARTED, 9, TimeEconomy.SPECIAL, "Carry soul trinkets that can fuel Wails from the Grave, improve death and Constitution saves, or cast Augury/ask a spirit question."),
@@ -219,14 +239,14 @@ SUBCLASS_FEATURES: tuple[SubclassFeatureProgression, ...] = (
     SubclassFeatureProgression(RogueSubclassType.PHANTOM, PhantomFeatureType.DEATHS_FRIEND, 17, TimeEconomy.PASSIVE, "Wails from the Grave can damage the first and second creature, and you gain one soul trinket on Initiative if you have none."),
     SubclassFeatureProgression(RogueSubclassType.SCION_OF_THE_THREE, ScionOfTheThreeFeatureType.BLOODTHIRST, 3, TimeEconomy.REACTION, "When a visible enemy within 30 feet becomes Bloodied by damage and is not killed, teleport within 5 feet and make one melee attack. Tracked as a resource."),
     SubclassFeatureProgression(RogueSubclassType.SCION_OF_THE_THREE, ScionOfTheThreeFeatureType.DREAD_ALLEGIANCE, 3, TimeEconomy.PASSIVE, "Choose Bane, Bhaal, or Myrkul after a Long Rest, gaining a damage Resistance and cantrip using Intelligence."),
-    SubclassFeatureProgression(RogueSubclassType.SCION_OF_THE_THREE, ScionOfTheThreeFeatureType.STRIKE_FEAR, 9, TimeEconomy.SPECIAL, "Gain Terrify Cunning Strike: cost 1d6, Wisdom save or Frightened for 1 minute; you have Advantage against the target while it is Frightened.", (ConditionEffect(ConditionType.FRIGHTENED, ConditionApplicationMode.TARGET_SAVE, savingThrow=AbilityType.WISDOM, saveDcAbility=AbilityType.DEXTERITY),)),
+    SubclassFeatureProgression(RogueSubclassType.SCION_OF_THE_THREE, ScionOfTheThreeFeatureType.STRIKE_FEAR, 9, TimeEconomy.SPECIAL, "Gain Terrify Cunning Strike: cost 1d6, Wisdom save or Frightened for 1 minute; you have Advantage against the target while it is Frightened.", rogue_feature_save_effect(ConditionType.FRIGHTENED, AbilityType.WISDOM)),
     SubclassFeatureProgression(RogueSubclassType.SCION_OF_THE_THREE, ScionOfTheThreeFeatureType.AURA_OF_MALEVOLENCE, 13, TimeEconomy.SPECIAL, "When you use Bloodthirst and teleport, chosen creatures within 10 feet of either endpoint take Intelligence modifier damage matching Dread Allegiance, ignoring Resistance."),
     SubclassFeatureProgression(RogueSubclassType.SCION_OF_THE_THREE, ScionOfTheThreeFeatureType.DREAD_INCARNATE, 17, TimeEconomy.PASSIVE, "Regain one Bloodthirst use on Short Rest, and treat Sneak Attack dice rolls of 1 or 2 as 3."),
     SubclassFeatureProgression(RogueSubclassType.SOULKNIFE, SoulknifeFeatureType.PSIONIC_POWER, 3, TimeEconomy.SPECIAL, "Use Psionic Energy dice for Psi-Bolstered Knack and Psychic Whispers. Tracked as a resource."),
     SubclassFeatureProgression(RogueSubclassType.SOULKNIFE, SoulknifeFeatureType.PSYCHIC_BLADES, 3, TimeEconomy.SPECIAL, "Manifest a Finesse, Thrown Psychic Blade for Attack actions or Opportunity Attacks; after attacking on your turn, make a second 1d4 Psychic Blade attack as a Bonus Action if your other hand is free."),
     SubclassFeatureProgression(RogueSubclassType.SOULKNIFE, SoulknifeFeatureType.SOUL_BLADES, 9, TimeEconomy.SPECIAL, "Use Homing Strikes to add a Psionic Energy Die to missed Psychic Blade attacks, and Psychic Teleportation to teleport 10 times the die roll feet."),
     SubclassFeatureProgression(RogueSubclassType.SOULKNIFE, SoulknifeFeatureType.PSYCHIC_VEIL, 13, TimeEconomy.ACTION, "As a Magic action, become Invisible for 1 hour or until dismissed, dealing damage, or forcing a save. Tracked as a resource."),
-    SubclassFeatureProgression(RogueSubclassType.SOULKNIFE, SoulknifeFeatureType.REND_MIND, 17, TimeEconomy.SPECIAL, "When Psychic Blades deal Sneak Attack damage, force a Wisdom save or Stun for 1 minute. Tracked as a resource.", (ConditionEffect(ConditionType.STUNNED, ConditionApplicationMode.TARGET_SAVE, savingThrow=AbilityType.WISDOM, saveDcAbility=AbilityType.DEXTERITY),)),
+    SubclassFeatureProgression(RogueSubclassType.SOULKNIFE, SoulknifeFeatureType.REND_MIND, 17, TimeEconomy.SPECIAL, "When Psychic Blades deal Sneak Attack damage, force a Wisdom save or Stun for 1 minute. Tracked as a resource.", rogue_feature_save_effect(ConditionType.STUNNED, AbilityType.WISDOM)),
     SubclassFeatureProgression(RogueSubclassType.THIEF, ThiefFeatureType.FAST_HANDS, 3, TimeEconomy.BONUS_ACTION, "As a Bonus Action, make a Sleight of Hand check to pick locks, disarm traps, or pick pockets; take the Utilize action; or take the Magic action to use a magic item requiring that action."),
     SubclassFeatureProgression(RogueSubclassType.THIEF, ThiefFeatureType.SECOND_STORY_WORK, 3, TimeEconomy.PASSIVE, "Gain Climb Speed equal to Speed and use Dexterity instead of Strength to determine jump distance."),
     SubclassFeatureProgression(RogueSubclassType.THIEF, ThiefFeatureType.SUPREME_SNEAK, 9, TimeEconomy.SPECIAL, "Gain Stealth Attack Cunning Strike: cost 1d6, your Hide action's Invisible condition does not end if you finish behind three-quarters or total cover."),
@@ -526,7 +546,27 @@ def subclass_feature(progression: SubclassFeatureProgression, rogue_level_value:
     if progression.subclass == RogueSubclassType.ARCANE_TRICKSTER and progression.featureType == ArcaneTricksterFeatureType.SPELLCASTING:
         spellcasting = arcane_trickster_spellcasting(rogue_level_value)
         description = f"{description} You know {spellcasting.cantrips_known} cantrips and prepare {spellcasting.spells_known} leveled spells."
-    return SheetFeature(enum_key(progression.featureType), enum_label(progression.featureType), rogue_subclass_label(progression.subclass), progression.activation, description, conditionEffects=list(progression.conditionEffects) or None)
+    roll_actions = None
+    if progression.mechanics is not None and progression.mechanics.activatedEffects:
+        roll_actions = [RollAction(
+            id=progression.featureType,
+            name=progression.featureType,
+            diceCount=0,
+            diceType=DiceType.D20,
+            activation=progression.activation,
+            source=rogue_subclass_label(progression.subclass),
+            description=description,
+            mechanics=progression.mechanics,
+        )]
+    return SheetFeature(
+        enum_key(progression.featureType),
+        enum_label(progression.featureType),
+        rogue_subclass_label(progression.subclass),
+        progression.activation,
+        description,
+        rollActions=roll_actions,
+        mechanics=progression.mechanics,
+    )
 
 
 def rogue_subclass_class(classes: list[CharacterClassLevel]) -> CharacterClassLevel | None:

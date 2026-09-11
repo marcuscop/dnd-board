@@ -18,6 +18,20 @@ from dnd_board.character_sheet import (
     enum_label,
 )
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
+from dnd_board.rules.shared.effects import (
+    AmountCalculation,
+    CalculatedAmount,
+    FeatureMechanics,
+    Interaction,
+    InteractionDecision,
+    InteractionDecisionType,
+    InteractionTiming,
+    PromptResponder,
+    RerollSavingThrow,
+    ResolutionEventType,
+    RollOutcome,
+    RollOutcomePredicate,
+)
 
 
 class FighterFeatureType(Enum):
@@ -368,9 +382,24 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
                 activation=TimeEconomy.SPECIAL,
                 description="Reroll a failed saving throw with a bonus equal to Fighter level.",
                 source=enum_label(ClassType.FIGHTER),
+                mechanics=indomitable_mechanics(),
             )
         )
     return resources
+
+
+def indomitable_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(
+        interactions=[
+            Interaction(
+                trigger=ResolutionEventType.SAVE_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+                predicates=[RollOutcomePredicate(RollOutcome.FAILURE)],
+                operations=[RerollSavingThrow(CalculatedAmount(AmountCalculation.SOURCE_CLASS_LEVEL, characterClass=ClassType.FIGHTER))],
+            )
+        ]
+    )
 
 
 def fighter_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from dnd_board.character_sheet import (
@@ -33,6 +33,48 @@ from dnd_board.character_sheet import (
 )
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
 from dnd_board.rules.species import SpeciesType
+from dnd_board.rules.shared.effects import (
+    AmountCalculation,
+    ApplyEffect,
+    CalculatedAmount,
+    CalculationType,
+    CombinedAmount,
+    DamageEffect,
+    DiceAmount,
+    FeatureMechanics,
+    FixedAmount,
+    Interaction,
+    InteractionDecision,
+    InteractionDecisionType,
+    InteractionTiming,
+    Modifier,
+    ModifierOperation,
+    ModifyPendingDamage,
+    ModifyRoll,
+    OwnerWearsArmorPredicate,
+    OwnerWearsHeavyArmorPredicate,
+    OwnerWieldsExactlyOneOneHandedWeaponPredicate,
+    OwnerWieldsShieldPredicate,
+    OwnerWieldsWeaponOrShieldPredicate,
+    PendingDamageModificationType,
+    PromptResponder,
+    ReplaceRollOutcome,
+    ResolutionEventType,
+    RollOutcome,
+    RollOutcomePredicate,
+    RollModificationType,
+    SavingThrowAbilityPredicate,
+    SourceIsSpellPredicate,
+    SourceAttackKindPredicate,
+    SourceAttackRangePredicate,
+    SourceDamageAbilityModifierPredicate,
+    SourceIsAttackPredicate,
+    SourceWeaponCategoryPredicate,
+    TargetIsOwnerPredicate,
+    WeaponHasAnyPropertyPredicate,
+    WeaponHasPropertyPredicate,
+    WithinDistancePredicate,
+)
 
 
 class FeatCategory(Enum):
@@ -293,36 +335,6 @@ class GeneralFeatType(Enum):
     WATCHERS = "Watchers"
 
 
-class FeatEffectType(Enum):
-    ARMOR_CLASS_BONUS = auto()
-    ATTACK_ROLL_BONUS = auto()
-    DAMAGE_DICE_REROLL = auto()
-    DAMAGE_ABILITY_MODIFIER = auto()
-    DAMAGE_ROLL_BONUS = auto()
-    ROLL_ABILITY = auto()
-    SHEET_ABILITY = auto()
-    DESCRIPTION_ONLY = auto()
-    RESOURCE = auto()
-
-
-class FeatAttackRollBonusScope(Enum):
-    RANGED_ATTACK = auto()
-    RANGED_WEAPON_ATTACK = auto()
-
-
-class FeatDamageRollBonusScope(Enum):
-    ONE_HANDED_MELEE_WEAPON_ATTACK = auto()
-    THROWN_RANGED_ATTACK = auto()
-
-
-class FeatDamageAbilityModifierScope(Enum):
-    TWO_WEAPON_FIGHTING_ATTACK = auto()
-
-
-class FeatDamageDiceRerollScope(Enum):
-    TWO_HANDED_OR_VERSATILE_MELEE_WEAPON_ATTACK = auto()
-
-
 class FeatPrerequisiteType(Enum):
     ABILITY_SCORE = auto()
     ARMOR_PROFICIENCY = auto()
@@ -381,25 +393,12 @@ class FeatPrerequisite:
 
 
 @dataclass(frozen=True)
-class FeatEffect:
-    effectType: FeatEffectType
-    value: int = 0
-    attackRollBonusScope: FeatAttackRollBonusScope | None = None
-    damageAbilityModifierScope: FeatDamageAbilityModifierScope | None = None
-    damageRollBonusScope: FeatDamageRollBonusScope | None = None
-    damageDiceRerollScope: FeatDamageDiceRerollScope | None = None
-    rollAction: RollAction | None = None
-    activation: TimeEconomy = TimeEconomy.PASSIVE
-    description: str = ""
-
-
-@dataclass(frozen=True)
 class FeatDefinition:
     featType: FightingStyleType
     category: FeatCategory
     repeatable: bool
     description: str
-    effects: tuple[FeatEffect, ...]
+    mechanics: FeatureMechanics = field(default_factory=FeatureMechanics)
     source: RuleSource = RuleSource.PLAYERS_HANDBOOK_2024
 
 
@@ -739,35 +738,35 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="Gain a +2 bonus to attack rolls you make with ranged weapons.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.ATTACK_ROLL_BONUS,
-                value=2,
-                attackRollBonusScope=FeatAttackRollBonusScope.RANGED_WEAPON_ATTACK,
-                description="Ranged weapon attack bonus.",
-            ),
-        ),
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.ATTACK_ROLL,
+            ModifierOperation.ADD,
+            predicates=[
+                SourceAttackRangePredicate(AttackRangeType.RANGED),
+                SourceWeaponCategoryPredicate(WeaponCategory.RANGED),
+            ],
+            amount=FixedAmount(2),
+            description="Ranged weapon attack bonus.",
+        )]),
     ),
     FightingStyleType.BLIND_FIGHTING: FeatDefinition(
         featType=FightingStyleType.BLIND_FIGHTING,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="You have blindsight with a range of 10 feet, letting you effectively see anything in range that is not behind total cover.",
-        effects=(FeatEffect(effectType=FeatEffectType.DESCRIPTION_ONLY),),
     ),
     FightingStyleType.CLOSE_QUARTERS_SHOOTER: FeatDefinition(
         featType=FightingStyleType.CLOSE_QUARTERS_SHOOTER,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="Ranged attacks do not have Disadvantage within 5 feet of a hostile creature, ignore half and three-quarters cover within 30 feet, and gain a +1 attack bonus.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.ATTACK_ROLL_BONUS,
-                value=1,
-                attackRollBonusScope=FeatAttackRollBonusScope.RANGED_ATTACK,
-                description="Ranged attack bonus.",
-            ),
-        ),
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.ATTACK_ROLL,
+            ModifierOperation.ADD,
+            predicates=[SourceAttackRangePredicate(AttackRangeType.RANGED)],
+            amount=FixedAmount(1),
+            description="Ranged attack bonus.",
+        )]),
         source=RuleSource.LEGACY,
     ),
     FightingStyleType.DEFENSE: FeatDefinition(
@@ -775,41 +774,56 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="While wearing armor, gain a +1 bonus to Armor Class.",
-        effects=(FeatEffect(effectType=FeatEffectType.ARMOR_CLASS_BONUS, value=1),),
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.ARMOR_CLASS,
+            ModifierOperation.ADD,
+            predicates=[OwnerWearsArmorPredicate()],
+            amount=FixedAmount(1),
+        )]),
     ),
     FightingStyleType.DUELING: FeatDefinition(
         featType=FightingStyleType.DUELING,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="When wielding a melee weapon in one hand and no other weapons, gain a +2 bonus to damage rolls with that weapon.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.DAMAGE_ROLL_BONUS,
-                value=2,
-                damageRollBonusScope=FeatDamageRollBonusScope.ONE_HANDED_MELEE_WEAPON_ATTACK,
-                description="Eligible one-handed melee weapon damage bonus.",
-            ),
-        ),
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.DAMAGE_ROLL,
+            ModifierOperation.ADD,
+            predicates=[
+                SourceAttackRangePredicate(AttackRangeType.MELEE),
+                OwnerWieldsExactlyOneOneHandedWeaponPredicate(),
+            ],
+            amount=FixedAmount(2),
+            description="Eligible one-handed melee weapon damage bonus.",
+        )]),
     ),
     FightingStyleType.GREAT_WEAPON_FIGHTING: FeatDefinition(
         featType=FightingStyleType.GREAT_WEAPON_FIGHTING,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="When rolling damage with an eligible two-handed or versatile melee weapon, treat any 1 or 2 on a damage die as a 3.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.DAMAGE_DICE_REROLL,
-                damageDiceRerollScope=FeatDamageDiceRerollScope.TWO_HANDED_OR_VERSATILE_MELEE_WEAPON_ATTACK,
-                description="Treat damage dice of 1 or 2 as 3.",
-            ),
-        ),
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.DAMAGE_ROLL,
+            ModifierOperation.MINIMUM,
+            predicates=[
+                SourceAttackRangePredicate(AttackRangeType.MELEE),
+                WeaponHasAnyPropertyPredicate([WeaponProperty.TWO_HANDED, WeaponProperty.VERSATILE]),
+            ],
+            amount=FixedAmount(3),
+            description="Treat each weapon damage die roll of 1 or 2 as 3.",
+        )]),
     ),
     FightingStyleType.MARINER: FeatDefinition(
         featType=FightingStyleType.MARINER,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="While not wearing heavy armor or using a shield, gain a swimming speed and climbing speed equal to your Speed, and gain a +1 bonus to Armor Class.",
-        effects=(FeatEffect(effectType=FeatEffectType.ARMOR_CLASS_BONUS, value=1),),
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.ARMOR_CLASS,
+            ModifierOperation.ADD,
+            predicates=[OwnerWearsHeavyArmorPredicate(False), OwnerWieldsShieldPredicate(False)],
+            amount=FixedAmount(1),
+        )]),
         source=RuleSource.LEGACY,
     ),
     FightingStyleType.PACK_FIGHTING: FeatDefinition(
@@ -817,12 +831,6 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="When you make a melee attack with a weapon or Unarmed Strike against a creature, gain +1 damage if at least one non-incapacitated ally is within 5 feet of it; +2 if such an ally also has this feat.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.DESCRIPTION_ONLY,
-                description="Conditional damage bonus; apply manually when an ally is within 5 feet of the target.",
-            ),
-        ),
         source=RuleSource.DND_BEYOND_DROPS_2026,
     ),
     FightingStyleType.PRONE_FIGHTING: FeatDefinition(
@@ -830,7 +838,6 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="When you have the Prone condition, you do not have Disadvantage on attack rolls from being Prone, and attack rolls against you do not have Advantage from you being Prone.",
-        effects=(FeatEffect(effectType=FeatEffectType.DESCRIPTION_ONLY),),
         source=RuleSource.DND_BEYOND_DROPS_2026,
     ),
     FightingStyleType.PROTECTION: FeatDefinition(
@@ -838,20 +845,24 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="Use a Reaction while wielding a shield to impose Disadvantage when a creature you can see attacks another target within 5 feet of you.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.SHEET_ABILITY,
-                activation=TimeEconomy.REACTION,
-                description="Impose Disadvantage on an attack against a nearby target other than you while wielding a shield.",
-            ),
-        ),
+        mechanics=FeatureMechanics(interactions=[Interaction(
+            trigger=ResolutionEventType.ATTACK_ROLLED,
+            timing=InteractionTiming.AFTER_EVENT,
+            decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+            predicates=[
+                SourceIsAttackPredicate(),
+                TargetIsOwnerPredicate(False),
+                OwnerWieldsShieldPredicate(),
+                WithinDistancePredicate(5),
+            ],
+            operations=[ModifyRoll(RollModificationType.DISADVANTAGE)],
+        )]),
     ),
     FightingStyleType.SUPERIOR_TECHNIQUE: FeatDefinition(
         featType=FightingStyleType.SUPERIOR_TECHNIQUE,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="Learn one Battle Master maneuver and gain one superiority die, which is a d6 unless added to Battle Master superiority dice from another source. The die fuels your maneuver and returns when you finish a short or long rest. Maneuver save DC is 8 + Proficiency Bonus + Strength or Dexterity modifier.",
-        effects=(FeatEffect(effectType=FeatEffectType.RESOURCE),),
         source=RuleSource.LEGACY,
     ),
     FightingStyleType.THROWN_WEAPON_FIGHTING: FeatDefinition(
@@ -859,27 +870,22 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="You can draw a thrown weapon as part of the attack, and gain a +2 damage bonus when you hit with a ranged attack using a thrown weapon.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.DAMAGE_ROLL_BONUS,
-                value=2,
-                damageRollBonusScope=FeatDamageRollBonusScope.THROWN_RANGED_ATTACK,
-                description="Thrown weapon ranged attack damage bonus.",
-            ),
-        ),
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.DAMAGE_ROLL,
+            ModifierOperation.ADD,
+            predicates=[
+                SourceAttackRangePredicate(AttackRangeType.RANGED),
+                WeaponHasPropertyPredicate(WeaponProperty.THROWN),
+            ],
+            amount=FixedAmount(2),
+            description="Thrown weapon ranged attack damage bonus.",
+        )]),
     ),
     FightingStyleType.TUNNEL_FIGHTER: FeatDefinition(
         featType=FightingStyleType.TUNNEL_FIGHTER,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="Use a Bonus Action to enter a defensive stance until the start of your next turn, enabling extra opportunity control.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.SHEET_ABILITY,
-                activation=TimeEconomy.BONUS_ACTION,
-                description="Enter a defensive stance until your next turn: opportunity attacks do not use your Reaction, and you can use your Reaction to attack a creature that moves more than 5 feet within your reach.",
-            ),
-        ),
         source=RuleSource.LEGACY,
     ),
     FightingStyleType.INTERCEPTION: FeatDefinition(
@@ -887,55 +893,50 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="Use a Reaction to reduce damage to a nearby target by 1d10 plus your Proficiency Bonus.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.ROLL_ABILITY,
-                rollAction=RollAction(
-                    id=FightingStyleType.INTERCEPTION,
-                    name=FightingStyleType.INTERCEPTION,
-                    diceCount=1,
-                    diceType=DiceType.D10,
-                    modifier=RollModifierType.PROFICIENCY_BONUS,
-                    resolution=RollResolutionMode.NONE,
-                ),
-                activation=TimeEconomy.REACTION,
-                description="Reduce damage by 1d10 plus Proficiency Bonus.",
-            ),
-        ),
+        mechanics=FeatureMechanics(interactions=[Interaction(
+            trigger=ResolutionEventType.DAMAGE_PENDING,
+            timing=InteractionTiming.BEFORE_EVENT,
+            decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+            predicates=[
+                SourceIsAttackPredicate(),
+                TargetIsOwnerPredicate(False),
+                OwnerWieldsWeaponOrShieldPredicate(),
+                WithinDistancePredicate(5),
+            ],
+            operations=[ModifyPendingDamage(
+                PendingDamageModificationType.REDUCE,
+                amount=CombinedAmount([
+                    DiceAmount(1, DiceType.D10),
+                    CalculatedAmount(AmountCalculation.SOURCE_PROFICIENCY_BONUS),
+                ]),
+            )],
+        )]),
     ),
     FightingStyleType.TWO_WEAPON_FIGHTING: FeatDefinition(
         featType=FightingStyleType.TWO_WEAPON_FIGHTING,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="When making the extra attack from a Light weapon, add your ability modifier to the damage if it is not already included.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.DAMAGE_ABILITY_MODIFIER,
-                damageAbilityModifierScope=FeatDamageAbilityModifierScope.TWO_WEAPON_FIGHTING_ATTACK,
-                description="Add the attack ability modifier to two-weapon fighting bonus attack damage.",
-            ),
-        ),
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.DAMAGE_ROLL,
+            ModifierOperation.ADD,
+            predicates=[
+                SourceAttackKindPredicate(AttackKind.TWO_WEAPON_FIGHTING),
+                SourceDamageAbilityModifierPredicate(AttackDamageAbilityModifierMode.EXCLUDED),
+            ],
+            amount=CalculatedAmount(AmountCalculation.SOURCE_ABILITY_MODIFIER),
+            description="Add the attack ability modifier to two-weapon fighting bonus attack damage.",
+        )]),
     ),
     FightingStyleType.UNARMED_FIGHTING: FeatDefinition(
         featType=FightingStyleType.UNARMED_FIGHTING,
         category=FeatCategory.FIGHTING_STYLE,
         repeatable=False,
         description="Your Unarmed Strikes deal improved damage; you can also deal 1d4 damage to a creature grappled by you.",
-        effects=(
-            FeatEffect(
-                effectType=FeatEffectType.ROLL_ABILITY,
-                rollAction=RollAction(
-                    id=FightingStyleType.UNARMED_FIGHTING,
-                    name=FightingStyleType.UNARMED_FIGHTING,
-                    diceCount=1,
-                    diceType=DiceType.D4,
-                    resolution=RollResolutionMode.APPLY_DAMAGE,
-                    damageType=DamageType.BLUDGEONING,
-                ),
-                activation=TimeEconomy.SPECIAL,
-                description="Roll 1d4 damage for the grapple rider when appropriate.",
-            ),
-        ),
+        mechanics=FeatureMechanics(activatedEffects=[ApplyEffect(DamageEffect(
+            DiceAmount(1, DiceType.D4),
+            DamageType.BLUDGEONING,
+        ))]),
     ),
 }
 
@@ -966,6 +967,7 @@ def fighting_style_features(classes: list[CharacterClassLevel]):
                 source=enum_label(FeatCategory.FIGHTING_STYLE),
                 activation=TimeEconomy.PASSIVE,
                 description=f"{definition.description} Source: {rule_source_label(definition.source)}.",
+                mechanics=definition.mechanics,
             )
         )
     return features
@@ -1180,7 +1182,15 @@ def feat_resources(classes: list[CharacterClassLevel], feats=None, proficiency_b
             description="Spend Luck Points to gain Advantage on a D20 Test or impose Disadvantage on an attack roll against you.",
         ))
     if GeneralFeatType.MAGE_SLAYER in selected_feats:
-        resources.append(feat_single_use_resource(FeatResourceId.MAGE_SLAYER, GeneralFeatType.MAGE_SLAYER, RestType.SHORT_REST, "If you fail an Intelligence, Wisdom, or Charisma saving throw, you can cause yourself to succeed instead."))
+        resources.append(
+            feat_single_use_resource(
+                FeatResourceId.MAGE_SLAYER,
+                GeneralFeatType.MAGE_SLAYER,
+                RestType.SHORT_REST,
+                "If you fail an Intelligence, Wisdom, or Charisma saving throw, you can cause yourself to succeed instead.",
+                mechanics=mage_slayer_mechanics(),
+            )
+        )
     if GeneralFeatType.BOON_OF_COMBAT_PROWESS in selected_feats:
         resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_COMBAT_PROWESS, GeneralFeatType.BOON_OF_COMBAT_PROWESS, RestType.SHORT_REST, "Turn a missed melee weapon attack into a hit."))
     if GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL in selected_feats:
@@ -1192,7 +1202,13 @@ def feat_resources(classes: list[CharacterClassLevel], feats=None, proficiency_b
     return resources
 
 
-def feat_single_use_resource(resource_id: FeatResourceId, feat_type: GeneralFeatType, reset: RestType, description: str) -> ResourceTracker:
+def feat_single_use_resource(
+    resource_id: FeatResourceId,
+    feat_type: GeneralFeatType,
+    reset: RestType,
+    description: str,
+    mechanics: FeatureMechanics | None = None,
+) -> ResourceTracker:
     return ResourceTracker(
         id=resource_id.value,
         name=enum_label(feat_type),
@@ -1201,6 +1217,25 @@ def feat_single_use_resource(resource_id: FeatResourceId, feat_type: GeneralFeat
         reset=reset,
         activation=TimeEconomy.SPECIAL,
         description=description,
+        mechanics=mechanics,
+    )
+
+
+def mage_slayer_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(
+        interactions=[
+            Interaction(
+                trigger=ResolutionEventType.SAVE_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+                predicates=[
+                    SourceIsSpellPredicate(),
+                    SavingThrowAbilityPredicate([AbilityType.INTELLIGENCE, AbilityType.WISDOM, AbilityType.CHARISMA]),
+                    RollOutcomePredicate(RollOutcome.FAILURE),
+                ],
+                operations=[ReplaceRollOutcome(RollOutcome.SUCCESS)],
+            )
+        ]
     )
 
 
@@ -1233,28 +1268,32 @@ def feat_abilities(classes: list[CharacterClassLevel], feats=None) -> list[Sheet
         definition = FIGHTING_STYLE_FEATS.get(style)
         if definition is None:
             continue
-        for effect in definition.effects:
-            if effect.effectType == FeatEffectType.ROLL_ABILITY and effect.rollAction is not None:
-                abilities.append(
-                    SheetAbility(
-                        id=enum_key(style),
-                        name=enum_label(style),
-                        source=enum_label(FeatCategory.FIGHTING_STYLE),
-                        activation=effect.activation,
-                        description=effect.description,
-                        rollActions=[effect.rollAction],
-                    )
-                )
-            elif effect.effectType == FeatEffectType.SHEET_ABILITY:
-                abilities.append(
-                    SheetAbility(
-                        id=enum_key(style),
-                        name=enum_label(style),
-                        source=enum_label(FeatCategory.FIGHTING_STYLE),
-                        activation=effect.activation,
-                        description=effect.description,
-                    )
-                )
+        if style == FightingStyleType.UNARMED_FIGHTING:
+            abilities.append(SheetAbility(
+                id=enum_key(style),
+                name=enum_label(style),
+                source=enum_label(FeatCategory.FIGHTING_STYLE),
+                activation=TimeEconomy.SPECIAL,
+                description="Roll 1d4 damage for the grapple rider when appropriate.",
+                rollActions=[RollAction(
+                    id=style,
+                    name=style,
+                    diceCount=1,
+                    diceType=DiceType.D4,
+                    resolution=RollResolutionMode.APPLY_DAMAGE,
+                    damageType=DamageType.BLUDGEONING,
+                    mechanics=definition.mechanics,
+                )],
+                mechanics=definition.mechanics,
+            ))
+        elif style == FightingStyleType.TUNNEL_FIGHTER:
+            abilities.append(SheetAbility(
+                id=enum_key(style),
+                name=enum_label(style),
+                source=enum_label(FeatCategory.FIGHTING_STYLE),
+                activation=TimeEconomy.BONUS_ACTION,
+                description="Enter a defensive stance until your next turn: opportunity attacks do not use your Reaction, and you can use your Reaction to attack a creature that moves more than 5 feet within your reach.",
+            ))
     return abilities
 
 
@@ -1283,40 +1322,46 @@ def feat_initiative_bonus(feats, proficiency_bonus: int) -> int:
 
 
 def armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:
-    bonus = 0
-    for style in selected_fighting_styles(classes):
-        definition = FIGHTING_STYLE_FEATS.get(style)
-        if definition is None:
-            continue
-        bonus += sum(effect.value for effect in definition.effects if effect.effectType == FeatEffectType.ARMOR_CLASS_BONUS and armor_class_bonus_applies(style, equipment))
-    return bonus
+    return sum(
+        modifier_fixed_amount(modifier)
+        for _definition, modifier in fighting_style_modifiers(classes, CalculationType.ARMOR_CLASS)
+        if modifier.operation == ModifierOperation.ADD
+        and fighting_style_modifier_applies(modifier, equipment, None)
+    )
 
 
 def attack_roll_modifiers(classes: list[CharacterClassLevel], action: AttackAction) -> list[RollModifierBreakdown]:
-    modifiers: list[RollModifierBreakdown] = []
-    for definition in selected_fighting_style_definitions(classes):
-        for effect in definition.effects:
-            if effect.effectType == FeatEffectType.ATTACK_ROLL_BONUS and attack_roll_bonus_applies(effect, action):
-                modifiers.append(RollModifierBreakdown(source=enum_label(definition.featType), value=effect.value, description=effect.description))
-    return modifiers
+    return [
+        RollModifierBreakdown(
+            source=enum_label(definition.featType),
+            value=modifier_fixed_amount(modifier),
+            description=modifier.description,
+        )
+        for definition, modifier in fighting_style_modifiers(classes, CalculationType.ATTACK_ROLL)
+        if modifier.operation == ModifierOperation.ADD
+        and fighting_style_modifier_applies(modifier, [], action)
+    ]
 
 
 def damage_roll_modifiers(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], action: AttackAction, ability_modifier_value: int) -> list[RollModifierBreakdown]:
-    modifiers: list[RollModifierBreakdown] = []
-    for definition in selected_fighting_style_definitions(classes):
-        for effect in definition.effects:
-            if effect.effectType == FeatEffectType.DAMAGE_ROLL_BONUS and damage_roll_bonus_applies(effect, equipment, action):
-                modifiers.append(RollModifierBreakdown(source=enum_label(definition.featType), value=effect.value, description=effect.description))
-            elif effect.effectType == FeatEffectType.DAMAGE_ABILITY_MODIFIER and damage_ability_modifier_applies(effect, action):
-                modifiers.append(RollModifierBreakdown(source=enum_label(definition.featType), value=ability_modifier_value, description=effect.description))
-    return modifiers
+    return [
+        RollModifierBreakdown(
+            source=enum_label(definition.featType),
+            value=modifier_amount(modifier, ability_modifier_value),
+            description=modifier.description,
+        )
+        for definition, modifier in fighting_style_modifiers(classes, CalculationType.DAMAGE_ROLL)
+        if modifier.operation == ModifierOperation.ADD
+        and fighting_style_modifier_applies(modifier, equipment, action)
+    ]
 
 
 def great_weapon_fighting_applies(classes: list[CharacterClassLevel], action: AttackAction) -> bool:
     return any(
-        effect.effectType == FeatEffectType.DAMAGE_DICE_REROLL and damage_dice_reroll_applies(effect, action)
-        for definition in selected_fighting_style_definitions(classes)
-        for effect in definition.effects
+        modifier.operation == ModifierOperation.MINIMUM
+        and modifier_fixed_amount(modifier) == 3
+        and fighting_style_modifier_applies(modifier, [], action)
+        for _definition, modifier in fighting_style_modifiers(classes, CalculationType.DAMAGE_ROLL)
     )
 
 
@@ -1324,32 +1369,67 @@ def selected_fighting_style_definitions(classes: list[CharacterClassLevel]) -> l
     return [definition for style in selected_fighting_styles(classes) if (definition := FIGHTING_STYLE_FEATS.get(style)) is not None]
 
 
-def attack_roll_bonus_applies(effect: FeatEffect, action: AttackAction) -> bool:
-    if effect.attackRollBonusScope == FeatAttackRollBonusScope.RANGED_ATTACK:
-        return is_ranged_attack(action)
-    if effect.attackRollBonusScope == FeatAttackRollBonusScope.RANGED_WEAPON_ATTACK:
-        return is_ranged_weapon_attack(action)
-    return False
+def fighting_style_modifiers(
+    classes: list[CharacterClassLevel],
+    calculation: CalculationType,
+) -> list[tuple[FeatDefinition, Modifier]]:
+    return [
+        (definition, modifier)
+        for definition in selected_fighting_style_definitions(classes)
+        for modifier in definition.mechanics.passiveModifiers
+        if modifier.calculation == calculation
+    ]
 
 
-def damage_roll_bonus_applies(effect: FeatEffect, equipment: list[EquipmentItem], action: AttackAction) -> bool:
-    if effect.damageRollBonusScope == FeatDamageRollBonusScope.ONE_HANDED_MELEE_WEAPON_ATTACK:
-        return is_one_handed_melee_weapon_attack(action) and is_wielding_exactly_one_one_handed_weapon(equipment)
-    if effect.damageRollBonusScope == FeatDamageRollBonusScope.THROWN_RANGED_ATTACK:
-        return is_thrown_weapon_attack(action)
-    return False
+def modifier_fixed_amount(modifier: Modifier) -> int:
+    return modifier.amount.value if isinstance(modifier.amount, FixedAmount) else 0
 
 
-def damage_ability_modifier_applies(effect: FeatEffect, action: AttackAction) -> bool:
-    if effect.damageAbilityModifierScope == FeatDamageAbilityModifierScope.TWO_WEAPON_FIGHTING_ATTACK:
-        return action.attackKind == AttackKind.TWO_WEAPON_FIGHTING and action.damageAbilityModifier == AttackDamageAbilityModifierMode.EXCLUDED
-    return False
+def modifier_amount(modifier: Modifier, ability_modifier_value: int) -> int:
+    if isinstance(modifier.amount, CalculatedAmount) and modifier.amount.calculation == AmountCalculation.SOURCE_ABILITY_MODIFIER:
+        return ability_modifier_value
+    return modifier_fixed_amount(modifier)
 
 
-def damage_dice_reroll_applies(effect: FeatEffect, action: AttackAction) -> bool:
-    if effect.damageDiceRerollScope == FeatDamageDiceRerollScope.TWO_HANDED_OR_VERSATILE_MELEE_WEAPON_ATTACK:
-        return is_two_handed_or_versatile_melee_weapon_attack(action)
-    return False
+def fighting_style_modifier_applies(
+    modifier: Modifier,
+    equipment: list[EquipmentItem],
+    action: AttackAction | None,
+) -> bool:
+    for predicate in modifier.predicates:
+        if isinstance(predicate, SourceAttackRangePredicate):
+            if action is None or action.attackRange != predicate.attackRange:
+                return False
+        elif isinstance(predicate, SourceWeaponCategoryPredicate):
+            if action is None or action.weaponCategory != predicate.weaponCategory:
+                return False
+        elif isinstance(predicate, SourceAttackKindPredicate):
+            if action is None or action.attackKind != predicate.attackKind:
+                return False
+        elif isinstance(predicate, SourceDamageAbilityModifierPredicate):
+            if action is None or action.damageAbilityModifier != predicate.mode:
+                return False
+        elif isinstance(predicate, WeaponHasPropertyPredicate):
+            if action is None or predicate.property not in weapon_properties(action):
+                return False
+        elif isinstance(predicate, WeaponHasAnyPropertyPredicate):
+            if action is None or not set(predicate.properties).intersection(weapon_properties(action)):
+                return False
+        elif isinstance(predicate, OwnerWearsArmorPredicate):
+            if is_wearing_armor(equipment) != predicate.expected:
+                return False
+        elif isinstance(predicate, OwnerWearsHeavyArmorPredicate):
+            if is_wearing_heavy_armor(equipment) != predicate.expected:
+                return False
+        elif isinstance(predicate, OwnerWieldsShieldPredicate):
+            if is_wielding_shield(equipment) != predicate.expected:
+                return False
+        elif isinstance(predicate, OwnerWieldsExactlyOneOneHandedWeaponPredicate):
+            if not is_wielding_exactly_one_one_handed_weapon(equipment):
+                return False
+        else:
+            return False
+    return True
 
 
 def feat_attacks(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], attacks: list[AttackAction]) -> list[AttackAction]:
@@ -1387,14 +1467,6 @@ def feat_attacks(classes: list[CharacterClassLevel], equipment: list[EquipmentIt
             )
         )
     return next_attacks
-
-
-def armor_class_bonus_applies(style: FightingStyleType, equipment: list[EquipmentItem]) -> bool:
-    if style == FightingStyleType.DEFENSE:
-        return is_wearing_armor(equipment)
-    if style == FightingStyleType.MARINER:
-        return not is_wearing_heavy_armor(equipment) and not is_wielding_shield(equipment)
-    return True
 
 
 def is_wearing_armor(equipment: list[EquipmentItem]) -> bool:

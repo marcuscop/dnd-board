@@ -173,36 +173,7 @@ export type ConditionType =
   | "seeInvisibility"
   | "wardingBond"
   | "zoneOfTruth";
-export type ConditionApplicationMode = "targetSave" | "sourceCheck" | "direct" | "manual";
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
-export type ConditionRemovalTrigger = "afterTakingDamage";
-export type RollModifierEffectOperation = "add" | "subtract";
-export type RollModifierEffectTarget = "abilityCheck" | "attackRoll" | "damageRoll" | "savingThrow" | "concentrationSave" | "armorClass";
-export type SpellMaxHitPointReductionMode = "damageTaken";
-export type ConditionEffect = {
-  condition?: ConditionType;
-  conditionLabel?: string;
-  mode: ConditionApplicationMode;
-  modeLabel: string;
-  savingThrow?: AbilityType;
-  savingThrowLabel?: string;
-  saveDcAbility?: AbilityType;
-  saveDcAbilityLabel?: string;
-  saveDc?: number;
-  sourceCheck?: AbilityType;
-  sourceCheckLabel?: string;
-  contestChecks?: AbilityType[];
-  contestChecksLabel?: string[];
-  duration: ConditionDuration;
-  durationLabel: string;
-  removalTrigger?: ConditionRemovalTrigger;
-  removalTriggerLabel?: string;
-  removalSavingThrow?: AbilityType;
-  removalSavingThrowLabel?: string;
-  removalSaveDc?: number;
-  removalAdvantage: boolean;
-  description: string;
-};
 export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "skillProficiencies" | "expertise" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
 export type DamageType =
   | "acid"
@@ -285,13 +256,7 @@ export type SpellCylinderArea = {
   diameterFeet: number;
 };
 export type SpellArea = SpellNoArea | SpellRadiusArea | SpellConeArea | SpellCubeArea | SpellLineArea | SpellCylinderArea;
-export type SpellAttackType = "none" | "meleeSpellAttack" | "rangedSpellAttack";
-export type SpellEffectKind = "damage" | "healing" | "temporaryHitPoints" | "condition" | "defense" | "movement" | "summoning" | "transformation" | "utility" | "special";
-export type SpellEffectTrigger = "onCast" | "onHit" | "onFailedSave" | "onSuccessfulSave" | "startOfTurn" | "endOfTurn" | "entersArea" | "repeatSave" | "special";
-export type SpellEffectTarget = "self" | "target" | "area" | "creaturesChosen" | "object" | "special";
 export type SpellSaveOutcome = "none" | "negates" | "halfDamage" | "partial" | "special";
-export type SpellLinkedHealingAmount = "halfDamageDealt";
-export type SpellScalingType = "none" | "cantripLevel" | "spellSlotLevel" | "casterLevel" | "special";
 export type SpellTargeting = {
   rangeType: SpellRangeType;
   rangeTypeLabel: string;
@@ -306,107 +271,75 @@ export type SpellDuration = {
   maximum: boolean;
   summary: string;
 };
-export type SpellEffectDice = {
-  diceCount: number;
-  diceType: DiceType;
-  dice: string;
-  staticBonus: number;
-  bonusAbility?: AbilityType;
-  bonusAbilityLabel?: string;
-  bonusSpellcastingAbility: boolean;
+
+export type EffectAmount = {
+  diceCount?: number;
+  diceType?: DiceType;
+  staticBonus?: number;
+  value?: number;
 };
-export type SpellDamageEffect = {
-  dice: SpellEffectDice;
-  damageType: DamageType;
-  damageTypeLabel: string;
-  scaling?: SpellScaling[];
-};
-export type SpellHealingEffect = {
-  dice: SpellEffectDice;
-};
-export type SpellSourceHealingEffect = {
-  amount: SpellLinkedHealingAmount;
-  amountLabel: string;
-};
-export type SpellMaxHitPointReduction = {
-  mode: SpellMaxHitPointReductionMode;
-  modeLabel: string;
-  reset: RestType;
-  resetLabel: string;
-};
-export type SpellConditionEffect = {
-  condition: ConditionType;
-  conditionLabel: string;
-  duration: ConditionDuration;
-  durationLabel: string;
-  savingThrow?: AbilityType;
-  savingThrowLabel?: string;
-  saveEnds: boolean;
-  removalTrigger?: ConditionRemovalTrigger;
-  removalTriggerLabel?: string;
-  removalAdvantage: boolean;
-};
-export type SpellRollModifierEffect = {
-  condition: ConditionType;
-  conditionLabel: string;
-  operation: RollModifierEffectOperation;
-  operationLabel: string;
-  targets: RollModifierEffectTarget[];
-  dice?: SpellEffectDice;
-  staticBonus: number;
-  description: string;
-};
-export type SpellSavingThrow = {
-  ability: AbilityType;
-  abilityLabel: string;
-  outcome: SpellSaveOutcome;
-  outcomeLabel: string;
-  repeat?: SpellEffectTrigger;
-  repeatLabel?: string;
-  disadvantageCreatureTypes?: CreatureType[];
-  disadvantageCreatureTypesLabel?: string[];
-  forcedFailureCreatureTypes?: CreatureType[];
-  forcedFailureCreatureTypesLabel?: string[];
-};
-export type SpellScaling = {
-  scalingType: SpellScalingType;
-  scalingTypeLabel: string;
-  additionalDice?: SpellEffectDice;
-  additionalStaticBonus: number;
-  additionalInstances: number;
+export type AmountScaling = {
+  basis: "characterLevel" | "casterLevel" | "spellSlotLevel";
   interval: number;
-  description: string;
+  additionalDice?: EffectAmount;
+  additionalFixedAmount: number;
 };
-export type SpellEffect = {
-  kind: SpellEffectKind;
-  kindLabel: string;
-  trigger: SpellEffectTrigger;
-  triggerLabel: string;
-  target: SpellEffectTarget;
-  targetLabel: string;
-  attack: SpellAttackType;
-  attackLabel: string;
-  targetCreatureTypes?: CreatureType[];
-  targetCreatureTypesLabel?: string[];
-  savingThrow?: SpellSavingThrow;
-  damage?: SpellDamageEffect;
-  damageComponents?: SpellDamageEffect[];
-  healing?: SpellHealingEffect;
-  sourceHealing?: SpellSourceHealingEffect;
-  maxHitPointIncrease?: SpellEffectDice;
-  maxHitPointReduction?: SpellMaxHitPointReduction;
-  temporaryHitPoints?: SpellEffectDice;
-  conditions?: SpellConditionEffect[];
-  conditionRemovals?: ConditionType[];
-  conditionRemovalsLabel?: string[];
-  rollModifier?: SpellRollModifierEffect;
-  scaling?: SpellScaling[];
-  restType?: RestType;
-  restTypeLabel?: string;
-  instances: number;
-  instanceLabel: string;
-  actionLabel: string;
-  description: string;
+export type AppliedEffect = {
+  kind: "damage" | "healing" | "temporaryHitPoints" | "conditionChange" | "maximumHitPoints" | "damageDefense" | "rest" | "movement";
+  amount?: EffectAmount;
+  damageType?: DamageType;
+  defense?: "resistance" | "vulnerability" | "immunity";
+  condition?: ConditionType;
+  operation?: "add" | "remove" | "suppress";
+  movementType?: "forced" | "teleport";
+  distanceFeet?: number;
+  scaling?: AmountScaling[];
+  multiplierNumerator?: number;
+  multiplierDenominator?: number;
+};
+export type EffectNode = {
+  label?: string;
+  description?: string;
+  effect?: AppliedEffect | EffectNode;
+  effects?: EffectNode[];
+  attack?: {
+    attackType: "weapon" | "spell";
+    ability?: AbilityType;
+  };
+  contest?: {
+    sourceCheck: {
+      ability: AbilityType;
+      skill?: string;
+    };
+    targetChecks: {
+      ability: AbilityType;
+      skill?: string;
+    }[];
+  };
+  onFailure?: EffectNode;
+  onSuccess?: EffectNode;
+  onHit?: EffectNode;
+  onMiss?: EffectNode;
+  onSourceWin?: EffectNode;
+  onTargetWin?: EffectNode;
+  whenTrue?: EffectNode;
+  whenFalse?: EffectNode;
+  choices?: {
+    option: DamageType | ConditionType;
+    effect: EffectNode;
+  }[];
+  instances?: {
+    baseInstances: number;
+    basis?: "characterLevel" | "casterLevel" | "spellSlotLevel";
+    interval: number;
+    additionalInstances: number;
+    thresholds: number[];
+  };
+};
+export type FeatureMechanics = {
+  activatedEffects: EffectNode[];
+  passiveModifiers: unknown[];
+  interactions: unknown[];
 };
 
 export type AttackAction = {
@@ -437,6 +370,7 @@ export type AttackAction = {
   properties: WeaponProperty[];
   propertiesLabel?: string[];
   activeSpellConditions?: string[];
+  mechanics?: FeatureMechanics;
 };
 
 export type RollAction = {
@@ -456,7 +390,7 @@ export type RollAction = {
   activation?: TimeEconomy;
   damageType?: DamageType;
   damageTypeLabel?: string;
-  conditionEffects?: ConditionEffect[];
+  mechanics?: FeatureMechanics;
 };
 
 export type AbilityScores = {
@@ -645,7 +579,7 @@ export type CharacterSheet = {
     description: string;
     resourceId?: string;
     rollActions?: RollAction[];
-    conditionEffects?: ConditionEffect[];
+    mechanics?: FeatureMechanics;
   }[];
   resources: {
     id: string;
@@ -660,6 +594,7 @@ export type CharacterSheet = {
     rollActions?: RollAction[];
     source?: string;
     spellSlotLevel?: number;
+    mechanics?: FeatureMechanics;
   }[];
   features: {
     id: string;
@@ -669,7 +604,7 @@ export type CharacterSheet = {
     activationLabel: string;
     description: string;
     rollActions?: RollAction[];
-    conditionEffects?: ConditionEffect[];
+    mechanics?: FeatureMechanics;
   }[];
   spells: {
     id: string;
@@ -695,7 +630,7 @@ export type CharacterSheet = {
     resourceId?: string;
     reset: RestType;
     resetLabel: string;
-    effects?: SpellEffect[];
+    mechanics?: FeatureMechanics;
   }[];
   spellbook: {
     id: string;
@@ -721,7 +656,7 @@ export type CharacterSheet = {
     resourceId?: string;
     reset: RestType;
     resetLabel: string;
-    effects?: SpellEffect[];
+    mechanics?: FeatureMechanics;
   }[];
   proficiencies: string[];
   conditions: ConditionType[];
@@ -731,6 +666,8 @@ export type CharacterSheet = {
     spellIdLabel: string;
     spellName: string;
   };
+  ongoingEffects: unknown[];
+  suppressedConditions: ConditionType[];
   creatureTypes: CreatureType[];
   creatureTypesLabel: string[];
   damageResistances: DamageType[];
@@ -815,21 +752,18 @@ export type RollPayload = {
   damageSaveForcedFailureCreatureTypesLabel?: string[];
   targetCreatureTypes?: CreatureType[];
   targetCreatureTypesLabel?: string[];
-  sourceHealing?: SpellSourceHealingEffect;
-  maxHitPointIncrease?: SpellEffectDice;
-  maxHitPointReduction?: SpellMaxHitPointReduction;
-  conditionEffects?: ConditionEffect[];
-  conditionEffectSucceeded?: boolean;
-  conditionRemovals?: ConditionType[];
-  conditionRemovalsLabel?: string[];
-  restType?: RestType;
-  restTypeLabel?: string;
   resourceSpent?: {
     resourceId: string;
     resourceName: string;
     remainingUses: number;
     maxUses: number;
   };
+  pendingEffect?: EffectNode;
+  effectInputs?: {
+    rolls: { effectNodeId: { path: number[] }; outcome: "success" | "failure" | "hit" | "miss" }[];
+    amounts: { effectNodeId: { path: number[] }; amount: number }[];
+  };
+  criticalHit?: boolean;
 };
 
 export type RollDamageComponent = {
@@ -846,6 +780,7 @@ export type RollDamageComponent = {
     description: string;
   }[];
   total: number;
+  effectNodeIds: { path: number[] }[];
 };
 
 export type RollResolution = {
@@ -867,6 +802,22 @@ export type RollResolution = {
   concentrationUpdates?: {
     sheetId: string;
     activeConcentration?: ActiveConcentrationStatus;
+  }[];
+  sheetUpdates?: {
+    sheetId: string;
+    tokenId: string;
+    hp?: CharacterSheet["hp"];
+    conditions?: ConditionType[];
+    damageResistances?: DamageType[];
+    damageVulnerabilities?: DamageType[];
+    damageImmunities?: DamageType[];
+    appliedEffects?: {
+      effect: AppliedEffect;
+      amount?: number;
+    }[];
+    scheduledEffects?: unknown[];
+    ongoingEffects?: unknown[];
+    suppressedConditions?: ConditionType[];
   }[];
 };
 
@@ -890,7 +841,9 @@ export type ResolutionInterceptorPrompt = {
   useLabel: string;
   declineLabel: string;
   createdAt: number;
+  interaction: unknown;
   ignoredInterceptors: string[];
+  resourceId?: string;
   responseRolls?: RollPayload[];
 };
 
