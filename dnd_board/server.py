@@ -41,7 +41,6 @@ from dnd_board.character_sheet import (
     RollModifierBreakdown,
     RollModifierEffectTarget,
     RollResolutionMode,
-    RollResourceSpend,
     RollResolution,
     RollSource,
     ResolutionInterceptorPrompt,
@@ -189,6 +188,21 @@ from dnd_board.rules.shared.effects import (
     recurring_effects_for_event,
 )
 from dnd_board.rules.shared.effects import MaximumHitPointsEffect, MaximumHitPointsOperation, RestEffect
+from dnd_board.rules.shared.resources import (
+    RESOURCE_DEFINITIONS,
+    InsufficientResourceError,
+    ResourceCost,
+    ResourceDefinition,
+    ResourceId,
+    ResourceKey,
+    ResourceRecoveryTrigger,
+    ResourceState,
+    ResourceUpdate,
+    adjust_resource,
+    recover_resources,
+    spell_slot_resource_id,
+    spend_resources,
+)
 from dnd_board.rules.shared.character_effects import (
     CharacterEffectExecution,
     CharacterEffectExecutionContext,
@@ -543,8 +557,8 @@ async def roll_sheet_damage(room_id: str, sheet_id: str, playerKey: str, attackI
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/attack")
-async def roll_sheet_spell_attack(room_id: str, sheet_id: str, spell_id: str, playerKey: str) -> dict[str, Any]:
-    return await create_spell_attack_roll(room_id, sheet_id, playerKey, spell_id)
+async def roll_sheet_spell_attack(room_id: str, sheet_id: str, spell_id: str, playerKey: str, spellSlotLevel: int | None = None) -> dict[str, Any]:
+    return await create_spell_attack_roll(room_id, sheet_id, playerKey, spell_id, spellSlotLevel)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/true-strike-attack")
@@ -573,8 +587,8 @@ async def roll_sheet_spell_temporary_hit_points(room_id: str, sheet_id: str, spe
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/effect")
-async def roll_sheet_spell_effect(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, choiceIndex: int | None = None) -> dict[str, Any]:
-    return await create_spell_condition_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, choiceIndex)
+async def roll_sheet_spell_effect(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, choiceIndex: int | None = None) -> dict[str, Any]:
+    return await create_spell_condition_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, choiceIndex)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/ability-check")
@@ -632,7 +646,22 @@ async def update_sheet_resource(room_id: str, sheet_id: str, resource_id: str, p
     if resource is None:
         raise HTTPException(status_code=404, detail="Resource not found")
 
-    room.resource_uses.setdefault(sheet.tokenId, {})[resource.id] = clamp_int(int(currentUses), 0, resource.maxUses)
+    adjusted = adjust_resource(
+        ResourceState(resource.resource, resource.currentUses, resource.maxUses),
+        currentUses,
+    ).current
+    room.resource_uses.setdefault(sheet.tokenId, {})[resource.id] = adjusted
+    save_room_to_disk(room)
+    await log_roll_note(
+        room,
+        sheet,
+        player,
+        resource.name,
+        f"Resource adjusted to {adjusted}/{resource.maxUses}",
+        DiceType.D20,
+        [],
+    )
+    await broadcast_room_state(room)
     updated = get_visible_sheet(room, player, sheet.id)
     return {"roomId": room.id, "sheet": sheet_to_dict(updated) if updated else sheet_to_dict(sheet)}
 
@@ -806,13 +835,28 @@ async def rest_room_sheets(room_id: str, playerKey: str, rest: str) -> dict[str,
 
     for sheet in visible_sheets(room, player):
         if sheet.kind == TokenKind.CHARACTER:
-            reset_sheet_resources(room, sheet, rest_type)
+            recovered_resources = reset_sheet_resources(room, sheet, rest_type)
             reset_sheet_conditions(room, sheet, rest_type)
             reset_sheet_temporary_hit_points(room, sheet, rest_type)
             reset_sheet_max_hit_point_increases(room, sheet, rest_type)
             reset_sheet_max_hit_point_reductions(room, sheet, rest_type)
             reset_sheet_exhaustion(room, sheet, rest_type)
+            if recovered_resources:
+                recovery_summary = ", ".join(
+                    f"{resource.label} {resource.current}/{resource.maximum}"
+                    for resource in recovered_resources
+                )
+                await log_roll_note(
+                    room,
+                    sheet,
+                    player,
+                    enum_label(rest_type),
+                    f"Resources recovered: {recovery_summary}",
+                    DiceType.D20,
+                    [],
+                )
     save_room_to_disk(room)
+    await broadcast_room_state(room)
     return sheet_state_message(room, player)
 
 
@@ -1024,7 +1068,6 @@ async def respond_to_resolution_prompt(room_id: str, prompt_id: str, playerKey: 
     if target is None:
         raise HTTPException(status_code=404, detail="Target sheet not found")
 
-    room.pending_resolution_prompts.pop(prompt.id, None)
     if prompt.effectExecutionId is not None:
         pending = room.pending_effect_executions.get(prompt.effectExecutionId)
         if pending is None:
@@ -1040,6 +1083,7 @@ async def respond_to_resolution_prompt(room_id: str, prompt_id: str, playerKey: 
         effect_event = pending.active.execution.waitingFor
         if effect_event is None:
             raise HTTPException(status_code=409, detail="Effect execution is not waiting for a response")
+        await claim_resolution_prompt(room, prompt, player, target, use)
         pending.ignoredInterceptors.append(resolution_interceptor_key(prompt))
         pending.outcomePrefixes.append(f"{prompt.ownerName} {'uses' if use else 'declines'} {prompt.label}")
         if use:
@@ -1178,6 +1222,7 @@ async def respond_to_resolution_prompt(room_id: str, prompt_id: str, playerKey: 
     outcome_prefixes = [f"{prompt.ownerName} {'uses' if use else 'declines'} {prompt.label}"]
     next_roll = prompt.pendingRoll
     ignored = [*prompt.ignoredInterceptors, resolution_interceptor_key(prompt)]
+    await claim_resolution_prompt(room, prompt, player, target, use)
     if use:
         used_roll, used_outcomes, used_response_rolls, canceled_resolution = apply_resolution_interceptor(room, prompt, target)
         outcome_prefixes.extend(used_outcomes)
@@ -1818,6 +1863,7 @@ async def create_attack_roll(room_id: str, sheet_id: str, player_key: str, attac
     action = find_attack(sheet, attack_id)
     await assert_roll_activation_allowed(room, sheet, player, action.activation, action.name, "Attack Roll")
     payload = build_combined_attack_roll_payload(sheet, player.player_key, action)
+    await consume_action_resources(room, sheet, player, action.resourceCosts, payload)
     return await store_outgoing_roll(room, sheet, payload)
 
 
@@ -1826,12 +1872,14 @@ async def create_damage_roll(room_id: str, sheet_id: str, player_key: str, attac
     action = find_attack(sheet, attack_id)
     await assert_roll_activation_allowed(room, sheet, player, action.activation, action.name, "Damage Roll")
     payload = build_damage_roll_payload(sheet, player.player_key, action)
+    await consume_action_resources(room, sheet, player, action.resourceCosts, payload)
     return await store_outgoing_roll(room, sheet, payload)
 
 
-async def create_spell_attack_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str) -> dict[str, Any]:
+async def create_spell_attack_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, spell_slot_level: int | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     spell = find_spell(sheet, spell_id)
+    validate_spell_slot_level(sheet, spell, spell_slot_level)
     from dnd_board.rules.shared.character_effects import first_attack_roll_effect
 
     if spell.mechanics is None or not any(first_attack_roll_effect(effect) is not None for effect in spell.mechanics.activatedEffects):
@@ -1839,6 +1887,7 @@ async def create_spell_attack_roll(room_id: str, sheet_id: str, player_key: str,
     await assert_roll_activation_allowed(room, sheet, player, spell.castingTime, enum_label(spell.name), "Spell Attack")
     await assert_slowed_somatic_spell_cast_allowed(room, sheet, player, spell)
     payload = build_spell_attack_roll_payload(sheet, player.player_key, spell)
+    await consume_action_resources(room, sheet, player, spell.resourceCosts or (), payload, spell_slot_level or spell.level)
     return await store_outgoing_roll(room, sheet, payload)
 
 
@@ -1887,6 +1936,7 @@ async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str,
         payload = build_spell_damage_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level, instance_index, damage_save_succeeded, choice_index)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    await consume_action_resources(room, sheet, player, spell.resourceCosts or (), payload, spell_slot_level or spell.level)
     return await store_outgoing_roll(room, sheet, payload)
 
 
@@ -1900,6 +1950,7 @@ async def create_spell_healing_roll(room_id: str, sheet_id: str, player_key: str
         payload = build_spell_healing_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    await consume_action_resources(room, sheet, player, spell.resourceCosts or (), payload, spell_slot_level or spell.level)
     return await store_outgoing_roll(room, sheet, payload)
 
 
@@ -1913,12 +1964,14 @@ async def create_spell_temporary_hit_points_roll(room_id: str, sheet_id: str, pl
         payload = build_spell_temporary_hit_points_roll_payload(sheet, player.player_key, spell, effect_index, spell_slot_level)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    await consume_action_resources(room, sheet, player, spell.resourceCosts or (), payload, spell_slot_level or spell.level)
     return await store_outgoing_roll(room, sheet, payload)
 
 
-async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, choice_index: int | None = None) -> dict[str, Any]:
+async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, choice_index: int | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     spell = find_spell(sheet, spell_id)
+    validate_spell_slot_level(sheet, spell, spell_slot_level)
     if spell.id == SpellId.SHILLELAGH and not shillelagh_weapon_attacks(sheet):
         await log_blocked_roll(room, sheet, player, enum_label(spell.name), "Shillelagh", "requires a wielded proficient Club or Quarterstaff")
         raise HTTPException(status_code=400, detail="Shillelagh requires a wielded proficient Club or Quarterstaff")
@@ -1934,6 +1987,7 @@ async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: s
         )
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    await consume_action_resources(room, sheet, player, spell.resourceCosts or (), payload, spell_slot_level or spell.level)
     return await store_outgoing_roll(room, sheet, payload)
 
 
@@ -1974,8 +2028,7 @@ async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, res
     await assert_roll_activation_allowed(room, sheet, player, action.activation or resource.activation, resource.name, enum_label(action.name))
     source = RollSource(section=SheetSectionType.RESOURCES, sourceId=resource.id, actionId=enum_key(action.id))
     payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=resource.name)
-    if action.consumesResource is not None:
-        spend_resource_use(room, sheet, enum_key(action.consumesResource), payload)
+    await consume_action_resources(room, sheet, player, action.resourceCosts, payload)
     return await store_outgoing_roll(room, sheet, payload)
 
 
@@ -1995,8 +2048,7 @@ async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, abil
     await assert_roll_activation_allowed(room, sheet, player, action.activation or ability.activation, ability.source, enum_label(action.name))
     source = RollSource(section=SheetSectionType.ABILITIES, sourceId=ability.id, actionId=enum_key(action.id))
     payload = build_roll_action_payload(sheet, player.player_key, source, action, source_label=ability.source)
-    if action.consumesResource is not None:
-        spend_resource_use(room, sheet, enum_key(action.consumesResource), payload)
+    await consume_action_resources(room, sheet, player, action.resourceCosts, payload)
     return await store_outgoing_roll(room, sheet, payload)
 
 
@@ -2044,6 +2096,9 @@ async def create_ad_hoc_dice_roll(room_id: str, player_key: str, dice: str, coun
 async def store_outgoing_roll(room: Room, sheet: CharacterSheet, payload: RollPayload) -> dict[str, Any]:
     response = await store_roll(room, payload)
     clear_conditions_after_outgoing_roll(room, sheet, payload)
+    if payload.resourcesSpent:
+        save_room_to_disk(room)
+        await broadcast_room_state(room)
     return response
 
 
@@ -2313,23 +2368,37 @@ def parse_rest_type(rest: str) -> RestType | None:
     return None
 
 
-def reset_sheet_resources(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
+def reset_sheet_resources(room: Room, sheet: CharacterSheet, rest_type: RestType) -> list[ResourceUpdate]:
+    recovery_trigger = (
+        ResourceRecoveryTrigger.SHORT_REST
+        if rest_type == RestType.SHORT_REST
+        else ResourceRecoveryTrigger.LONG_REST
+    )
+    recovery_definitions = dict(RESOURCE_DEFINITIONS)
+    for resource in sheet.resources:
+        recovery_definitions[resource.resource] = ResourceDefinition(
+            ResourceKey(resource.resource, resource.kind),
+            resource.name,
+            resource.recoveries,
+        )
+    recovered_states = recover_resources(
+        [ResourceState(resource.resource, resource.currentUses, resource.maxUses) for resource in sheet.resources],
+        recovery_definitions,
+        recovery_trigger,
+    )
     refreshed_resources = {
-        resource.id: resource.maxUses
-        for resource in sheet.resources
-        if resource_resets_on_rest(resource.reset, rest_type)
+        resource.id: recovered.current
+        for resource, recovered in zip(sheet.resources, recovered_states)
+        if recovered.current != resource.currentUses
     }
     if not refreshed_resources:
-        return
+        return []
     room.resource_uses.setdefault(sheet.tokenId, {}).update(refreshed_resources)
-
-
-def resource_resets_on_rest(resource_reset: RestType, rest_type: RestType) -> bool:
-    if resource_reset == RestType.NONE:
-        return False
-    if rest_type == RestType.LONG_REST:
-        return resource_reset in {RestType.SHORT_REST, RestType.LONG_REST}
-    return resource_reset == RestType.SHORT_REST
+    return [
+        ResourceUpdate(resource.resource, resource.name, refreshed_resources[resource.id], resource.maxUses)
+        for resource in sheet.resources
+        if resource.id in refreshed_resources
+    ]
 
 
 def reset_sheet_conditions(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
@@ -2375,11 +2444,19 @@ def reset_sheet_temporary_hit_points(room: Room, sheet: CharacterSheet, rest_typ
 
 def reset_sheet_max_hit_point_reductions(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
     reductions = room.max_hit_point_reductions.get(sheet.tokenId, [])
-    remaining = [reduction for reduction in reductions if not resource_resets_on_rest(reduction.reset, rest_type)]
+    remaining = [reduction for reduction in reductions if not reset_applies_to_rest(reduction.reset, rest_type)]
     if remaining:
         room.max_hit_point_reductions[sheet.tokenId] = remaining
         return
     room.max_hit_point_reductions.pop(sheet.tokenId, None)
+
+
+def reset_applies_to_rest(reset: RestType, rest_type: RestType) -> bool:
+    if reset == RestType.NONE:
+        return False
+    if rest_type == RestType.LONG_REST:
+        return reset in {RestType.SHORT_REST, RestType.LONG_REST}
+    return reset == RestType.SHORT_REST
 
 
 def reset_sheet_max_hit_point_increases(room: Room, sheet: CharacterSheet, rest_type: RestType) -> None:
@@ -2428,19 +2505,89 @@ def conditions_for_exhaustion_level(conditions: list[ConditionType], exhaustion_
     return normalized_conditions(next_conditions)
 
 
-def spend_resource_use(room: Room, sheet: CharacterSheet, resource_id: str, payload: RollPayload) -> None:
-    resource = next((candidate for candidate in sheet.resources if candidate.id == resource_id), None)
-    if resource is None:
-        return
-
-    remaining_uses = clamp_int(resource.currentUses - 1, 0, resource.maxUses)
-    room.resource_uses.setdefault(sheet.tokenId, {})[resource.id] = remaining_uses
-    payload.resourceSpent = RollResourceSpend(
-        resourceId=resource.id,
-        resourceName=resource.name,
-        remainingUses=remaining_uses,
-        maxUses=resource.maxUses,
+def resolved_resource_costs(costs: tuple[ResourceCost, ...], spell_slot_level: int | None = None) -> tuple[ResourceCost, ...]:
+    return tuple(
+        ResourceCost(spell_slot_resource_id(spell_slot_level), cost.amount)
+        if cost.resource == ResourceId.SPELL_SLOT and spell_slot_level is not None
+        else cost
+        for cost in costs
     )
+
+
+async def consume_action_resources(
+    room: Room,
+    sheet: CharacterSheet,
+    player: Player,
+    costs: tuple[ResourceCost, ...],
+    payload: RollPayload,
+    spell_slot_level: int | None = None,
+) -> list[ResourceUpdate]:
+    resolved_costs = resolved_resource_costs(costs, spell_slot_level)
+    if not resolved_costs:
+        return []
+    if any(cost.resource == ResourceId.SPELL_SLOT for cost in resolved_costs):
+        raise HTTPException(status_code=400, detail="A spell-slot cost requires a selected slot level")
+
+    resources_by_id = {
+        resource.resource: resource
+        for resource in sheet.resources
+    }
+    states = [
+        ResourceState(resource_id, resource.currentUses, resource.maxUses)
+        for resource_id, resource in resources_by_id.items()
+    ]
+    try:
+        updated_states = spend_resources(states, resolved_costs)
+    except InsufficientResourceError as error:
+        await log_blocked_roll(room, sheet, player, payload.sourceLabel, payload.label, str(error))
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    previous_by_id = {state.resource: state for state in states}
+    spent: list[ResourceUpdate] = []
+    for state in updated_states:
+        previous = previous_by_id[state.resource]
+        if state.current == previous.current:
+            continue
+        tracker = resources_by_id[state.resource]
+        room.resource_uses.setdefault(sheet.tokenId, {})[tracker.id] = state.current
+        spent.append(ResourceUpdate(state.resource, tracker.name, state.current, state.maximum))
+    payload.resourcesSpent = spent or None
+    return spent
+
+
+async def claim_resolution_prompt(
+    room: Room,
+    prompt: ResolutionInterceptorPrompt,
+    player: Player,
+    target: CharacterSheet,
+    use: bool,
+) -> None:
+    if room.pending_resolution_prompts.get(prompt.id) is not prompt:
+        raise HTTPException(status_code=409, detail="Resolution prompt has already been answered")
+
+    costs = prompt.interaction.resourceCosts
+    owner = next((sheet for sheet in all_room_sheets(room) if sheet.id == prompt.ownerSheetId), target)
+    updates: list[ResourceUpdate] = []
+    if use and costs:
+        resource_payload = replace(
+            prompt.pendingRoll,
+            sourceLabel=prompt.label,
+            label=prompt.useLabel,
+            resourcesSpent=None,
+        )
+        updates = await consume_action_resources(room, owner, player, costs, resource_payload)
+
+    # Claim the prompt before broadcasting resource changes. Failed payment raises
+    # above and deliberately leaves the prompt available for another response.
+    if room.pending_resolution_prompts.get(prompt.id) is not prompt:
+        raise HTTPException(status_code=409, detail="Resolution prompt has already been answered")
+    room.pending_resolution_prompts.pop(prompt.id)
+    if not updates:
+        return
+    save_room_to_disk(room)
+    await broadcast_room_state(room)
+    summary = ", ".join(f"{update.label} {update.current}/{update.maximum}" for update in updates)
+    await log_roll_note(room, owner, player, prompt.label, f"Resources spent: {summary}", DiceType.D20, [])
 
 
 def roll_queue_key(roll: RollPayload) -> tuple[str, str, str, str]:
@@ -2968,7 +3115,6 @@ def counterspell_prompt_for_roll(
                 createdAt=time_ns(),
                 interaction=interaction_source.interaction,
                 ignoredInterceptors=list(ignored),
-                resourceId=interaction_source.resourceId,
                 responseRolls=response_rolls or None,
             )
     return None
@@ -3028,7 +3174,6 @@ def condition_interaction_prompt_for_roll(
         createdAt=time_ns(),
         interaction=interaction_source.interaction,
         ignoredInterceptors=list(ignored),
-        resourceId=interaction_source.resourceId,
         responseRolls=response_rolls or None,
     )
 
@@ -3073,7 +3218,6 @@ def failed_save_prompt_for_roll(
             createdAt=time_ns(),
             interaction=interaction_source.interaction,
             ignoredInterceptors=list(ignored),
-            resourceId=interaction_source.resourceId,
             responseRolls=response_rolls or None,
         )
     return None
@@ -3126,7 +3270,6 @@ def attack_interaction_prompt_for_roll(
                 createdAt=time_ns(),
                 interaction=interaction_source.interaction,
                 ignoredInterceptors=list(ignored),
-                resourceId=interaction_source.resourceId,
                 responseRolls=response_rolls or None,
             )
     return None
@@ -3197,7 +3340,6 @@ def damage_interaction_prompt_for_roll(
         createdAt=time_ns(),
         interaction=interaction_source.interaction,
         ignoredInterceptors=list(ignored),
-        resourceId=interaction_source.resourceId,
         responseRolls=response_rolls or None,
     )
 
@@ -3206,7 +3348,6 @@ def damage_interaction_prompt_for_roll(
 class SheetInteractionSource:
     label: str
     interaction: Interaction
-    resourceId: str | None = None
 
 
 def sheet_interaction_sources(sheet: CharacterSheet) -> list[SheetInteractionSource]:
@@ -3214,9 +3355,9 @@ def sheet_interaction_sources(sheet: CharacterSheet) -> list[SheetInteractionSou
 
     sources: list[SheetInteractionSource] = []
 
-    def add_mechanics(label: str, mechanics, resource_id: str | None = None) -> None:
+    def add_mechanics(label: str, mechanics) -> None:
         if mechanics is not None:
-            sources.extend(SheetInteractionSource(label, interaction, resource_id) for interaction in mechanics.interactions)
+            sources.extend(SheetInteractionSource(label, interaction) for interaction in mechanics.interactions)
 
     seen_spells: set[SpellId] = set()
     for spell in [*sheet.spells, *sheet.spellbook]:
@@ -3229,15 +3370,15 @@ def sheet_interaction_sources(sheet: CharacterSheet) -> list[SheetInteractionSou
         for action in feature.rollActions or []:
             add_mechanics(enum_label(action.name), action.mechanics)
     for ability in sheet.abilities:
-        add_mechanics(ability.name, ability.mechanics, ability.resourceId)
+        add_mechanics(ability.name, ability.mechanics)
         for action in ability.rollActions or []:
-            add_mechanics(enum_label(action.name), action.mechanics, ability.resourceId)
+            add_mechanics(enum_label(action.name), action.mechanics)
     for resource in sheet.resources:
         if resource.currentUses <= 0:
             continue
-        add_mechanics(resource.name, resource.mechanics, resource.id)
+        add_mechanics(resource.name, resource.mechanics)
         for action in resource.rollActions or []:
-            add_mechanics(enum_label(action.name), action.mechanics, resource.id)
+            add_mechanics(enum_label(action.name), action.mechanics)
     for attack in sheet.attacks:
         add_mechanics(attack.name, attack.mechanics)
     for condition, ongoing_effect in condition_ongoing_effects(sheet.conditions, sheet.suppressedConditions):
@@ -3348,9 +3489,6 @@ def apply_resolution_interceptor(
         prompt.label,
         modify_damage=modify_damage_roll,
     )
-    if prompt.resourceId is not None:
-        consume_sheet_resource(room, owner, prompt.resourceId)
-
     if operation_result.cancelled:
         resolution = RollResolution(
             id=f"resolution-{time_ns()}",
@@ -3598,19 +3736,6 @@ def save_outcome_roll(roll: RollPayload, succeeded: bool) -> RollPayload:
 def all_room_sheets(room: Room) -> list[CharacterSheet]:
     player = Player(id="interceptor-dm", name="DM", player_key="dm", websocket=None, room_id=room.id)
     return visible_sheets(room, player)
-
-
-def sheet_resource_current_uses(sheet: CharacterSheet, resource_id: str) -> int:
-    resource = next((resource for resource in sheet.resources if resource.id == resource_id), None)
-    return resource.currentUses if resource is not None else 0
-
-
-def consume_sheet_resource(room: Room, sheet: CharacterSheet, resource_id: str) -> None:
-    resource = next((resource for resource in sheet.resources if resource.id == resource_id), None)
-    if resource is None:
-        return
-    room.resource_uses.setdefault(sheet.tokenId, {})[resource_id] = clamp_int(resource.currentUses - 1, 0, resource.maxUses)
-    save_room_to_disk(room)
 
 
 def class_level(sheet: CharacterSheet, class_type: ClassType) -> int:

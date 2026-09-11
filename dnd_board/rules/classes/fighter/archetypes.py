@@ -58,6 +58,7 @@ from dnd_board.rules.shared.effects import (
     SavingThrowEffect,
     SequenceEffect,
 )
+from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId, spell_slot_resource_id
 
 
 class ChampionFeatureType(Enum):
@@ -206,6 +207,56 @@ class FighterSubclassResourceType(Enum):
     SECOND_LEVEL_SPELL_SLOTS = auto()
     THIRD_LEVEL_SPELL_SLOTS = auto()
     FOURTH_LEVEL_SPELL_SLOTS = auto()
+
+
+FIGHTER_SUBCLASS_RESOURCE_IDS: dict[FighterSubclassResourceType, ResourceId] = {
+    FighterSubclassResourceType.ARCANE_SHOT: ResourceId.ARCANE_SHOT,
+    FighterSubclassResourceType.GROUP_RECOVERY: ResourceId.GROUP_RECOVERY,
+    FighterSubclassResourceType.KNOW_YOUR_ENEMY: ResourceId.KNOW_YOUR_ENEMY,
+    FighterSubclassResourceType.UNWAVERING_MARK: ResourceId.UNWAVERING_MARK,
+    FighterSubclassResourceType.WARDING_MANEUVER: ResourceId.WARDING_MANEUVER,
+    FighterSubclassResourceType.FIGHTING_SPIRIT: ResourceId.FIGHTING_SPIRIT,
+    FighterSubclassResourceType.STRENGTH_BEFORE_DEATH: ResourceId.STRENGTH_BEFORE_DEATH,
+    FighterSubclassResourceType.STEADY_AIM: ResourceId.STEADY_AIM,
+    FighterSubclassResourceType.PROTECTION_FROM_EVIL_AND_GOOD: ResourceId.PROTECTION_FROM_EVIL_AND_GOOD,
+    FighterSubclassResourceType.GIANTS_MIGHT: ResourceId.GIANTS_MIGHT,
+    FighterSubclassResourceType.RUNIC_SHIELD: ResourceId.RUNIC_SHIELD,
+    FighterSubclassResourceType.CLOUD_RUNE: ResourceId.CLOUD_RUNE,
+    FighterSubclassResourceType.FIRE_RUNE: ResourceId.FIRE_RUNE,
+    FighterSubclassResourceType.FROST_RUNE: ResourceId.FROST_RUNE,
+    FighterSubclassResourceType.STONE_RUNE: ResourceId.STONE_RUNE,
+    FighterSubclassResourceType.HILL_RUNE: ResourceId.HILL_RUNE,
+    FighterSubclassResourceType.STORM_RUNE: ResourceId.STORM_RUNE,
+    FighterSubclassResourceType.UNLEASH_INCARNATION: ResourceId.UNLEASH_INCARNATION,
+    FighterSubclassResourceType.SHADOW_MARTYR: ResourceId.SHADOW_MARTYR,
+    FighterSubclassResourceType.RECLAIM_POTENTIAL: ResourceId.RECLAIM_POTENTIAL,
+    FighterSubclassResourceType.PSIONIC_ENERGY_DICE: ResourceId.PSI_WARRIOR_PSIONIC_ENERGY_DICE,
+    FighterSubclassResourceType.PSIONIC_ENERGY_RECOVERY: ResourceId.PSIONIC_ENERGY_RECOVERY,
+    FighterSubclassResourceType.TELEKINETIC_MOVEMENT: ResourceId.TELEKINETIC_MOVEMENT,
+    FighterSubclassResourceType.PSI_POWERED_LEAP: ResourceId.PSI_POWERED_LEAP,
+    FighterSubclassResourceType.BULWARK_OF_FORCE: ResourceId.BULWARK_OF_FORCE,
+    FighterSubclassResourceType.TELEKINETIC_MASTER: ResourceId.TELEKINETIC_MASTER,
+}
+
+RUNE_RESOURCE_IDS: dict[RuneType, ResourceId] = {
+    RuneType.CLOUD_RUNE: ResourceId.CLOUD_RUNE,
+    RuneType.FIRE_RUNE: ResourceId.FIRE_RUNE,
+    RuneType.FROST_RUNE: ResourceId.FROST_RUNE,
+    RuneType.STONE_RUNE: ResourceId.STONE_RUNE,
+    RuneType.HILL_RUNE: ResourceId.HILL_RUNE,
+    RuneType.STORM_RUNE: ResourceId.STORM_RUNE,
+}
+
+FIGHTER_SPELL_SLOT_RESOURCE_IDS = {
+    FighterSubclassResourceType.FIRST_LEVEL_SPELL_SLOTS: ResourceId.FIRST_LEVEL_SPELL_SLOTS,
+    FighterSubclassResourceType.SECOND_LEVEL_SPELL_SLOTS: ResourceId.SECOND_LEVEL_SPELL_SLOTS,
+    FighterSubclassResourceType.THIRD_LEVEL_SPELL_SLOTS: ResourceId.THIRD_LEVEL_SPELL_SLOTS,
+    FighterSubclassResourceType.FOURTH_LEVEL_SPELL_SLOTS: ResourceId.FOURTH_LEVEL_SPELL_SLOTS,
+}
+
+
+def fighter_subclass_resource_id(resource_type: FighterSubclassResourceType) -> ResourceId:
+    return FIGHTER_SUBCLASS_RESOURCE_IDS.get(resource_type) or FIGHTER_SPELL_SLOT_RESOURCE_IDS[resource_type]
 
 
 class FighterSubclassRollActionType(Enum):
@@ -1192,9 +1243,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.GROUP_RECOVERY),
                 currentUses=1,
                 maxUses=1,
-                reset=RestType.SHORT_REST,
                 activation=TimeEconomy.SPECIAL,
                 description="When you use Second Wind to regain HP, choose allies in a 30-foot Emanation (60 feet at level 18) up to Charisma modifier, minimum one. Each regains 1d4 plus your Fighter level HP.",
+                resource=ResourceId.GROUP_RECOVERY,
                 rollActions=[
                     RollAction(
                         id=FighterSubclassRollActionType.GROUP_RECOVERY_HEAL,
@@ -1203,7 +1254,7 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                         diceType=DiceType.D4,
                         modifier=RollModifierType.CLASS_LEVEL,
                         resolution=RollResolutionMode.NONE,
-                        consumesResource=FighterSubclassResourceType.GROUP_RECOVERY,
+                        resourceCosts=(ResourceCost(ResourceId.GROUP_RECOVERY),),
                         activation=TimeEconomy.SPECIAL,
                         source=enum_label(FighterSubclassType.BANNERET),
                     )
@@ -1218,26 +1269,29 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.KNOW_YOUR_ENEMY),
                 currentUses=1,
                 maxUses=1,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.BONUS_ACTION,
                 description="Learn a visible creature's damage immunities, resistances, and vulnerabilities within 30 feet. Spend a Superiority Die to restore this use.",
+                resource=ResourceId.KNOW_YOUR_ENEMY,
                 source=enum_label(FighterSubclassType.BATTLE_MASTER),
             )
         )
     if subclass == FighterSubclassType.ELDRITCH_KNIGHT and fighter_level_value >= 3:
         progression = eldritch_knight_spellcasting(fighter_level_value)
         for resource_type, slot_level, max_uses in eldritch_knight_spell_slot_resources(progression):
+            resource_id = spell_slot_resource_id(slot_level)
             resources.append(
                 ResourceTracker(
                     id=enum_key(resource_type),
                     name=enum_label(resource_type),
                     currentUses=max_uses,
                     maxUses=max_uses,
-                    reset=RestType.LONG_REST,
                     activation=TimeEconomy.ACTION,
                     description=f"Spend to cast an Eldritch Knight spell using a level {slot_level} spell slot.",
                     source=enum_label(FighterSubclassType.ELDRITCH_KNIGHT),
                     spellSlotLevel=slot_level,
+                    resource=resource_id,
+                    kind=RESOURCE_DEFINITIONS[resource_id].key.kind,
+                    recoveries=RESOURCE_DEFINITIONS[resource_id].recoveries,
                 )
             )
     if subclass == FighterSubclassType.ARCANE_ARCHER and fighter_level_value >= 3:
@@ -1247,9 +1301,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.ARCANE_SHOT),
                 currentUses=2,
                 maxUses=2,
-                reset=RestType.SHORT_REST,
                 activation=TimeEconomy.SPECIAL,
                 description="Spend a use to apply one Arcane Shot option to a shortbow or longbow arrow.",
+                resource=ResourceId.ARCANE_SHOT,
                 source=enum_label(FighterSubclassType.ARCANE_ARCHER),
             )
         )
@@ -1260,9 +1314,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.UNWAVERING_MARK),
                 currentUses=max(1, ability_modifier(ability_scores.strength if ability_scores else 10)),
                 maxUses=max(1, ability_modifier(ability_scores.strength if ability_scores else 10)),
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.BONUS_ACTION,
                 description="Spend a use to make the special Unwavering Mark Bonus Action attack after a marked creature damages someone other than you.",
+                resource=ResourceId.UNWAVERING_MARK,
                 source=enum_label(FighterSubclassType.CAVALIER),
             )
         )
@@ -1274,9 +1328,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.WARDING_MANEUVER),
                 currentUses=uses,
                 maxUses=uses,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.REACTION,
                 description="Roll 1d8 and add it to the target's AC against the triggering attack.",
+                resource=ResourceId.WARDING_MANEUVER,
                 rollActions=[
                     RollAction(
                         id=FighterSubclassRollActionType.WARDING_MANEUVER,
@@ -1284,7 +1338,7 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                         diceCount=1,
                         diceType=DiceType.D8,
                         resolution=RollResolutionMode.NONE,
-                        consumesResource=FighterSubclassResourceType.WARDING_MANEUVER,
+                        resourceCosts=(ResourceCost(ResourceId.WARDING_MANEUVER),),
                         activation=TimeEconomy.REACTION,
                         source=enum_label(FighterSubclassType.CAVALIER),
                     )
@@ -1299,9 +1353,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.FIGHTING_SPIRIT),
                 currentUses=3,
                 maxUses=3,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.BONUS_ACTION,
                 description="Gain Advantage on weapon attacks until turn end and temporary hit points from Fighting Spirit.",
+                resource=ResourceId.FIGHTING_SPIRIT,
                 source=enum_label(FighterSubclassType.SAMURAI),
             )
         )
@@ -1312,9 +1366,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.STRENGTH_BEFORE_DEATH),
                 currentUses=1,
                 maxUses=1,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.REACTION,
                 description="Use when damage reduces you to 0 HP to take an extra turn before falling unconscious.",
+                resource=ResourceId.STRENGTH_BEFORE_DEATH,
                 source=enum_label(FighterSubclassType.SAMURAI),
             )
         )
@@ -1325,9 +1379,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.STEADY_AIM),
                 currentUses=3,
                 maxUses=3,
-                reset=RestType.SHORT_REST,
                 activation=TimeEconomy.BONUS_ACTION,
                 description=f"Aim at a visible target; ranged weapon hits against it deal {2 + fighter_level_value // 2} extra damage this turn.",
+                resource=ResourceId.STEADY_AIM,
                 source=enum_label(FighterSubclassType.SHARPSHOOTER),
             )
         )
@@ -1338,9 +1392,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.PROTECTION_FROM_EVIL_AND_GOOD),
                 currentUses=1,
                 maxUses=1,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.ACTION,
                 description="Cast Protection from Evil and Good with Wisdom as your spellcasting ability.",
+                resource=ResourceId.PROTECTION_FROM_EVIL_AND_GOOD,
                 source=enum_label(FighterSubclassType.MONSTER_HUNTER),
             )
         )
@@ -1351,9 +1405,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.GIANTS_MIGHT),
                 currentUses=proficiency_bonus_for_level(fighter_level_value),
                 maxUses=proficiency_bonus_for_level(fighter_level_value),
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.BONUS_ACTION,
                 description="Become Large if possible and gain Giant's Might benefits for 1 minute.",
+                resource=ResourceId.GIANTS_MIGHT,
                 source=enum_label(FighterSubclassType.RUNE_KNIGHT),
             )
         )
@@ -1364,9 +1418,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                     name=enum_label(rune),
                     currentUses=rune_uses(fighter_level_value),
                     maxUses=rune_uses(fighter_level_value),
-                    reset=RestType.SHORT_REST,
                     activation=rune_activation(rune),
                     description=rune_resource_description(rune),
+                    resource=RUNE_RESOURCE_IDS[rune],
                     source=enum_label(FighterSubclassType.RUNE_KNIGHT),
                 )
             )
@@ -1377,9 +1431,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.RUNIC_SHIELD),
                 currentUses=proficiency_bonus_for_level(fighter_level_value),
                 maxUses=proficiency_bonus_for_level(fighter_level_value),
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.REACTION,
                 description="Force an attacker to reroll a hit against another creature within 60 feet.",
+                resource=ResourceId.RUNIC_SHIELD,
                 source=enum_label(FighterSubclassType.RUNE_KNIGHT),
             )
         )
@@ -1391,9 +1445,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.UNLEASH_INCARNATION),
                 currentUses=uses,
                 maxUses=uses,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.SPECIAL,
                 description="Make one additional melee attack from your echo's position when you take the Attack action.",
+                resource=ResourceId.UNLEASH_INCARNATION,
                 source=enum_label(FighterSubclassType.ECHO_KNIGHT),
             )
         )
@@ -1404,9 +1458,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.SHADOW_MARTYR),
                 currentUses=1,
                 maxUses=1,
-                reset=RestType.SHORT_REST,
                 activation=TimeEconomy.REACTION,
                 description="Redirect an attack against another creature to your echo.",
+                resource=ResourceId.SHADOW_MARTYR,
                 source=enum_label(FighterSubclassType.ECHO_KNIGHT),
             )
         )
@@ -1418,9 +1472,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.RECLAIM_POTENTIAL),
                 currentUses=uses,
                 maxUses=uses,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.SPECIAL,
                 description="Gain 2d6 + Constitution modifier temporary hit points when your echo is destroyed by damage.",
+                resource=ResourceId.RECLAIM_POTENTIAL,
                 rollActions=[
                     RollAction(
                         id=FighterSubclassRollActionType.RECLAIM_POTENTIAL,
@@ -1429,7 +1483,7 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                         diceType=DiceType.D6,
                         staticModifier=ability_modifier(ability_scores.constitution if ability_scores else 10),
                         resolution=RollResolutionMode.APPLY_TEMPORARY_HIT_POINTS,
-                        consumesResource=FighterSubclassResourceType.RECLAIM_POTENTIAL,
+                        resourceCosts=(ResourceCost(ResourceId.RECLAIM_POTENTIAL),),
                         source=enum_label(FighterSubclassType.ECHO_KNIGHT),
                     )
                 ],
@@ -1445,9 +1499,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.PSIONIC_ENERGY_DICE),
                 currentUses=2 * proficiency_bonus_for_level(fighter_level_value),
                 maxUses=2 * proficiency_bonus_for_level(fighter_level_value),
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.SPECIAL,
                 description=f"Spend Psionic Energy dice ({enum_key(psi_die)}) to fuel Psi Warrior powers.",
+                resource=ResourceId.PSI_WARRIOR_PSIONIC_ENERGY_DICE,
                 rollActions=[
                     RollAction(
                         id=FighterSubclassRollActionType.PROTECTIVE_FIELD,
@@ -1455,7 +1509,7 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                         diceCount=1,
                         diceType=psi_die,
                         staticModifier=intelligence_modifier,
-                        consumesResource=FighterSubclassResourceType.PSIONIC_ENERGY_DICE,
+                        resourceCosts=(ResourceCost(ResourceId.PSI_WARRIOR_PSIONIC_ENERGY_DICE),),
                         activation=TimeEconomy.REACTION,
                         source=enum_label(FighterSubclassType.PSI_WARRIOR),
                     ),
@@ -1465,7 +1519,7 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                         diceCount=1,
                         diceType=psi_die,
                         staticModifier=intelligence_modifier,
-                        consumesResource=FighterSubclassResourceType.PSIONIC_ENERGY_DICE,
+                        resourceCosts=(ResourceCost(ResourceId.PSI_WARRIOR_PSIONIC_ENERGY_DICE),),
                         activation=TimeEconomy.SPECIAL,
                         source=enum_label(FighterSubclassType.PSI_WARRIOR),
                         resolution=RollResolutionMode.APPLY_DAMAGE,
@@ -1483,9 +1537,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                     name=enum_label(FighterSubclassResourceType.PSIONIC_ENERGY_RECOVERY),
                     currentUses=1,
                     maxUses=1,
-                    reset=RestType.SHORT_REST,
                     activation=TimeEconomy.BONUS_ACTION,
                     description="Regain one expended Psionic Energy die.",
+                    resource=ResourceId.PSIONIC_ENERGY_RECOVERY,
                     source=enum_label(FighterSubclassType.PSI_WARRIOR),
                 ),
                 ResourceTracker(
@@ -1493,9 +1547,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                     name=enum_label(FighterSubclassResourceType.TELEKINETIC_MOVEMENT),
                     currentUses=1,
                     maxUses=1,
-                    reset=RestType.SHORT_REST,
                     activation=TimeEconomy.ACTION,
                     description="Move a willing creature or loose object within 30 feet. Spend a Psionic Energy die to use again.",
+                    resource=ResourceId.TELEKINETIC_MOVEMENT,
                     source=enum_label(FighterSubclassType.PSI_WARRIOR),
                 ),
             ]
@@ -1507,9 +1561,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.PSI_POWERED_LEAP),
                 currentUses=1,
                 maxUses=1,
-                reset=RestType.SHORT_REST,
                 activation=TimeEconomy.BONUS_ACTION,
                 description="Gain a flying speed equal to twice your walking speed until the end of the turn. Spend a Psionic Energy die to use again.",
+                resource=ResourceId.PSI_POWERED_LEAP,
                 source=enum_label(FighterSubclassType.PSI_WARRIOR),
             )
         )
@@ -1520,9 +1574,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.BULWARK_OF_FORCE),
                 currentUses=1,
                 maxUses=1,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.BONUS_ACTION,
                 description="Grant half cover for 1 minute to visible creatures within 30 feet, up to Intelligence modifier minimum one. Spend a Psionic Energy die to use again.",
+                resource=ResourceId.BULWARK_OF_FORCE,
                 source=enum_label(FighterSubclassType.PSI_WARRIOR),
             )
         )
@@ -1533,9 +1587,9 @@ def fighter_subclass_resources(classes, ability_scores: AbilityScores | None) ->
                 name=enum_label(FighterSubclassResourceType.TELEKINETIC_MASTER),
                 currentUses=1,
                 maxUses=1,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.ACTION,
                 description="Cast Telekinesis without components. Spend a Psionic Energy die to use again.",
+                resource=ResourceId.TELEKINETIC_MASTER,
                 source=enum_label(FighterSubclassType.PSI_WARRIOR),
             )
         )
@@ -1569,7 +1623,7 @@ def fighter_subclass_abilities(classes) -> list[SheetAbility]:
                     source=enum_label(FighterSubclassType.ARCANE_ARCHER),
                     activation=TimeEconomy.SPECIAL,
                     description=arcane_shot_description(arcane_shot, fighter_level_value),
-                    resourceId=enum_key(FighterSubclassResourceType.ARCANE_SHOT),
+                    resourceId=ResourceId.ARCANE_SHOT,
                     rollActions=arcane_shot_roll_actions(arcane_shot, fighter_level_value),
                 )
             )
@@ -1624,7 +1678,7 @@ def fighter_subclass_abilities(classes) -> list[SheetAbility]:
                 source=enum_label(FighterSubclassType.RUNE_KNIGHT),
                 activation=TimeEconomy.BONUS_ACTION,
                 description="Activate Giant's Might, then roll this extra damage once on each of your turns when a weapon or unarmed strike hits.",
-                resourceId=enum_key(FighterSubclassResourceType.GIANTS_MIGHT),
+                resourceId=ResourceId.GIANTS_MIGHT,
                 rollActions=[
                     RollAction(
                         id=FighterSubclassRollActionType.GIANTS_MIGHT_DAMAGE,
@@ -1645,7 +1699,7 @@ def fighter_subclass_abilities(classes) -> list[SheetAbility]:
                     source=enum_label(FighterSubclassType.RUNE_KNIGHT),
                     activation=rune_activation(rune),
                     description=rune_ability_description(rune),
-                    resourceId=enum_key(rune),
+                    resourceId=RUNE_RESOURCE_IDS[rune],
                     rollActions=rune_roll_actions(rune),
                     mechanics=rune_mechanics(rune),
                 )
@@ -1765,7 +1819,7 @@ def fighter_subclass_spells(classes) -> list[SpellEntry]:
                 status=SpellStatus(
                     source=SpellSource.MONSTER_HUNTER,
                     castingAbility=AbilityType.WISDOM,
-                    resourceId=enum_key(FighterSubclassResourceType.PROTECTION_FROM_EVIL_AND_GOOD),
+                    resourceId=ResourceId.PROTECTION_FROM_EVIL_AND_GOOD,
                     reset=RestType.LONG_REST,
                 ),
                 level=1,
@@ -1786,7 +1840,7 @@ def fighter_subclass_spells(classes) -> list[SpellEntry]:
                 status=SpellStatus(
                     source=SpellSource.PSI_WARRIOR,
                     castingAbility=AbilityType.INTELLIGENCE,
-                    resourceId=enum_key(FighterSubclassResourceType.TELEKINETIC_MASTER),
+                    resourceId=ResourceId.TELEKINETIC_MASTER,
                     reset=RestType.LONG_REST,
                 ),
                 level=5,
@@ -1831,6 +1885,7 @@ def normalized_eldritch_knight_spell(spell: SpellEntry) -> SpellEntry:
         description=spell.description,
         concentration=spell.concentration,
         ritual=spell.ritual,
+        resourceCosts=spell.resourceCosts,
     )
 
 
@@ -1956,7 +2011,7 @@ def resource_ability(
         source=enum_label(subclass),
         activation=activation,
         description=description,
-        resourceId=enum_key(resource_type),
+        resourceId=fighter_subclass_resource_id(resource_type),
         mechanics=mechanics,
     )
 
@@ -2024,7 +2079,7 @@ def arcane_shot_roll_actions(arcane_shot: ArcaneShotType, fighter_level_value: i
             name=arcane_shot,
             diceCount=dice_count,
             diceType=DiceType.D6,
-            consumesResource=FighterSubclassResourceType.ARCANE_SHOT,
+            resourceCosts=(ResourceCost(ResourceId.ARCANE_SHOT),),
             source=enum_label(FighterSubclassType.ARCANE_ARCHER),
             resolution=RollResolutionMode.APPLY_DAMAGE,
             damageType=damage_type,
@@ -2175,7 +2230,7 @@ def rune_roll_actions(rune: RuneType) -> list[RollAction] | None:
             name=FighterSubclassRollActionType.FIRE_RUNE_SHACKLES,
             diceCount=2,
             diceType=DiceType.D6,
-            consumesResource=RuneType.FIRE_RUNE,
+            resourceCosts=(ResourceCost(ResourceId.FIRE_RUNE),),
             source=enum_label(FighterSubclassType.RUNE_KNIGHT),
             resolution=RollResolutionMode.APPLY_DAMAGE,
             damageType=DamageType.FIRE,

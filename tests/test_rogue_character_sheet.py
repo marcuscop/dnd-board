@@ -1,3 +1,4 @@
+from dnd_board.rules.shared.resources import ResourceId
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -105,7 +106,7 @@ def test_soulknife_resources_and_psychic_blade_attacks_scale() -> None:
     assert resources["rendMind"].maxUses == 1
     assert attacks[enum_key(RogueSubclassAttackType.PSYCHIC_BLADE)].damageType == DamageType.PSYCHIC
     assert attacks[enum_key(RogueSubclassAttackType.PSYCHIC_BLADE_BONUS)].damageDiceType == DiceType.D4
-    assert abilities[enum_key(RogueSubclassAbilityType.HOMING_STRIKES)].resourceId == "psionicEnergyDice"
+    assert abilities[enum_key(RogueSubclassAbilityType.HOMING_STRIKES)].resourceId == ResourceId.SOULKNIFE_PSIONIC_ENERGY_DICE
 
 
 def test_soulknife_attacks_do_not_duplicate_existing_psychic_blades() -> None:

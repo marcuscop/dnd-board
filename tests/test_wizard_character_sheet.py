@@ -44,6 +44,7 @@ from dnd_board.rules.classes.wizard.base import (
     wizard_spellbook_spells,
     wizard_subclass_label,
 )
+from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceId
 from dnd_board.rules.progression import ProgressionChoiceId, apply_progression_choice, class_hit_die, progression_choices, prune_progression_choices
 from dnd_board.rules.species import SpeciesType
 from dnd_board.rules.backgrounds import BackgroundType
@@ -65,7 +66,7 @@ def test_wizard_sheet_exposes_base_spellcasting_resources_and_saves() -> None:
 
     assert enum_key(WizardResourceType.ARCANE_RECOVERY) in resources
     assert resources[enum_key(WizardResourceType.THIRD_LEVEL_SPELL_SLOTS)].maxUses == 2
-    assert resources[enum_key(WizardResourceType.THIRD_LEVEL_SPELL_SLOTS)].reset == RestType.LONG_REST
+    assert resources[enum_key(WizardResourceType.THIRD_LEVEL_SPELL_SLOTS)].recoveries == RESOURCE_DEFINITIONS[ResourceId.THIRD_LEVEL_SPELL_SLOTS].recoveries
     assert "spellcasting" in features
     assert "memorizeSpell" in features
     assert {AbilityType.INTELLIGENCE, AbilityType.WISDOM}.issubset(saves)

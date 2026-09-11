@@ -341,6 +341,81 @@ export type FeatureMechanics = {
   passiveModifiers: unknown[];
   interactions: unknown[];
 };
+export type ResourceKind = "spellSlot" | "featureUse" | "itemCharge" | "ammunition" | "action" | "bonusAction" | "reaction";
+export type ResourceId =
+  | "spellSlot"
+  | "firstLevelSpellSlots"
+  | "secondLevelSpellSlots"
+  | "thirdLevelSpellSlots"
+  | "fourthLevelSpellSlots"
+  | "fifthLevelSpellSlots"
+  | "sixthLevelSpellSlots"
+  | "seventhLevelSpellSlots"
+  | "eighthLevelSpellSlots"
+  | "ninthLevelSpellSlots"
+  | "secondWind"
+  | "actionSurge"
+  | "indomitable"
+  | "arcaneRecovery"
+  | "superiorityDice"
+  | "psiWarriorPsionicEnergyDice"
+  | "soulknifePsionicEnergyDice"
+  | "strokeOfLuck"
+  | "luckPoints"
+  | "mageSlayer"
+  | "boonOfCombatProwess"
+  | "boonOfDimensionalTravel"
+  | "boonOfFate"
+  | "boonOfRecovery"
+  | "magicInitiateFreeCast"
+  | "groupRecovery"
+  | "knowYourEnemy"
+  | "arcaneShot"
+  | "unwaveringMark"
+  | "wardingManeuver"
+  | "fightingSpirit"
+  | "strengthBeforeDeath"
+  | "steadyAim"
+  | "protectionFromEvilAndGood"
+  | "giantsMight"
+  | "runicShield"
+  | "cloudRune"
+  | "fireRune"
+  | "frostRune"
+  | "stoneRune"
+  | "hillRune"
+  | "stormRune"
+  | "unleashIncarnation"
+  | "shadowMartyr"
+  | "reclaimPotential"
+  | "psionicEnergyRecovery"
+  | "telekineticMovement"
+  | "psiPoweredLeap"
+  | "bulwarkOfForce"
+  | "telekineticMaster"
+  | "spellThief"
+  | "wailsFromTheGrave"
+  | "soulTrinkets"
+  | "voiceOfDeath"
+  | "ghostWalk"
+  | "bloodthirst"
+  | "psychicVeil"
+  | "rendMind"
+  | "arcaneWard"
+  | "portent"
+  | "greaterPortent"
+  | "bladesong"
+  | "illusorySelf"
+  | "arrows"
+  | "bolts"
+  | "action"
+  | "bonusAction"
+  | "reaction";
+export type ResourceRecoveryTrigger = "shortRest" | "longRest";
+export type ResourceCost = {
+  resource: ResourceId;
+  amount: number;
+};
 
 export type AttackAction = {
   id: string;
@@ -371,6 +446,7 @@ export type AttackAction = {
   propertiesLabel?: string[];
   activeSpellConditions?: string[];
   mechanics?: FeatureMechanics;
+  resourceCosts: ResourceCost[];
 };
 
 export type RollAction = {
@@ -385,12 +461,12 @@ export type RollAction = {
   modifierAbilityLabel?: string;
   staticModifier: number;
   resolution: RollResolutionMode;
-  consumesResource?: string;
   description?: string;
   activation?: TimeEconomy;
   damageType?: DamageType;
   damageTypeLabel?: string;
   mechanics?: FeatureMechanics;
+  resourceCosts: ResourceCost[];
 };
 
 export type AbilityScores = {
@@ -577,7 +653,7 @@ export type CharacterSheet = {
     activation: TimeEconomy;
     activationLabel: string;
     description: string;
-    resourceId?: string;
+    resourceId?: ResourceId;
     rollActions?: RollAction[];
     mechanics?: FeatureMechanics;
   }[];
@@ -586,8 +662,6 @@ export type CharacterSheet = {
     name: string;
     currentUses: number;
     maxUses: number;
-    reset: RestType;
-    resetLabel: string;
     activation: TimeEconomy;
     activationLabel: string;
     description: string;
@@ -595,6 +669,27 @@ export type CharacterSheet = {
     source?: string;
     spellSlotLevel?: number;
     mechanics?: FeatureMechanics;
+    resource: ResourceId;
+    resourceLabel?: string;
+    kind: ResourceKind;
+    kindLabel: string;
+    recoveries: {
+      trigger: ResourceRecoveryTrigger;
+      triggerLabel: string;
+      amount?: number;
+    }[];
+    key: {
+      id: ResourceId;
+      idLabel: string;
+      kind: ResourceKind;
+      kindLabel: string;
+    };
+    state: {
+      resource: ResourceId;
+      resourceLabel: string;
+      current: number;
+      maximum: number;
+    };
   }[];
   features: {
     id: string;
@@ -627,10 +722,11 @@ export type CharacterSheet = {
     description: string;
     concentration: boolean;
     ritual: boolean;
-    resourceId?: string;
+    resourceId?: ResourceId;
     reset: RestType;
     resetLabel: string;
     mechanics?: FeatureMechanics;
+    resourceCosts?: ResourceCost[];
   }[];
   spellbook: {
     id: string;
@@ -653,10 +749,11 @@ export type CharacterSheet = {
     description: string;
     concentration: boolean;
     ritual: boolean;
-    resourceId?: string;
+    resourceId?: ResourceId;
     reset: RestType;
     resetLabel: string;
     mechanics?: FeatureMechanics;
+    resourceCosts?: ResourceCost[];
   }[];
   proficiencies: string[];
   conditions: ConditionType[];
@@ -752,12 +849,13 @@ export type RollPayload = {
   damageSaveForcedFailureCreatureTypesLabel?: string[];
   targetCreatureTypes?: CreatureType[];
   targetCreatureTypesLabel?: string[];
-  resourceSpent?: {
-    resourceId: string;
-    resourceName: string;
-    remainingUses: number;
-    maxUses: number;
-  };
+  resourcesSpent?: {
+    resource: ResourceId;
+    resourceLabel: string;
+    label: string;
+    current: number;
+    maximum: number;
+  }[];
   pendingEffect?: EffectNode;
   effectInputs?: {
     rolls: { effectNodeId: { path: number[] }; outcome: "success" | "failure" | "hit" | "miss" }[];
@@ -843,7 +941,6 @@ export type ResolutionInterceptorPrompt = {
   createdAt: number;
   interaction: unknown;
   ignoredInterceptors: string[];
-  resourceId?: string;
   responseRolls?: RollPayload[];
 };
 

@@ -7,6 +7,8 @@ from time import time_ns
 from types import SimpleNamespace, UnionType
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin, get_type_hints
 
+from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId, ResourceKey, ResourceKind, ResourceRecovery, ResourceState, ResourceUpdate
+
 if TYPE_CHECKING:
     from dnd_board.rules.shared.effects import ActiveOngoingEffect, ActiveScheduledEffect, AppliedEffectResult, CalculationType, DiceAmount, EffectNode, EffectNodeId, EffectResolutionInputs, FeatureMechanics, Interaction, ModifierOperation
     from dnd_board.rules.shared.character_effects import ResolvedCharacterEffect
@@ -1175,6 +1177,7 @@ class AttackAction:
     properties: list[WeaponProperty] | None = None
     activeSpellConditions: list[SpellId] | None = None
     mechanics: FeatureMechanics | None = None
+    resourceCosts: tuple[ResourceCost, ...] = ()
 
     @api_field
     def damageDie(self) -> str:
@@ -1191,12 +1194,12 @@ class RollAction:
     modifierAbility: AbilityType | None = None
     staticModifier: int = 0
     resolution: RollResolutionMode = RollResolutionMode.NONE
-    consumesResource: Enum | None = None
     description: str | None = None
     activation: TimeEconomy | None = None
     source: str | None = None
     damageType: DamageType | None = None
     mechanics: FeatureMechanics | None = None
+    resourceCosts: tuple[ResourceCost, ...] = ()
 
     @api_field
     def dice(self) -> str:
@@ -1269,13 +1272,29 @@ class ResourceTracker:
     name: str
     currentUses: int
     maxUses: int
-    reset: RestType
     activation: TimeEconomy
     description: str
+    resource: ResourceId
     rollActions: list[RollAction] | None = None
     source: str | None = None
     spellSlotLevel: int | None = None
     mechanics: FeatureMechanics | None = None
+    kind: ResourceKind = ResourceKind.FEATURE_USE
+    recoveries: tuple[ResourceRecovery, ...] | None = None
+
+    def __post_init__(self) -> None:
+        definition = RESOURCE_DEFINITIONS[self.resource]
+        self.kind = definition.key.kind
+        if self.recoveries is None:
+            self.recoveries = definition.recoveries
+
+    @api_field
+    def key(self) -> ResourceKey:
+        return ResourceKey(self.resource, self.kind)
+
+    @api_field
+    def state(self) -> ResourceState:
+        return ResourceState(self.resource, self.currentUses, self.maxUses)
 
 
 @dataclass
@@ -1285,7 +1304,7 @@ class SheetAbility:
     source: str
     activation: TimeEconomy
     description: str
-    resourceId: str | None = None
+    resourceId: ResourceId | None = None
     rollActions: list[RollAction] | None = None
     mechanics: FeatureMechanics | None = None
 
@@ -1305,7 +1324,7 @@ class SheetFeature:
 class SpellStatus:
     source: SpellSource | None = None
     castingAbility: AbilityType | None = None
-    resourceId: str | None = None
+    resourceId: ResourceId | None = None
     reset: RestType = RestType.NONE
 
 
@@ -1325,6 +1344,7 @@ class SpellEntry:
     castingDuration: SpellDuration | None = None
     status: SpellStatus = field(default_factory=SpellStatus)
     mechanics: FeatureMechanics | None = None
+    resourceCosts: tuple[ResourceCost, ...] | None = None
 
     @api_field
     def castingTimeLabel(self) -> str:
@@ -1349,7 +1369,7 @@ class SpellEntry:
         return enum_label(self.status.castingAbility) if self.status.castingAbility is not None else ""
 
     @api_field
-    def resourceId(self) -> str | None:
+    def resourceId(self) -> ResourceId | None:
         return self.status.resourceId
 
     @api_field
@@ -1513,18 +1533,10 @@ class RollPayload:
     damageSaveDisadvantageCreatureTypes: list[CreatureType] | None = None
     damageSaveForcedFailureCreatureTypes: list[CreatureType] | None = None
     targetCreatureTypes: list[CreatureType] | None = None
-    resourceSpent: RollResourceSpend | None = None
+    resourcesSpent: list[ResourceUpdate] | None = None
     pendingEffect: EffectNode | None = None
     effectInputs: EffectResolutionInputs | None = None
     criticalHit: bool | None = None
-
-
-@dataclass
-class RollResourceSpend:
-    resourceId: str
-    resourceName: str
-    remainingUses: int
-    maxUses: int
 
 
 @dataclass
@@ -1580,7 +1592,6 @@ class ResolutionInterceptorPrompt:
     createdAt: int
     interaction: Interaction
     ignoredInterceptors: list[str] = field(default_factory=list)
-    resourceId: str | None = None
     responseRolls: list[RollPayload] | None = None
     effectExecutionId: int | None = None
 
@@ -3357,7 +3368,7 @@ def resource_roll_abilities(resources: list[ResourceTracker]) -> list[SheetAbili
                     source=action.source or resource.source or resource.name,
                     activation=action.activation or resource.activation,
                     description=action.description or dice_formula(action.diceCount, action.diceType),
-                    resourceId=resource.id,
+                    resourceId=resource.resource,
                     rollActions=[action],
                 )
             )
@@ -3371,13 +3382,15 @@ def apply_resource_overrides(resources: list[ResourceTracker], overrides: dict[s
             name=resource.name,
             currentUses=clamp_int(overrides.get(resource.id, resource.currentUses), 0, resource.maxUses),
             maxUses=resource.maxUses,
-            reset=resource.reset,
             activation=resource.activation,
             description=resource.description,
             rollActions=resource.rollActions,
             source=resource.source,
             spellSlotLevel=resource.spellSlotLevel,
             mechanics=resource.mechanics,
+            resource=resource.resource,
+            kind=resource.kind,
+            recoveries=resource.recoveries,
         )
         for resource in resources
     ]
@@ -3458,7 +3471,7 @@ def default_spellcasting_spells(classes: list[CharacterClassLevel], spells: list
 
 
 def hydrated_spell_entries(spells: list[SpellEntry]) -> list[SpellEntry]:
-    from dnd_board.rules.spells import spell_entry
+    from dnd_board.rules.spells import spell_entry, spell_resource_costs
 
     hydrated: list[SpellEntry] = []
     for spell in spells:
@@ -3466,17 +3479,21 @@ def hydrated_spell_entries(spells: list[SpellEntry]) -> list[SpellEntry]:
         if current is None:
             hydrated.append(spell)
             continue
-        hydrated.append(
-            replace(
-                current,
-                status=SpellStatus(
-                    source=spell.source,
-                    castingAbility=spell.castingAbility,
-                    resourceId=spell.resourceId,
-                    reset=spell.reset,
-                ),
-            )
+        status = SpellStatus(
+            source=spell.source,
+            castingAbility=spell.castingAbility,
+            resourceId=spell.resourceId,
+            reset=spell.reset,
         )
+        hydrated_current = replace(current, status=status)
+        hydrated.append(replace(
+            hydrated_current,
+            resourceCosts=(
+                spell.resourceCosts
+                if spell.resourceCosts is not None
+                else spell_resource_costs(hydrated_current)
+            ),
+        ))
     return hydrated
 
 
@@ -3696,6 +3713,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
     from dnd_board.rules.classes.wizard.base import WizardFeatureType, WizardResourceType, WizardSubclassType
     from dnd_board.rules.shared.combat_superiority import BattleMasterResourceType, MonsterHunterSuperiorityActionType, ScoutSuperiorityActionType
     from dnd_board.rules.shared.effects import effect_model_types
+    from dnd_board.rules.shared.resources import resource_model_types
 
     return {
         type_.__name__: type_
@@ -3795,6 +3813,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             WizardSubclassResourceType,
             WizardSubclassType,
             *effect_model_types(),
+            *resource_model_types(),
         ]
     }
 

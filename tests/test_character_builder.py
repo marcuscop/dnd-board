@@ -3,6 +3,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceId
+
 from dnd_board import server
 from dnd_board.character_builder import (
     AbilityScoreGenerationMethod,
@@ -267,11 +269,12 @@ def test_character_builder_adds_magic_initiate_spells_from_background() -> None:
     assert all(spell.castingAbility == AbilityType.INTELLIGENCE for spell in spells.values())
     assert spells[SpellId.MAGE_HAND].resourceId is None
     assert spells[SpellId.PRESTIDIGITATION].resourceId is None
-    assert spells[SpellId.MAGIC_MISSILE].resourceId == "magicInitiateMagicMissileFreeCast"
+    assert spells[SpellId.MAGIC_MISSILE].resourceId == ResourceId.MAGIC_INITIATE_FREE_CAST
     assert spells[SpellId.MAGIC_MISSILE].reset == RestType.LONG_REST
+    assert spells[SpellId.MAGIC_MISSILE].resourceCosts == ()
     assert member.sheet.resources is not None
-    assert [(resource.id, resource.currentUses, resource.maxUses, resource.reset) for resource in member.sheet.resources] == [
-        ("magicInitiateMagicMissileFreeCast", 1, 1, RestType.LONG_REST)
+    assert [(resource.id, resource.currentUses, resource.maxUses, resource.recoveries) for resource in member.sheet.resources] == [
+        ("magicInitiateFreeCast", 1, 1, RESOURCE_DEFINITIONS[ResourceId.MAGIC_INITIATE_FREE_CAST].recoveries)
     ]
 
 

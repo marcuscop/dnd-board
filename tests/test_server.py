@@ -4,6 +4,7 @@ from dataclasses import replace
 from io import BytesIO
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -53,6 +54,7 @@ from dnd_board.rules.shared.effects import (
     SavingThrowEffect,
     SequenceEffect,
 )
+from dnd_board.rules.shared.resources import ResourceCost, ResourceId, ResourceKind, ResourceRecovery, ResourceRecoveryTrigger
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -1455,6 +1457,13 @@ def test_player_can_roll_fire_bolt_spell_attack_and_scaled_damage(tmp_path, monk
     assert burning_hands_roll["damageSavingThrow"] == "dexterity"
     assert burning_hands_roll["damageSaveDc"] == 15
     assert burning_hands_roll["damageSaveOutcome"] == "halfDamage"
+    assert burning_hands_roll["resourcesSpent"] == [{
+        "resource": "thirdLevelSpellSlots",
+        "resourceLabel": "Third Level Spell Slots",
+        "label": "Third Level Spell Slots",
+        "current": 1,
+        "maximum": 2,
+    }]
 
     resolution = client.post(f"/api/rooms/spell-roll-test/rolls/{burning_hands_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
     dodger = client.get("/api/rooms/spell-roll-test/sheet/player-2?playerKey=player-2").json()["sheet"]
@@ -1465,6 +1474,38 @@ def test_player_can_roll_fire_bolt_spell_attack_and_scaled_damage(tmp_path, monk
     assert "passes DC 15 Dexterity save for half damage" in resolution_body["outcome"]
     assert resolution_body["responseRolls"][0]["label"] == "Dexterity Save"
     assert resolution_body["responseRolls"][0]["total"] == 18
+
+
+def test_effect_spell_can_consume_selected_higher_level_slot(tmp_path, monkeypatch) -> None:
+    mage_armor = wizard_spell_entry(SpellId.MAGE_ARMOR)
+    assert mage_armor is not None
+    write_party_campaign(
+        tmp_path,
+        "effect-spell-slot-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=24,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[mage_armor]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    before = client.get("/api/rooms/effect-spell-slot-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    response = client.post(
+        "/api/rooms/effect-spell-slot-test/sheet/player-1/spells/mageArmor/rolls/effect"
+        "?playerKey=player-1&spellSlotLevel=3"
+    )
+    after = client.get("/api/rooms/effect-spell-slot-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    before_resources = {resource["resource"]: resource["currentUses"] for resource in before["resources"] if "resource" in resource}
+    after_resources = {resource["resource"]: resource["currentUses"] for resource in after["resources"] if "resource" in resource}
+
+    assert response.status_code == 200
+    assert response.json()["roll"]["resourcesSpent"][0]["resource"] == "thirdLevelSpellSlots"
+    assert after_resources["firstLevelSpellSlots"] == before_resources["firstLevelSpellSlots"]
+    assert after_resources["thirdLevelSpellSlots"] == before_resources["thirdLevelSpellSlots"] - 1
 
 
 def test_spell_damage_resolves_save_and_damage_as_one_action(tmp_path, monkeypatch) -> None:
@@ -1543,6 +1584,73 @@ def test_indomitable_prompts_on_failed_damage_save_and_can_reroll(tmp_path, monk
     assert "rerolls with Indomitable and passes" in final_response.json()["resolution"]["outcome"]
     assert fighter["resources"][2]["id"] == "indomitable"
     assert fighter["resources"][2]["currentUses"] == 0
+    assert prompt["interaction"]["resourceCosts"][0]["resource"] == "indomitable"
+    assert any(
+        entry.roll.label == "Resources spent: Indomitable 0/1"
+        for entry in server.rooms["indomitable-interceptor-test"].roll_history
+    )
+
+
+def test_resolution_prompt_can_only_be_claimed_once(tmp_path, monkeypatch) -> None:
+    harm = spell_entry(SpellId.HARM)
+    assert harm is not None
+    write_party_campaign(
+        tmp_path,
+        "resolution-prompt-race-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Cleric",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=18, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.CLERIC, level=11)], spells=[harm]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Fighter",
+            maxHp=60,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=13)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 2)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1 if maximum == 20 else 2)
+    client = TestClient(server.app)
+
+    damage_roll = client.post(
+        "/api/rooms/resolution-prompt-race-test/sheet/player-1/spells/harm/rolls/damage?playerKey=player-1"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/resolution-prompt-race-test/rolls/{damage_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+
+    async def yielding_broadcast(_room) -> None:
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(server, "broadcast_room_state", yielding_broadcast)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 20 if maximum == 20 else 2)
+
+    async def respond_twice():
+        return await asyncio.gather(
+            server.respond_to_resolution_prompt(
+                "resolution-prompt-race-test", prompt["id"], "player-2", True
+            ),
+            server.respond_to_resolution_prompt(
+                "resolution-prompt-race-test", prompt["id"], "player-2", True
+            ),
+            return_exceptions=True,
+        )
+
+    responses = asyncio.run(respond_twice())
+    failures = [response for response in responses if isinstance(response, HTTPException)]
+    fighter = client.get(
+        "/api/rooms/resolution-prompt-race-test/sheet/player-2?playerKey=player-2"
+    ).json()["sheet"]
+    indomitable = next(resource for resource in fighter["resources"] if resource["id"] == "indomitable")
+
+    assert len(failures) == 1
+    assert failures[0].status_code in {404, 409}
+    assert indomitable["currentUses"] == 1
 
 
 def test_mage_slayer_prompts_on_failed_spell_int_wis_cha_save(tmp_path, monkeypatch) -> None:
@@ -2952,14 +3060,14 @@ def test_slow_applies_condition_penalties_and_blocks_reactions(tmp_path, monkeyp
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
                 savingThrowProficiencies=[AbilityType.DEXTERITY],
                 resources=[
-                    ResourceTracker(
+                        ResourceTracker(
                         "reactionDice",
                         "Reaction Dice",
                         1,
                         1,
-                        RestType.LONG_REST,
                         TimeEconomy.REACTION,
-                        "A reaction roll.",
+                            "A reaction roll.",
+                            ResourceId.ILLUSORY_SELF,
                         rollActions=[RollAction(BattleMasterManeuverType.PARRY, BattleMasterManeuverType.PARRY, 1, DiceType.D8)],
                     )
                 ],
@@ -3235,7 +3343,7 @@ def test_prayer_of_healing_grants_short_rest_to_resolved_target(tmp_path, monkey
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
                 conditions=[ConditionType.PRONE],
-                resources=[ResourceTracker("short", "Short", 0, 2, RestType.SHORT_REST, TimeEconomy.SPECIAL, "short")],
+                    resources=[ResourceTracker("short", "Short", 0, 2, TimeEconomy.SPECIAL, "short", ResourceId.ACTION_SURGE)],
             ),
         ),
     )
@@ -3807,6 +3915,72 @@ def test_sheet_resource_update_rejects_missing_resource(tmp_path, monkeypatch) -
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Resource not found"
+
+
+def test_attack_resource_costs_are_validated_and_consumed_atomically(tmp_path, monkeypatch) -> None:
+    ammunition_attack = AttackAction(
+        id="ammunition-test",
+        name="Ammunition Test",
+        ability=AbilityType.DEXTERITY,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D6,
+        damageType=DamageType.PIERCING,
+        attackRange=AttackRangeType.RANGED,
+        weaponCategory=WeaponCategory.RANGED,
+        resourceCosts=(ResourceCost(ResourceId.ARROWS), ResourceCost(ResourceId.BOLTS)),
+    )
+    write_party_campaign(
+        tmp_path,
+        "atomic-ammunition-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Archer",
+            maxHp=20,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                attacks=[ammunition_attack],
+                resources=[
+                    ResourceTracker("arrows", "Arrows", 1, 1, TimeEconomy.SPECIAL, "Arrow ammunition.", resource=ResourceId.ARROWS, kind=ResourceKind.AMMUNITION),
+                    ResourceTracker("bolts", "Bolts", 0, 1, TimeEconomy.SPECIAL, "Bolt ammunition.", resource=ResourceId.BOLTS, kind=ResourceKind.AMMUNITION),
+                ],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: maximum)
+    client = TestClient(server.app)
+
+    blocked = client.post(
+        "/api/rooms/atomic-ammunition-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=ammunition-test"
+    )
+    blocked_sheet = client.get(
+        "/api/rooms/atomic-ammunition-test/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+    assert blocked.status_code == 409
+    assert "Bolts requires 1, but only 0 remain" in blocked.json()["detail"]
+    assert {resource["id"]: resource["currentUses"] for resource in blocked_sheet["resources"]} == {
+        "arrows": 1,
+        "bolts": 0,
+    }
+
+    client.post(
+        "/api/rooms/atomic-ammunition-test/sheet/player-1/resources/bolts?playerKey=player-1&currentUses=1"
+    )
+    rolled = client.post(
+        "/api/rooms/atomic-ammunition-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=ammunition-test"
+    )
+    spent_sheet = client.get(
+        "/api/rooms/atomic-ammunition-test/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+
+    assert rolled.status_code == 200
+    assert {spend["resource"] for spend in rolled.json()["roll"]["resourcesSpent"]} == {"arrows", "bolts"}
+    assert {
+        resource["id"]: resource["currentUses"]
+        for resource in spent_sheet["resources"]
+        if resource["id"] in {"arrows", "bolts"}
+    } == {"arrows": 0, "bolts": 0}
 
 
 def test_sheet_endpoint_rejects_missing_visible_sheet() -> None:
@@ -4618,7 +4792,7 @@ def test_rogue_levels_into_soulknife_and_uses_homing_strikes(tmp_path, monkeypat
     abilities = {ability["id"]: ability for ability in sheet["abilities"]}
     attacks = {attack["id"]: attack for attack in sheet["attacks"]}
     assert resources["psionicEnergyDice"]["maxUses"] == 8
-    assert abilities[enum_key(RogueSubclassAbilityType.HOMING_STRIKES)]["resourceId"] == "psionicEnergyDice"
+    assert abilities[enum_key(RogueSubclassAbilityType.HOMING_STRIKES)]["resourceId"] == "soulknifePsionicEnergyDice"
     assert attacks[enum_key(RogueSubclassAttackType.PSYCHIC_BLADE)]["id"] == enum_key(RogueSubclassAttackType.PSYCHIC_BLADE)
     assert attacks[enum_key(RogueSubclassAttackType.PSYCHIC_BLADE)]["damageType"] == "psychic"
 
@@ -4632,12 +4806,13 @@ def test_rogue_levels_into_soulknife_and_uses_homing_strikes(tmp_path, monkeypat
     assert roll.json()["roll"]["label"] == "Homing Strikes"
     assert roll.json()["roll"]["die"] == "1d8"
     assert roll.json()["roll"]["dice"] == [4]
-    assert roll.json()["roll"]["resourceSpent"] == {
-        "resourceId": "psionicEnergyDice",
-        "resourceName": "Psionic Energy Dice",
-        "remainingUses": 7,
-        "maxUses": 8,
-    }
+    assert roll.json()["roll"]["resourcesSpent"] == [{
+        "resource": "soulknifePsionicEnergyDice",
+        "resourceLabel": "Soulknife Psionic Energy Dice",
+        "label": "Psionic Energy Dice",
+        "current": 7,
+        "maximum": 8,
+    }]
     assert psionic_energy["currentUses"] == 7
 
 
@@ -4792,14 +4967,49 @@ def test_short_rest_resets_only_short_rest_resources(tmp_path, monkeypatch) -> N
     second_resources = {resource["id"]: resource for resource in sheets["player-2"]["resources"]}
 
     assert response.status_code == 200
-    assert resources["secondWind"]["currentUses"] == resources["secondWind"]["maxUses"]
+    assert resources["secondWind"]["currentUses"] == 1
+    assert resources["secondWind"]["key"]["id"] == "secondWind"
+    assert resources["secondWind"]["key"]["kind"] == "featureUse"
+    assert resources["secondWind"]["state"]["resource"] == "secondWind"
+    assert resources["secondWind"]["state"]["current"] == 1
+    assert resources["secondWind"]["state"]["maximum"] == 3
+    assert [recovery["trigger"] for recovery in resources["secondWind"]["recoveries"]] == ["shortRest", "longRest"]
+    assert [recovery.get("amount") for recovery in resources["secondWind"]["recoveries"]] == [1, None]
     assert resources["actionSurge"]["currentUses"] == resources["actionSurge"]["maxUses"]
     assert resources["indomitable"]["currentUses"] == 0
     assert sheets["player-1"]["hp"]["temporary"] == 7
-    assert second_resources["secondWind"]["currentUses"] == second_resources["secondWind"]["maxUses"]
+    assert second_resources["secondWind"]["currentUses"] == 1
     assert second_resources["actionSurge"]["currentUses"] == second_resources["actionSurge"]["maxUses"]
     assert second_resources["indomitable"]["currentUses"] == 0
     assert sheets["player-2"]["hp"]["temporary"] == 7
+    assert any(
+        entry.roll.label.startswith("Resources recovered: Second Wind 1/3")
+        for entry in room.roll_history
+    )
+
+
+def test_serialized_tracker_recovery_rules_override_definition_defaults() -> None:
+    room = server.get_or_create_room("tracker-recovery-test")
+    sheet = server.token_to_sheet(room.tokens["player-1"], room.id)
+    sheet.resources = [
+        ResourceTracker(
+            "customActionSurge",
+            "Custom Action Surge",
+            0,
+            3,
+            TimeEconomy.SPECIAL,
+            "Recover one use on a Short Rest.",
+            resource=ResourceId.ACTION_SURGE,
+            kind=ResourceKind.FEATURE_USE,
+            recoveries=(ResourceRecovery(ResourceRecoveryTrigger.SHORT_REST, 1),),
+        )
+    ]
+
+    recovered = server.reset_sheet_resources(room, sheet, RestType.SHORT_REST)
+
+    assert room.resource_uses[sheet.tokenId] == {"customActionSurge": 1}
+    assert recovered[0].resource == ResourceId.ACTION_SURGE
+    assert recovered[0].current == 1
 
 
 def test_long_rest_resets_short_and_long_rest_resources(tmp_path, monkeypatch) -> None:
@@ -4972,12 +5182,13 @@ def test_tactical_mind_roll_consumes_second_wind_and_has_own_pending_slot(tmp_pa
     assert roll["die"] == "1d10"
     assert roll["diceType"] == "d10"
     assert roll["dice"] == [7]
-    assert roll["resourceSpent"] == {
-        "resourceId": "secondWind",
-        "resourceName": "Second Wind",
-        "remainingUses": 2,
-        "maxUses": 3,
-    }
+    assert roll["resourcesSpent"] == [{
+        "resource": "secondWind",
+        "resourceLabel": "Second Wind",
+        "label": "Second Wind",
+        "current": 2,
+        "maximum": 3,
+    }]
     assert second_wind["currentUses"] == 2
     assert {pending_roll["id"] for pending_roll in pending} == {attack.json()["roll"]["id"], roll["id"]}
 
@@ -5053,12 +5264,13 @@ def test_superior_technique_roll_consumes_superiority_die(tmp_path, monkeypatch)
     assert roll["die"] == "1d6"
     assert roll["diceType"] == "d6"
     assert roll["dice"] == [5]
-    assert roll["resourceSpent"] == {
-        "resourceId": "superiorityDice",
-        "resourceName": "Superiority Dice",
-        "remainingUses": 0,
-        "maxUses": 1,
-    }
+    assert roll["resourcesSpent"] == [{
+        "resource": "superiorityDice",
+        "resourceLabel": "Superiority Dice",
+        "label": "Superiority Dice",
+        "current": 0,
+        "maximum": 1,
+    }]
     assert superiority_die["currentUses"] == 0
 
 
@@ -5099,7 +5311,7 @@ def test_cavalier_warding_maneuver_roll_consumes_resource(tmp_path, monkeypatch)
     assert roll["sourceLabel"] == "Cavalier"
     assert roll["die"] == "1d8"
     assert roll["dice"] == [6]
-    assert roll["resourceSpent"]["remainingUses"] == 1
+    assert roll["resourcesSpent"][0]["current"] == 1
     assert warding_maneuver["currentUses"] == 1
 
 
@@ -5308,11 +5520,24 @@ def test_second_wind_roll_immediately_heals_source(monkeypatch) -> None:
 
     assert response.status_code == 200
     roll = response.json()["roll"]
+    second_wind = next(resource for resource in starting_sheet.resources if resource.id == "secondWind")
     assert roll["resolution"] == "healSelf"
+    assert roll["resourcesSpent"] == [{
+        "resource": "secondWind",
+        "resourceLabel": "Second Wind",
+        "label": "Second Wind",
+        "current": second_wind.currentUses - 1,
+        "maximum": second_wind.maxUses,
+    }]
     assert response.json()["resolution"]["targetSheetId"] == "player-1"
     assert response.json()["logEntry"]["entryType"] == "rollResolved"
     assert healed_sheet["hp"]["current"] == min(starting_sheet.hp.max, 10 + roll["total"])
     assert pending == []
+
+    client.post("/api/rooms/sheet-healing-test/sheet/player-1/resources/secondWind?playerKey=player-1&currentUses=0")
+    blocked = client.post("/api/rooms/sheet-healing-test/sheet/player-1/resources/secondWind/rolls/secondWindHeal?playerKey=player-1")
+    assert blocked.status_code == 409
+    assert "Second Wind requires 1, but only 0 remain" in blocked.json()["detail"]
 
 
 def test_reclaim_potential_roll_resolution_adds_temporary_hp(tmp_path, monkeypatch) -> None:
@@ -6075,9 +6300,9 @@ def test_server_state_helpers_cover_rest_equipment_and_room_edges(tmp_path, monk
     player = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
     room.players[player.id] = player
     sheet = server.token_to_sheet(room.tokens["player-1"], room.id, current_hp=5)
-    short_resource = ResourceTracker("short", "Short", 0, 2, RestType.SHORT_REST, TimeEconomy.SPECIAL, "short")
-    long_resource = ResourceTracker("long", "Long", 0, 1, RestType.LONG_REST, TimeEconomy.SPECIAL, "long")
-    none_resource = ResourceTracker("none", "None", 0, 1, RestType.NONE, TimeEconomy.SPECIAL, "none")
+    short_resource = ResourceTracker("short", "Short", 0, 2, TimeEconomy.SPECIAL, "short", ResourceId.ACTION_SURGE)
+    long_resource = ResourceTracker("long", "Long", 0, 1, TimeEconomy.SPECIAL, "long", ResourceId.ARCANE_RECOVERY)
+    none_resource = ResourceTracker("none", "None", 0, 1, TimeEconomy.SPECIAL, "none", ResourceId.ARROWS, recoveries=())
     sheet.resources = [short_resource, long_resource, none_resource]
     sheet.conditions = [ConditionType.PRONE, ConditionType.FRIGHTENED, ConditionType.CHARMED]
     room.condition_durations[sheet.tokenId] = {
@@ -6101,7 +6326,7 @@ def test_server_state_helpers_cover_rest_equipment_and_room_edges(tmp_path, monk
     assert sheet.tokenId not in room.temporary_hit_points
     assert server.parse_rest_type("short-rest") == RestType.SHORT_REST
     assert server.parse_rest_type("long") == RestType.LONG_REST
-    assert server.resource_resets_on_rest(RestType.NONE, RestType.LONG_REST) is False
+    assert server.reset_applies_to_rest(RestType.NONE, RestType.LONG_REST) is False
 
     armor = EquipmentItem(id="chain", name="Chain Mail", itemType=EquipmentType.ARMOR, slot=EquipmentSlot.ARMOR, armorCategory=ArmorCategory.HEAVY, armorClass=16)
     sword = EquipmentItem(id="sword", name="Sword", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND)

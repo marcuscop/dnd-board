@@ -11,7 +11,6 @@ from dnd_board.character_sheet import (
     DiceType,
     FightingStyleType,
     ResourceTracker,
-    RestType,
     RollModifierType,
     RollAction,
     RollResolutionMode,
@@ -20,6 +19,7 @@ from dnd_board.character_sheet import (
     enum_label,
 )
 from dnd_board.rules.shared.effects import FeatureMechanics
+from dnd_board.rules.shared.resources import ResourceCost, ResourceId
 
 
 class BattleMasterResourceType(Enum):
@@ -81,9 +81,9 @@ def combat_superiority_resource(classes: list[CharacterClassLevel]) -> ResourceT
         name="Superiority Dice",
         currentUses=dice_count,
         maxUses=dice_count,
-        reset=RestType.SHORT_REST,
         activation=TimeEconomy.SPECIAL,
         description=f"Spend one superiority die ({enum_key(dice_type)}) to use a maneuver or superiority option. Save DC is 8 + Proficiency Bonus + Strength or Dexterity modifier.",
+        resource=ResourceId.SUPERIORITY_DICE,
         source=superiority_resource_source(classes),
         rollActions=[
             RollAction(
@@ -95,7 +95,7 @@ def combat_superiority_resource(classes: list[CharacterClassLevel]) -> ResourceT
                 modifier=definition.modifier,
                 modifierAbility=definition.modifierAbility,
                 staticModifier=definition.staticModifier,
-                consumesResource=BattleMasterResourceType.SUPERIORITY_DICE,
+                resourceCosts=(ResourceCost(ResourceId.SUPERIORITY_DICE),),
                 description=definition.description,
                 activation=definition.activation,
                 source=enum_label(definition.source),

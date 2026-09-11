@@ -22,6 +22,7 @@ from dnd_board.character_sheet import (
     WeaponProperty,
     WeaponCategory,
 )
+from dnd_board.rules.shared.resources import ResourceCost
 
 
 class EffectTarget(Enum):
@@ -703,6 +704,7 @@ class Interaction:
     decision: InteractionDecision
     predicates: list[Predicate] = field(default_factory=list)
     operations: list[ResolutionOperation] = field(default_factory=list)
+    resourceCosts: tuple[ResourceCost, ...] = ()
 
 
 class PendingResolutionStatus(Enum):

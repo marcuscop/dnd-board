@@ -11,7 +11,6 @@ from dnd_board.character_sheet import (
     DamageType,
     DiceType,
     ResourceTracker,
-    RestType,
     RollAction,
     RollResolutionMode,
     SheetAbility,
@@ -42,6 +41,7 @@ from dnd_board.rules.shared.effects import (
     SourceIsAttackPredicate,
     TargetIsOwnerPredicate,
 )
+from dnd_board.rules.shared.resources import ResourceId
 
 
 class RogueFeatureType(Enum):
@@ -182,10 +182,10 @@ def rogue_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracker]
             name=enum_label(RogueResourceType.STROKE_OF_LUCK),
             currentUses=1,
             maxUses=1,
-            reset=RestType.SHORT_REST,
             activation=TimeEconomy.SPECIAL,
             description="If you fail a d20 Test, turn the roll into a 20.",
             source=enum_label(ClassType.ROGUE),
+            resource=ResourceId.STROKE_OF_LUCK,
         )
     ]
 

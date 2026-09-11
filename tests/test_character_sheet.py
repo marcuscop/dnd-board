@@ -70,6 +70,7 @@ from dnd_board.character_sheet import (
     effective_damage_resistances,
     generated_ability_scores,
     generated_max_hp,
+    hydrated_spell_entries,
     optional_text,
     party_manifest_from_dict,
     positive_int,
@@ -109,7 +110,21 @@ from dnd_board.rules.shared.effects import (
     SavingThrowEffect,
     SequenceEffect,
 )
+from dnd_board.rules.shared.resources import ResourceCost, ResourceId
 from dnd_board.rules.spells import cleric_spell_entry, paladin_spell_entry, spell_damage_effect, spell_entry, spell_scaling, wizard_spell_entry
+
+
+def test_spell_hydration_derives_missing_costs_but_preserves_explicit_free_casting() -> None:
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    assert burning_hands is not None
+
+    migrated, explicitly_free = hydrated_spell_entries([
+        replace(burning_hands, resourceCosts=None),
+        replace(burning_hands, resourceCosts=()),
+    ])
+
+    assert migrated.resourceCosts == (ResourceCost(ResourceId.SPELL_SLOT),)
+    assert explicitly_free.resourceCosts == ()
 
 
 def test_typed_party_manifest_round_trips_config_objects() -> None:

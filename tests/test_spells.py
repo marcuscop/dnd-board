@@ -84,6 +84,7 @@ from dnd_board.rules.shared.effects import (
     SequenceEffect,
     TemporaryHitPointsEffect,
 )
+from dnd_board.rules.shared.resources import ResourceCost, ResourceId
 
 
 def test_spell_catalog_loads_full_2024_markdown_table() -> None:
@@ -155,6 +156,22 @@ def test_spell_catalog_uses_existing_sheet_spell_entry() -> None:
     assert "Spell lists: Sorcerer, Wizard." in entry.description
     assert wizard_spell_entry("cureWounds") is None
     assert SpellId.FIREBALL in {spell.id for spell in wizard_spell_entries(maximum_level=3)}
+
+
+def test_spell_resource_costs_only_cover_one_cast_control() -> None:
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    fire_bolt = wizard_spell_entry(SpellId.FIRE_BOLT)
+    magic_missile = wizard_spell_entry(SpellId.MAGIC_MISSILE)
+    acid_arrow = wizard_spell_entry(SpellId.MELF_S_ACID_ARROW)
+
+    assert burning_hands is not None
+    assert fire_bolt is not None
+    assert magic_missile is not None
+    assert acid_arrow is not None
+    assert burning_hands.resourceCosts == (ResourceCost(ResourceId.SPELL_SLOT),)
+    assert fire_bolt.resourceCosts == ()
+    assert magic_missile.resourceCosts == ()
+    assert acid_arrow.resourceCosts == ()
 
 
 def test_named_spell_list_helpers_use_the_shared_catalog() -> None:

@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from dnd_board.character_sheet import CharacterClassLevel, ClassType, ResourceTracker, RestType, SheetAbility, SheetFeature, TimeEconomy, enum_key, enum_label
+from dnd_board.character_sheet import CharacterClassLevel, ClassType, ResourceTracker, SheetAbility, SheetFeature, TimeEconomy, enum_key, enum_label
 from dnd_board.rules.classes.wizard.base import WizardSubclassType, wizard_class, wizard_subclass_label
+from dnd_board.rules.shared.resources import ResourceId
 
 
 class WizardSubclassFeatureType(Enum):
@@ -141,12 +142,13 @@ def wizard_subclass_resources(classes: list[CharacterClassLevel]) -> list[Resour
     resources: list[ResourceTracker] = []
     if subclass == WizardSubclassType.DIVINER and level >= 3:
         resource_type = WizardSubclassResourceType.GREATER_PORTENT if level >= 14 else WizardSubclassResourceType.PORTENT
+        resource_id = ResourceId.GREATER_PORTENT if level >= 14 else ResourceId.PORTENT
         uses = 3 if level >= 14 else 2
-        resources.append(ResourceTracker(enum_key(resource_type), enum_label(resource_type), uses, uses, RestType.LONG_REST, TimeEconomy.SPECIAL, "Rolled Portent dice available after a Long Rest.", source=wizard_subclass_label(subclass)))
+        resources.append(ResourceTracker(enum_key(resource_type), enum_label(resource_type), uses, uses, TimeEconomy.SPECIAL, "Rolled Portent dice available after a Long Rest.", resource_id, source=wizard_subclass_label(subclass)))
     if subclass == WizardSubclassType.BLADESINGER and level >= 3:
-        resources.append(ResourceTracker(enum_key(WizardSubclassResourceType.BLADESONG), enum_label(WizardSubclassResourceType.BLADESONG), 2, 2, RestType.LONG_REST, TimeEconomy.BONUS_ACTION, "Start Bladesong.", source=wizard_subclass_label(subclass)))
+        resources.append(ResourceTracker(enum_key(WizardSubclassResourceType.BLADESONG), enum_label(WizardSubclassResourceType.BLADESONG), 2, 2, TimeEconomy.BONUS_ACTION, "Start Bladesong.", ResourceId.BLADESONG, source=wizard_subclass_label(subclass)))
     if subclass == WizardSubclassType.ILLUSIONIST and level >= 10:
-        resources.append(ResourceTracker(enum_key(WizardSubclassResourceType.ILLUSORY_SELF), enum_label(WizardSubclassResourceType.ILLUSORY_SELF), 1, 1, RestType.SHORT_REST, TimeEconomy.REACTION, "Use Illusory Self to avoid an attack.", source=wizard_subclass_label(subclass)))
+        resources.append(ResourceTracker(enum_key(WizardSubclassResourceType.ILLUSORY_SELF), enum_label(WizardSubclassResourceType.ILLUSORY_SELF), 1, 1, TimeEconomy.REACTION, "Use Illusory Self to avoid an attack.", ResourceId.ILLUSORY_SELF, source=wizard_subclass_label(subclass)))
     return resources
 
 

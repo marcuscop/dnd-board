@@ -42,6 +42,7 @@ from dnd_board.rules.backgrounds import (
     background_skill_proficiencies,
     background_tool_options,
 )
+from dnd_board.rules.shared.resources import ResourceId
 from dnd_board.rules.progression import class_hit_die
 from dnd_board.rules.species import SpeciesType, species_definition, species_hit_point_bonus, species_label, species_traits
 
@@ -611,9 +612,10 @@ def background_spell_entries(background: BackgroundType, selected_spells: tuple[
                 status=SpellStatus(
                     source=spell.source,
                     castingAbility=spell.castingAbility,
-                    resourceId=magic_initiate_resource_id(spell.id),
+                    resourceId=ResourceId.MAGIC_INITIATE_FREE_CAST,
                     reset=RestType.LONG_REST,
                 ),
+                resourceCosts=(),
             )
         spells.append(spell)
     return [spell for spell in spells if spell is not None]
@@ -650,22 +652,18 @@ def background_spell_resources(background: BackgroundType, selected_spells: tupl
     spells = background_spell_entries(background, selected_spells)
     return [
         ResourceTracker(
-            id=magic_initiate_resource_id(spell.id),
+            id=enum_key(ResourceId.MAGIC_INITIATE_FREE_CAST),
             name=f"{enum_label(spell.id)} Free Cast",
             currentUses=1,
             maxUses=1,
-            reset=RestType.LONG_REST,
             activation=TimeEconomy.ACTION,
             description=f"Cast {enum_label(spell.id)} once without expending a spell slot. Resets on a Long Rest.",
             source=enum_label(SpellSource.MAGIC_INITIATE),
+            resource=ResourceId.MAGIC_INITIATE_FREE_CAST,
         )
         for spell in spells
         if spell.level == 1
     ]
-
-
-def magic_initiate_resource_id(spell_id: SpellId) -> str:
-    return f"magicInitiate{enum_key(spell_id)[0].upper()}{enum_key(spell_id)[1:]}FreeCast"
 
 
 def magic_initiate_spell_list(background: BackgroundType):

@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId
+
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -350,8 +352,8 @@ def test_supported_general_feat_mechanics_are_reflected_on_sheet() -> None:
     assert sheet.speed == 70
     assert sheet.hp.max == 84
     assert resources["luckPoints"].maxUses == sheet.proficiencyBonus
-    assert resources["luckPoints"].reset.name == "LONG_REST"
-    assert abilities["luckyAdvantage"].resourceId == "luckPoints"
+    assert resources["luckPoints"].recoveries == RESOURCE_DEFINITIONS[ResourceId.LUCK_POINTS].recoveries
+    assert abilities["luckyAdvantage"].resourceId == ResourceId.LUCK_POINTS
     assert abilities["observantQuickSearch"].activation == TimeEconomy.BONUS_ACTION
 
 
@@ -367,10 +369,10 @@ def test_epic_boon_feat_resources_and_legacy_speed_bonus_are_reflected() -> None
     abilities = {ability.id: ability for ability in feat_abilities([], feats)}
 
     assert set(resources) == {"boonOfCombatProwess", "boonOfDimensionalTravel", "boonOfFate", "boonOfRecovery"}
-    assert resources["boonOfRecovery"].reset == RestType.LONG_REST
-    assert resources["boonOfFate"].reset == RestType.SHORT_REST
+    assert resources["boonOfRecovery"].recoveries == RESOURCE_DEFINITIONS[ResourceId.BOON_OF_RECOVERY].recoveries
+    assert resources["boonOfFate"].recoveries == RESOURCE_DEFINITIONS[ResourceId.BOON_OF_FATE].recoveries
     assert abilities["boonOfDimensionalTravel"].activation == TimeEconomy.ACTION
-    assert abilities["boonOfRecovery"].resourceId == "boonOfRecovery"
+    assert abilities["boonOfRecovery"].resourceId == ResourceId.BOON_OF_RECOVERY
     assert feat_speed_bonus(feats) == 10
 
 
@@ -738,12 +740,12 @@ def test_fighting_style_superior_technique_adds_short_rest_superiority_die() -> 
     resource = resources["superiorityDice"]
     assert resource.currentUses == 1
     assert resource.maxUses == 1
-    assert resource.reset.name == "SHORT_REST"
+    assert resource.recoveries == RESOURCE_DEFINITIONS[ResourceId.SUPERIORITY_DICE].recoveries
     assert len(resource.rollActions or []) == len(BATTLE_MASTER_2024_MANEUVERS)
     assert all(action.diceType == DiceType.D6 for action in resource.rollActions or [])
-    assert all(action.consumesResource.name == "SUPERIORITY_DICE" for action in resource.rollActions or [])
+    assert all(action.resourceCosts == (ResourceCost(ResourceId.SUPERIORITY_DICE),) for action in resource.rollActions or [])
     assert {"ambush", "tripAttack"} <= abilities.keys()
-    assert abilities["ambush"].resourceId == "superiorityDice"
+    assert abilities["ambush"].resourceId == ResourceId.SUPERIORITY_DICE
     assert abilities["ambush"].source == "Battle Master"
     assert abilities["rally"].activation.name == "BONUS_ACTION"
 
@@ -1030,7 +1032,7 @@ def test_cavalier_samurai_and_sharpshooter_resources_are_tracked() -> None:
     assert samurai["fightingSpirit"].maxUses == 3
     assert samurai["strengthBeforeDeath"].maxUses == 1
     assert sharpshooter["steadyAim"].maxUses == 3
-    assert sharpshooter["steadyAim"].reset.name == "SHORT_REST"
+    assert sharpshooter["steadyAim"].recoveries == RESOURCE_DEFINITIONS[ResourceId.STEADY_AIM].recoveries
 
 
 def test_scout_superiority_actions_use_scaled_dice() -> None:
@@ -1066,13 +1068,13 @@ def test_monster_hunter_tracks_superiority_and_mysticism_spells() -> None:
     assert superiority.source == "Monster Hunter"
     assert {action.id.name for action in superiority.rollActions or []} == {"HUNTERS_DAMAGE", "HUNTERS_WILL", "HUNTERS_EYE"}
     assert resources["protectionFromEvilAndGood"].maxUses == 1
-    assert resources["protectionFromEvilAndGood"].reset.name == "LONG_REST"
+    assert resources["protectionFromEvilAndGood"].recoveries == RESOURCE_DEFINITIONS[ResourceId.PROTECTION_FROM_EVIL_AND_GOOD].recoveries
     assert spells[SpellId.DETECT_MAGIC].ritual is True
     assert spells[SpellId.DETECT_MAGIC].source == SpellSource.MONSTER_HUNTER
     assert spells[SpellId.DETECT_MAGIC].castingAbility.name == "WISDOM"
     assert spells[SpellId.DETECT_MAGIC].castingTime == TimeEconomy.SPECIAL
     assert spells[SpellId.DETECT_MAGIC].castingDuration == SpellDuration(SpellDurationUnit.MINUTE, amount=10)
-    assert spells[SpellId.PROTECTION_FROM_EVIL_AND_GOOD].resourceId == "protectionFromEvilAndGood"
+    assert spells[SpellId.PROTECTION_FROM_EVIL_AND_GOOD].resourceId == ResourceId.PROTECTION_FROM_EVIL_AND_GOOD
     assert spells[SpellId.PROTECTION_FROM_EVIL_AND_GOOD].concentration is True
 
 
@@ -1082,7 +1084,7 @@ def test_arcane_archer_exposes_arcane_shots_with_damage_types() -> None:
     abilities = {ability.id: ability for ability in sheet.abilities}
 
     assert resources["arcaneShot"].maxUses == 2
-    assert resources["arcaneShot"].reset.name == "SHORT_REST"
+    assert resources["arcaneShot"].recoveries == RESOURCE_DEFINITIONS[ResourceId.ARCANE_SHOT].recoveries
     assert {"banishingArrow", "beguilingArrow", "burstingArrow", "enfeeblingArrow", "graspingArrow", "piercingArrow", "seekingArrow", "shadowArrow"} <= set(abilities)
     assert abilities["burstingArrow"].rollActions
     assert abilities["burstingArrow"].rollActions[0].damageType == DamageType.FORCE
@@ -1109,7 +1111,7 @@ def test_rune_knight_tracks_giant_rune_resources_and_damage_scaling() -> None:
     assert resources["giantsMight"].maxUses == 3
     assert resources["runicShield"].maxUses == 3
     assert resources["fireRune"].maxUses == 1
-    assert resources["hillRune"].reset.name == "SHORT_REST"
+    assert resources["hillRune"].recoveries == RESOURCE_DEFINITIONS[ResourceId.HILL_RUNE].recoveries
     assert abilities["fireRune"].rollActions[0].damageType == DamageType.FIRE
     assert level_18_abilities["giantsMight"].rollActions[0].diceType == DiceType.D10
     assert level_18_resources["stormRune"].maxUses == 2
@@ -1122,7 +1124,7 @@ def test_echo_knight_tracks_constitution_based_resources() -> None:
 
     assert resources["unleashIncarnation"].maxUses == 2
     assert resources["shadowMartyr"].maxUses == 1
-    assert resources["shadowMartyr"].reset.name == "SHORT_REST"
+    assert resources["shadowMartyr"].recoveries == RESOURCE_DEFINITIONS[ResourceId.SHADOW_MARTYR].recoveries
     assert resources["reclaimPotential"].maxUses == 2
     assert abilities["reclaimPotential"].rollActions[0].staticModifier == 2
 
@@ -1136,8 +1138,8 @@ def test_psi_warrior_tracks_psionic_dice_scaling_and_telekinesis() -> None:
     assert resources["psionicEnergyDice"].maxUses == 12
     assert resources["psionicEnergyDice"].rollActions[0].diceType == DiceType.D12
     assert resources["psionicEnergyDice"].rollActions[1].damageType == DamageType.FORCE
-    assert resources["psionicEnergyRecovery"].reset.name == "SHORT_REST"
-    assert resources["telekineticMaster"].reset.name == "LONG_REST"
+    assert resources["psionicEnergyRecovery"].recoveries == RESOURCE_DEFINITIONS[ResourceId.PSIONIC_ENERGY_RECOVERY].recoveries
+    assert resources["telekineticMaster"].recoveries == RESOURCE_DEFINITIONS[ResourceId.TELEKINETIC_MASTER].recoveries
     assert "guardedMind" in abilities
     assert spells[SpellId.TELEKINESIS].name == SpellId.TELEKINESIS
     assert spells[SpellId.TELEKINESIS].source == SpellSource.PSI_WARRIOR
@@ -1158,7 +1160,7 @@ def test_eldritch_knight_tracks_spell_slots_and_known_counts() -> None:
     assert level_20_resources["secondLevelSpellSlots"].maxUses == 3
     assert level_20_resources["thirdLevelSpellSlots"].maxUses == 3
     assert level_20_resources["fourthLevelSpellSlots"].maxUses == 1
-    assert level_20_abilities["fourthLevelSpellSlots"].resourceId == "fourthLevelSpellSlots"
+    assert level_20_abilities["fourthLevelSpellSlots"].resourceId == ResourceId.FOURTH_LEVEL_SPELL_SLOTS
     assert "3 cantrips and prepare 13 leveled spells" in spellcasting.description
 
 

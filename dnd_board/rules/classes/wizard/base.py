@@ -8,7 +8,6 @@ from dnd_board.character_sheet import (
     CharacterClassLevel,
     ClassType,
     ResourceTracker,
-    RestType,
     SheetFeature,
     SpellEntry,
     SpellId,
@@ -19,6 +18,7 @@ from dnd_board.character_sheet import (
 )
 from dnd_board.rules.sources import RuleSource, rule_source_label
 from dnd_board.rules.spells import SpellListType, spell_entries_for_list, spell_entry_for_list
+from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceId, spell_slot_resource_id
 
 
 class WizardFeatureType(Enum):
@@ -178,10 +178,10 @@ def wizard_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracker
             name=enum_label(WizardResourceType.ARCANE_RECOVERY),
             currentUses=1,
             maxUses=1,
-            reset=RestType.LONG_REST,
             activation=TimeEconomy.SPECIAL,
             description="Once per Long Rest when you finish a Short Rest, recover expended spell slots with combined levels up to half your Wizard level rounded up.",
             source=enum_label(ClassType.WIZARD),
+            resource=ResourceId.ARCANE_RECOVERY,
         )
     ]
     resource_types = (
@@ -198,16 +198,19 @@ def wizard_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracker
     for slot_level, (resource_type, max_uses) in enumerate(zip(resource_types, progression.spell_slots), start=1):
         if max_uses <= 0:
             continue
+        resource_id = spell_slot_resource_id(slot_level)
         resources.append(ResourceTracker(
             id=enum_key(resource_type),
             name=enum_label(resource_type),
             currentUses=max_uses,
             maxUses=max_uses,
-            reset=RestType.LONG_REST,
             activation=TimeEconomy.SPECIAL,
             description=f"Level {slot_level} Wizard spell slots.",
             source=enum_label(ClassType.WIZARD),
             spellSlotLevel=slot_level,
+            resource=resource_id,
+            kind=RESOURCE_DEFINITIONS[resource_id].key.kind,
+            recoveries=RESOURCE_DEFINITIONS[resource_id].recoveries,
         ))
     return resources
 

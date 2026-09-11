@@ -97,6 +97,7 @@ from dnd_board.rules.shared.effects import (
     TargetHasAnyCreatureTypePredicate,
     TemporaryHitPointsEffect,
 )
+from dnd_board.rules.shared.resources import ResourceCost, ResourceId
 
 
 class SpellListType(Enum):
@@ -732,17 +733,48 @@ def normalized_spell_entry(
     source: SpellSource,
     casting_ability: AbilityType,
 ) -> SpellEntry:
+    status = SpellStatus(
+        source=source,
+        castingAbility=casting_ability,
+        resourceId=spell.resourceId,
+        reset=spell.reset,
+    )
     return replace(
         spell,
-        status=SpellStatus(
-            source=source,
-            castingAbility=casting_ability,
-            resourceId=spell.resourceId,
-            reset=spell.reset,
-        ),
+        status=status,
         components=list(spell.components),
+        resourceCosts=spell_resource_costs(replace(spell, status=status)),
         mechanics=deepcopy(spell.mechanics),
     )
+
+
+def spell_resource_costs(spell: SpellEntry) -> tuple[ResourceCost, ...]:
+    if spell.level == 0 or spell.resourceId is not None or spell.source is None:
+        return ()
+    # Multiple activated controls and repeated rolls belong to one cast. They need
+    # a cast transaction before their individual UI controls can share one cost.
+    activated = spell.mechanics.activatedEffects if spell.mechanics is not None else []
+    if len(activated) != 1 or contains_repeated_effect(activated[0]):
+        return ()
+    return (ResourceCost(ResourceId.SPELL_SLOT),)
+
+
+def contains_repeated_effect(effect: EffectNode | None) -> bool:
+    if isinstance(effect, RepeatedEffect):
+        return True
+    if isinstance(effect, ActivatedEffect):
+        return contains_repeated_effect(effect.effect)
+    if isinstance(effect, SequenceEffect):
+        return any(contains_repeated_effect(child) for child in effect.effects)
+    if isinstance(effect, SavingThrowEffect):
+        return contains_repeated_effect(effect.onFailure) or contains_repeated_effect(effect.onSuccess)
+    if isinstance(effect, AttackRollEffect):
+        return contains_repeated_effect(effect.onHit) or contains_repeated_effect(effect.onMiss)
+    if isinstance(effect, ConditionalEffect):
+        return contains_repeated_effect(effect.whenTrue) or contains_repeated_effect(effect.whenFalse)
+    if isinstance(effect, ChoiceEffect):
+        return any(contains_repeated_effect(choice.effect) for choice in effect.choices)
+    return False
 
 
 def clone_spell_entry(spell: SpellEntry) -> SpellEntry:

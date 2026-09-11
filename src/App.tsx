@@ -817,9 +817,10 @@ export function App() {
   );
 
   const rollSpellAttack = useCallback(
-    async (sheet: CharacterSheet, spellId: string) => {
+    async (sheet: CharacterSheet, spellId: string, spellSlotLevel?: number) => {
+      const slotQuery = spellSlotLevel === undefined ? "" : `&spellSlotLevel=${encodeURIComponent(spellSlotLevel)}`;
       const response = await fetch(
-        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/attack?playerKey=${encodeURIComponent(playerKey)}`,
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/attack?playerKey=${encodeURIComponent(playerKey)}${slotQuery}`,
         { method: "POST" }
       );
       if (!response.ok) {
@@ -912,10 +913,11 @@ export function App() {
   );
 
   const rollSpellEffect = useCallback(
-    async (sheet: CharacterSheet, spellId: string, effectIndex: number, choiceIndex?: number) => {
+    async (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, choiceIndex?: number) => {
+      const slotQuery = spellSlotLevel === undefined ? "" : `&spellSlotLevel=${encodeURIComponent(spellSlotLevel)}`;
       const choiceQuery = choiceIndex === undefined ? "" : `&choiceIndex=${encodeURIComponent(choiceIndex)}`;
       const response = await fetch(
-        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/effect?playerKey=${encodeURIComponent(playerKey)}&effectIndex=${encodeURIComponent(effectIndex)}${choiceQuery}`,
+        `/api/rooms/${encodeURIComponent(getInitialRoomId())}/sheet/${encodeURIComponent(sheet.id)}/spells/${encodeURIComponent(spellId)}/rolls/effect?playerKey=${encodeURIComponent(playerKey)}&effectIndex=${encodeURIComponent(effectIndex)}${slotQuery}${choiceQuery}`,
         { method: "POST" }
       );
       if (!response.ok) {
@@ -1371,13 +1373,13 @@ type SheetViewProps = {
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, abilityId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
-  onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
+  onRollSpellAttack: (sheet: CharacterSheet, spellId: string, spellSlotLevel?: number) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number, choiceIndex?: number) => void;
   onRollTrueStrikeAttack: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
   onRollTrueStrikeDamage: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
-  onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number, choiceIndex?: number) => void;
+  onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, choiceIndex?: number) => void;
   onRollAdHocDice: (dice: DiceType, count: number) => Promise<RollPayload | null>;
   onRestSheets: (rest: "short" | "long") => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
@@ -2973,7 +2975,9 @@ function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: CharacterS
           ? ` ${actor}: ${displayRoll.label} ${rollMathText(displayRoll)}${responseRollText}; ${entry.resolution.outcome} to ${entry.resolution.targetName}`
           : ` ${actor}: ${roll.label} `}
         {!entry.resolution && !isBlocked && !isLogOnly && <span className="roll-result-number">{rollMathText(roll)}</span>}
-        {roll.resourceSpent ? ` · ${roll.resourceSpent.resourceName} ${roll.resourceSpent.remainingUses}/${roll.resourceSpent.maxUses}` : ""}
+        {roll.resourcesSpent
+          ? roll.resourcesSpent.map((resource) => ` · ${resource.label} ${resource.current}/${resource.maximum}`).join("")
+          : ""}
       </span>
     </li>
   );
@@ -3081,7 +3085,7 @@ function SheetAbilityList({
       <h2>Abilities</h2>
       <div className="resource-list">
         {sheet.abilities.map((ability) => {
-          const resource = ability.resourceId ? sheet.resources.find((candidate) => candidate.id === ability.resourceId) : undefined;
+          const resource = ability.resourceId ? sheet.resources.find((candidate) => candidate.resource === ability.resourceId) : undefined;
           const matchingRolls = pendingRolls.filter((roll) => rollMatchesSource(roll, SheetSectionType.ABILITIES, ability.id));
           const matchingResolvedRolls = resolvedRolls.filter((entry) => rollMatchesSource(entry.roll, SheetSectionType.ABILITIES, ability.id));
 
@@ -3106,7 +3110,7 @@ function SheetAbilityList({
               {ability.description && <p>{ability.description}</p>}
               {(ability.rollActions ?? []).length > 0 ? (
                 <RollActionList
-                  canRoll={canRoll}
+                  canRoll={canRoll && (!resource || resource.currentUses > 0)}
                   pendingRolls={matchingRolls}
                   resolvedRolls={matchingResolvedRolls}
                   roller={sheet}
@@ -3251,13 +3255,13 @@ function FullSheet({
   onRollDamage: (sheet: CharacterSheet, attackId: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
-  onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
+  onRollSpellAttack: (sheet: CharacterSheet, spellId: string, spellSlotLevel?: number) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number, choiceIndex?: number) => void;
   onRollTrueStrikeAttack: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
   onRollTrueStrikeDamage: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
-  onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number, choiceIndex?: number) => void;
+  onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, choiceIndex?: number) => void;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateCondition: (sheet: CharacterSheet, condition: ConditionType, active: boolean) => void;
   onUpdateExhaustion: (sheet: CharacterSheet, level: number) => void;
@@ -3529,13 +3533,13 @@ function SheetSpellList({
   canRoll: boolean;
   onDragRollEnd: () => void;
   onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
-  onRollSpellAttack: (sheet: CharacterSheet, spellId: string) => void;
+  onRollSpellAttack: (sheet: CharacterSheet, spellId: string, spellSlotLevel?: number) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number, choiceIndex?: number) => void;
   onRollTrueStrikeAttack: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
   onRollTrueStrikeDamage: (sheet: CharacterSheet, spellId: string, attackId: string, damageType: DamageType) => void;
   onRollSpellHealing: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
-  onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number, choiceIndex?: number) => void;
+  onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, choiceIndex?: number) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   pendingRolls: RollPayload[];
   resolvedRolls?: RollLogEntry[];
@@ -3551,7 +3555,7 @@ function SheetSpellList({
       <h2>Spells</h2>
       {sheet.spells.length > 0 && <div className="spell-list">
         {sheet.spells.map((spell) => {
-          const resource = spell.resourceId ? sheet.resources.find((candidate) => candidate.id === spell.resourceId) : undefined;
+          const resource = spell.resourceId ? sheet.resources.find((candidate) => candidate.resource === spell.resourceId) : undefined;
           const matchingRolls = pendingRolls.filter((roll) => rollMatchesSource(roll, SheetSectionType.SPELLS, spell.id));
           const matchingResolvedRolls = resolvedRolls.filter((entry) => rollMatchesSource(entry.roll, SheetSectionType.SPELLS, spell.id));
           const damageEffects = spellDamageEffects(spell);
@@ -3559,9 +3563,16 @@ function SheetSpellList({
           const temporaryHitPointEffects = spellTemporaryHitPointEffects(spell);
           const conditionEffects = spellConditionEffects(spell);
           const trueStrikeAttacks = spell.id === "trueStrike" ? trueStrikeWeaponAttacks(sheet) : [];
-          const slotLevelsByDamageEffect = new Map(damageEffects.map((effectIndex) => [effectIndex, spellDamageSlotLevels(sheet, spell, effectIndex)]));
-          const slotLevelsByHealingEffect = new Map(healingEffects.map((effectIndex) => [effectIndex, spellHealingSlotLevels(sheet, spell, effectIndex)]));
-          const slotLevelsByTemporaryHitPointEffect = new Map(temporaryHitPointEffects.map((effectIndex) => [effectIndex, spellTemporaryHitPointSlotLevels(sheet, spell, effectIndex)]));
+          const slotControlKey = `${spell.source}:${spell.id}`;
+          const slotLevels = spellSlotLevelsForCast(sheet, spell);
+          const cachedSlotLevel = selectedSpellSlots[slotControlKey];
+          const selectedSlotLevel = cachedSlotLevel !== undefined && slotLevels.includes(cachedSlotLevel)
+            ? cachedSlotLevel
+            : slotLevels[0];
+          const requiresSpellSlot = (spell.resourceCosts ?? []).some((cost) => cost.resource === "spellSlot");
+          const spellCanRoll = canRoll
+            && (!requiresSpellSlot || selectedSlotLevel !== undefined)
+            && (!resource || resource.currentUses > 0);
           const tags = [
             spell.sourceLabel,
             spell.level === 0 ? "Cantrip" : `Level ${spell.level}`,
@@ -3594,25 +3605,33 @@ function SheetSpellList({
                 <div className="inline-roll-area">
                   {(spellHasAttackRoll(spell) || damageEffects.length > 0 || healingEffects.length > 0 || temporaryHitPointEffects.length > 0 || conditionEffects.length > 0 || trueStrikeAttacks.length > 0) && (
                     <div className="roll-action-buttons">
+                      {slotLevels.length > 0 && (
+                        <select
+                          disabled={!canRoll}
+                          value={selectedSlotLevel}
+                          onChange={(event) => setSelectedSpellSlots((current) => ({ ...current, [slotControlKey]: Number(event.target.value) }))}
+                        >
+                          {slotLevels.map((slotLevel) => (
+                            <option key={slotLevel} value={slotLevel}>L{slotLevel}</option>
+                          ))}
+                        </select>
+                      )}
                       {trueStrikeAttacks.flatMap((attack) => trueStrikeDamageTypes(attack).map((damageType) => (
                         <span className="spell-roll-control" key={`true-strike-${attack.id}-${damageType}`}>
-                          <button disabled={!canRoll} onClick={() => onRollTrueStrikeAttack(sheet, spell.id, attack.id, damageType)}>
+                          <button disabled={!spellCanRoll} onClick={() => onRollTrueStrikeAttack(sheet, spell.id, attack.id, damageType)}>
                             Attack {attack.name}{damageType === "radiant" ? " Radiant" : ""}
                           </button>
-                          <button disabled={!canRoll} onClick={() => onRollTrueStrikeDamage(sheet, spell.id, attack.id, damageType)}>
+                          <button disabled={!spellCanRoll} onClick={() => onRollTrueStrikeDamage(sheet, spell.id, attack.id, damageType)}>
                             Damage {attack.name}{damageType === "radiant" ? " Radiant" : ""}
                           </button>
                         </span>
                       )))}
                       {spellHasAttackRoll(spell) && !spellHasCombinedAttackAction(spell) && (
-                        <button disabled={!canRoll} onClick={() => onRollSpellAttack(sheet, spell.id)}>
+                        <button disabled={!spellCanRoll} onClick={() => onRollSpellAttack(sheet, spell.id, selectedSlotLevel)}>
                           Attack Roll
                         </button>
                       )}
                       {damageEffects.map((effectIndex) => {
-                        const slotLevels = slotLevelsByDamageEffect.get(effectIndex) ?? [undefined];
-                        const slotControlKey = `${spell.source}:${spell.id}:${effectIndex}`;
-                        const selectedSlotLevel = selectedSpellSlots[slotControlKey] ?? slotLevels[0];
                         const directAction = directDamageActions(spell)[effectIndex];
                         const choices = directAction?.choices ?? [];
                         const choiceKey = `${spell.source}:${spell.id}:damage:${effectIndex}`;
@@ -3620,22 +3639,9 @@ function SheetSpellList({
                         const instanceCount = spellDamageInstanceCount(sheet, spell, effectIndex, selectedSlotLevel);
                         return (
                           <span className="spell-roll-control" key={effectIndex}>
-                            {slotLevels.length > 1 && (
-                              <select
-                                disabled={!canRoll}
-                                value={selectedSlotLevel}
-                                onChange={(event) => setSelectedSpellSlots((current) => ({ ...current, [slotControlKey]: Number(event.target.value) }))}
-                              >
-                                {slotLevels.map((slotLevel) => (
-                                  <option key={slotLevel} value={slotLevel}>
-                                    L{slotLevel}
-                                  </option>
-                                ))}
-                              </select>
-                            )}
                             {choices.length > 0 && (
                               <select
-                                disabled={!canRoll}
+                                disabled={!spellCanRoll}
                                 value={selectedChoice}
                                 onChange={(event) => setSelectedSpellChoices((current) => ({ ...current, [choiceKey]: Number(event.target.value) }))}
                               >
@@ -3647,7 +3653,7 @@ function SheetSpellList({
                             {instanceCount > 1
                               ? Array.from({ length: instanceCount }, (_value, instanceIndex) => (
                                   <button
-                                    disabled={!canRoll}
+                                    disabled={!spellCanRoll}
                                     key={instanceIndex}
                                     onClick={() => onRollSpellDamage(sheet, spell.id, effectIndex, selectedSlotLevel, instanceIndex, choices.length > 0 ? selectedChoice : undefined)}
                                   >
@@ -3655,7 +3661,7 @@ function SheetSpellList({
                                   </button>
                                 ))
                               : (
-                                  <button disabled={!canRoll} onClick={() => onRollSpellDamage(sheet, spell.id, effectIndex, selectedSlotLevel, undefined, choices.length > 0 ? selectedChoice : undefined)}>
+                                  <button disabled={!spellCanRoll} onClick={() => onRollSpellDamage(sheet, spell.id, effectIndex, selectedSlotLevel, undefined, choices.length > 0 ? selectedChoice : undefined)}>
                                     {directAttackRollEffect(directAction) ? (directAction?.label || "Cast") : (directAction?.label || "Damage")}
                                   </button>
                                 )}
@@ -3663,50 +3669,18 @@ function SheetSpellList({
                         );
                       })}
                       {healingEffects.map((effectIndex) => {
-                        const slotLevels = slotLevelsByHealingEffect.get(effectIndex) ?? [undefined];
-                        const slotControlKey = `${spell.source}:${spell.id}:healing:${effectIndex}`;
-                        const selectedSlotLevel = selectedSpellSlots[slotControlKey] ?? slotLevels[0];
                         return (
                           <span className="spell-roll-control" key={`healing-${effectIndex}`}>
-                            {slotLevels.length > 1 && (
-                              <select
-                                disabled={!canRoll}
-                                value={selectedSlotLevel}
-                                onChange={(event) => setSelectedSpellSlots((current) => ({ ...current, [slotControlKey]: Number(event.target.value) }))}
-                              >
-                                {slotLevels.map((slotLevel) => (
-                                  <option key={slotLevel} value={slotLevel}>
-                                    L{slotLevel}
-                                  </option>
-                                ))}
-                              </select>
-                            )}
-                            <button disabled={!canRoll} onClick={() => onRollSpellHealing(sheet, spell.id, effectIndex, selectedSlotLevel)}>
+                            <button disabled={!spellCanRoll} onClick={() => onRollSpellHealing(sheet, spell.id, effectIndex, selectedSlotLevel)}>
                               {directHealingActions(spell)[effectIndex]?.label || "Heal"}
                             </button>
                           </span>
                         );
                       })}
                       {temporaryHitPointEffects.map((effectIndex) => {
-                        const slotLevels = slotLevelsByTemporaryHitPointEffect.get(effectIndex) ?? [undefined];
-                        const slotControlKey = `${spell.source}:${spell.id}:temporary-hit-points:${effectIndex}`;
-                        const selectedSlotLevel = selectedSpellSlots[slotControlKey] ?? slotLevels[0];
                         return (
                           <span className="spell-roll-control" key={`temporary-hit-points-${effectIndex}`}>
-                            {slotLevels.length > 1 && (
-                              <select
-                                disabled={!canRoll}
-                                value={selectedSlotLevel}
-                                onChange={(event) => setSelectedSpellSlots((current) => ({ ...current, [slotControlKey]: Number(event.target.value) }))}
-                              >
-                                {slotLevels.map((slotLevel) => (
-                                  <option key={slotLevel} value={slotLevel}>
-                                    L{slotLevel}
-                                  </option>
-                                ))}
-                              </select>
-                            )}
-                            <button disabled={!canRoll} onClick={() => onRollSpellTemporaryHitPoints(sheet, spell.id, effectIndex, selectedSlotLevel)}>
+                            <button disabled={!spellCanRoll} onClick={() => onRollSpellTemporaryHitPoints(sheet, spell.id, effectIndex, selectedSlotLevel)}>
                               {directTemporaryHitPointActions(spell)[effectIndex]?.label || "Temp HP"}
                             </button>
                           </span>
@@ -3721,7 +3695,7 @@ function SheetSpellList({
                           <span className="spell-roll-control" key={`effect-${effectIndex}`}>
                             {choices.length > 0 && (
                               <select
-                                disabled={!canRoll}
+                                disabled={!spellCanRoll}
                                 value={selectedChoice}
                                 onChange={(event) => setSelectedSpellChoices((current) => ({ ...current, [choiceKey]: Number(event.target.value) }))}
                               >
@@ -3731,8 +3705,8 @@ function SheetSpellList({
                               </select>
                             )}
                             <button
-                              disabled={!canRoll}
-                              onClick={() => onRollSpellEffect(sheet, spell.id, effectIndex, choices.length > 0 ? selectedChoice : undefined)}
+                              disabled={!spellCanRoll}
+                              onClick={() => onRollSpellEffect(sheet, spell.id, effectIndex, selectedSlotLevel, choices.length > 0 ? selectedChoice : undefined)}
                             >
                               {directAction?.label || "Effect"}
                             </button>
@@ -4357,43 +4331,40 @@ function directConditionActions(spell: CharacterSheet["spells"][number]) {
     .filter((effect) => firstDirectAppliedEffect(effect, "conditionChange") !== undefined && firstDirectDamageEffect(effect) === undefined);
 }
 
-function spellDamageSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], damageEffectIndex: number) {
-  const action = directDamageActions(spell)[damageEffectIndex];
-  const directDamage = firstDirectDamageEffect(action);
-  const repetition = directRepeatedEffect(action)?.instances;
-  const scalesBySlot = directDamage?.scaling?.some((scaling) => scaling.basis === "spellSlotLevel")
-    || repetition?.basis === "spellSlotLevel";
-  if (!scalesBySlot) {
-    return [undefined];
-  }
-  return spellSlotLevelsForSpell(sheet, spell.level);
+function spellSlotLevelsForCast(sheet: CharacterSheet, spell: CharacterSheet["spells"][number]) {
+  const consumesSpellSlot = (spell.resourceCosts ?? []).some((cost) => cost.resource === "spellSlot");
+  const scalesBySpellSlot = (spell.mechanics?.activatedEffects ?? []).some(effectScalesBySpellSlot);
+  return consumesSpellSlot || scalesBySpellSlot ? spellSlotLevelsForSpell(sheet, spell.level) : [];
 }
 
-function spellHealingSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], healingEffectIndex: number) {
-  const directHealingActions = (spell.mechanics?.activatedEffects ?? [])
-    .filter((effect) => firstDirectAppliedEffect(effect, "healing") !== undefined && firstDirectDamageEffect(effect) === undefined);
-  const directHealing = firstDirectAppliedEffect(directHealingActions[healingEffectIndex], "healing");
-  const scalesBySlot = directHealing?.scaling?.some((scaling) => scaling.basis === "spellSlotLevel");
-  if (!scalesBySlot) {
-    return [undefined];
+function effectScalesBySpellSlot(effect: EffectNode | undefined): boolean {
+  if (!effect) return false;
+  if (effect.instances?.basis === "spellSlotLevel") return true;
+  if (effect.effect) {
+    if ("kind" in effect.effect) {
+      if (effect.effect.scaling?.some((scaling) => scaling.basis === "spellSlotLevel")) return true;
+    } else if (effectScalesBySpellSlot(effect.effect)) {
+      return true;
+    }
   }
-  return spellSlotLevelsForSpell(sheet, spell.level);
-}
-
-function spellTemporaryHitPointSlotLevels(sheet: CharacterSheet, spell: CharacterSheet["spells"][number], temporaryHitPointEffectIndex: number) {
-  const directTemporaryActions = (spell.mechanics?.activatedEffects ?? [])
-    .filter((effect) => firstDirectAppliedEffect(effect, "temporaryHitPoints") !== undefined);
-  const directTemporary = firstDirectAppliedEffect(directTemporaryActions[temporaryHitPointEffectIndex], "temporaryHitPoints");
-  const scalesBySlot = directTemporary?.scaling?.some((scaling) => scaling.basis === "spellSlotLevel");
-  if (!scalesBySlot) {
-    return [undefined];
-  }
-  return spellSlotLevelsForSpell(sheet, spell.level);
+  if (effect.effects?.some(effectScalesBySpellSlot)) return true;
+  if (effect.choices?.some((choice) => effectScalesBySpellSlot(choice.effect))) return true;
+  return [
+    effect.onFailure,
+    effect.onSuccess,
+    effect.onHit,
+    effect.onMiss,
+    effect.onSourceWin,
+    effect.onTargetWin,
+    effect.whenTrue,
+    effect.whenFalse,
+  ].some(effectScalesBySpellSlot);
 }
 
 function spellSlotLevelsForSpell(sheet: CharacterSheet, minimumLevel: number) {
   const availableSlotLevels = [...new Set(
     sheet.resources
+      .filter((resource) => resource.currentUses > 0)
       .map((resource) => resource.spellSlotLevel)
       .filter((slotLevel): slotLevel is number => slotLevel !== undefined && slotLevel >= minimumLevel)
   )].sort((left, right) => left - right);

@@ -8,7 +8,6 @@ from dnd_board.character_sheet import (
     ClassType,
     DiceType,
     ResourceTracker,
-    RestType,
     RollAction,
     RollModifierType,
     RollResolutionMode,
@@ -32,6 +31,7 @@ from dnd_board.rules.shared.effects import (
     RollOutcome,
     RollOutcomePredicate,
 )
+from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId
 
 
 class FighterFeatureType(Enum):
@@ -330,7 +330,7 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
             diceType=DiceType.D10,
             modifier=RollModifierType.CLASS_LEVEL,
             resolution=RollResolutionMode.HEAL_SELF,
-            consumesResource=FighterResourceType.SECOND_WIND,
+            resourceCosts=(ResourceCost(ResourceId.SECOND_WIND),),
         )
     ]
     if progression.level >= 2:
@@ -341,7 +341,7 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
                 diceCount=1,
                 diceType=DiceType.D10,
                 resolution=RollResolutionMode.NONE,
-                consumesResource=FighterResourceType.SECOND_WIND,
+                resourceCosts=(ResourceCost(ResourceId.SECOND_WIND),),
             )
         )
 
@@ -351,11 +351,13 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
             name=enum_label(FighterResourceType.SECOND_WIND),
             currentUses=progression.second_wind_uses,
             maxUses=progression.second_wind_uses,
-            reset=RestType.SHORT_REST,
             activation=TimeEconomy.BONUS_ACTION,
             description="Regain 1d10 plus Fighter level hit points, or spend a use for Tactical Mind.",
             rollActions=second_wind_roll_actions,
             source=enum_label(ClassType.FIGHTER),
+            resource=ResourceId.SECOND_WIND,
+            kind=RESOURCE_DEFINITIONS[ResourceId.SECOND_WIND].key.kind,
+            recoveries=RESOURCE_DEFINITIONS[ResourceId.SECOND_WIND].recoveries,
         )
     ]
     if progression.action_surge_uses > 0:
@@ -365,10 +367,10 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
                 name=enum_label(FighterResourceType.ACTION_SURGE),
                 currentUses=progression.action_surge_uses,
                 maxUses=progression.action_surge_uses,
-                reset=RestType.SHORT_REST,
                 activation=TimeEconomy.SPECIAL,
                 description="Take one additional non-Magic action on your turn.",
                 source=enum_label(ClassType.FIGHTER),
+                resource=ResourceId.ACTION_SURGE,
             )
         )
     if progression.indomitable_uses > 0:
@@ -378,11 +380,13 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
                 name=enum_label(FighterResourceType.INDOMITABLE),
                 currentUses=progression.indomitable_uses,
                 maxUses=progression.indomitable_uses,
-                reset=RestType.LONG_REST,
                 activation=TimeEconomy.SPECIAL,
                 description="Reroll a failed saving throw with a bonus equal to Fighter level.",
                 source=enum_label(ClassType.FIGHTER),
                 mechanics=indomitable_mechanics(),
+                resource=ResourceId.INDOMITABLE,
+                kind=RESOURCE_DEFINITIONS[ResourceId.INDOMITABLE].key.kind,
+                recoveries=RESOURCE_DEFINITIONS[ResourceId.INDOMITABLE].recoveries,
             )
         )
     return resources
@@ -397,6 +401,7 @@ def indomitable_mechanics() -> FeatureMechanics:
                 decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
                 predicates=[RollOutcomePredicate(RollOutcome.FAILURE)],
                 operations=[RerollSavingThrow(CalculatedAmount(AmountCalculation.SOURCE_CLASS_LEVEL, characterClass=ClassType.FIGHTER))],
+                resourceCosts=(ResourceCost(ResourceId.INDOMITABLE),),
             )
         ]
     )

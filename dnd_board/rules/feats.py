@@ -19,7 +19,6 @@ from dnd_board.character_sheet import (
     EquipmentType,
     FightingStyleType,
     ResourceTracker,
-    RestType,
     RollAction,
     RollModifierBreakdown,
     RollModifierType,
@@ -75,6 +74,7 @@ from dnd_board.rules.shared.effects import (
     WeaponHasPropertyPredicate,
     WithinDistancePredicate,
 )
+from dnd_board.rules.shared.resources import ResourceCost, ResourceId
 
 
 class FeatCategory(Enum):
@@ -106,15 +106,6 @@ class FeatFeatureField(Enum):
     DESCRIPTION = "description"
     ID = "id"
     NAME = "name"
-
-
-class FeatResourceId(Enum):
-    LUCK_POINTS = "luckPoints"
-    MAGE_SLAYER = "mageSlayer"
-    BOON_OF_COMBAT_PROWESS = "boonOfCombatProwess"
-    BOON_OF_DIMENSIONAL_TRAVEL = "boonOfDimensionalTravel"
-    BOON_OF_FATE = "boonOfFate"
-    BOON_OF_RECOVERY = "boonOfRecovery"
 
 
 class FeatAbilityId(Enum):
@@ -1173,51 +1164,49 @@ def feat_resources(classes: list[CharacterClassLevel], feats=None, proficiency_b
     resources: list[ResourceTracker] = []
     if GeneralFeatType.LUCKY in selected_feats:
         resources.append(ResourceTracker(
-            id=FeatResourceId.LUCK_POINTS.value,
+            id=enum_key(ResourceId.LUCK_POINTS),
             name=enum_label(GeneralFeatType.LUCKY),
             currentUses=proficiency_bonus,
             maxUses=proficiency_bonus,
-            reset=RestType.LONG_REST,
             activation=TimeEconomy.SPECIAL,
             description="Spend Luck Points to gain Advantage on a D20 Test or impose Disadvantage on an attack roll against you.",
+            resource=ResourceId.LUCK_POINTS,
         ))
     if GeneralFeatType.MAGE_SLAYER in selected_feats:
         resources.append(
             feat_single_use_resource(
-                FeatResourceId.MAGE_SLAYER,
+                ResourceId.MAGE_SLAYER,
                 GeneralFeatType.MAGE_SLAYER,
-                RestType.SHORT_REST,
                 "If you fail an Intelligence, Wisdom, or Charisma saving throw, you can cause yourself to succeed instead.",
                 mechanics=mage_slayer_mechanics(),
             )
         )
     if GeneralFeatType.BOON_OF_COMBAT_PROWESS in selected_feats:
-        resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_COMBAT_PROWESS, GeneralFeatType.BOON_OF_COMBAT_PROWESS, RestType.SHORT_REST, "Turn a missed melee weapon attack into a hit."))
+        resources.append(feat_single_use_resource(ResourceId.BOON_OF_COMBAT_PROWESS, GeneralFeatType.BOON_OF_COMBAT_PROWESS, "Turn a missed melee weapon attack into a hit."))
     if GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL in selected_feats:
-        resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_DIMENSIONAL_TRAVEL, GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, RestType.SHORT_REST, "Cast Misty Step without a spell slot or components."))
+        resources.append(feat_single_use_resource(ResourceId.BOON_OF_DIMENSIONAL_TRAVEL, GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, "Cast Misty Step without a spell slot or components."))
     if GeneralFeatType.BOON_OF_FATE in selected_feats:
-        resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_FATE, GeneralFeatType.BOON_OF_FATE, RestType.SHORT_REST, "Roll 1d10 and add or subtract it from another creature's d20 Test."))
+        resources.append(feat_single_use_resource(ResourceId.BOON_OF_FATE, GeneralFeatType.BOON_OF_FATE, "Roll 1d10 and add or subtract it from another creature's d20 Test."))
     if GeneralFeatType.BOON_OF_RECOVERY in selected_feats:
-        resources.append(feat_single_use_resource(FeatResourceId.BOON_OF_RECOVERY, GeneralFeatType.BOON_OF_RECOVERY, RestType.LONG_REST, "Regain hit points when reduced to 0 or by using a Bonus Action."))
+        resources.append(feat_single_use_resource(ResourceId.BOON_OF_RECOVERY, GeneralFeatType.BOON_OF_RECOVERY, "Regain hit points when reduced to 0 or by using a Bonus Action."))
     return resources
 
 
 def feat_single_use_resource(
-    resource_id: FeatResourceId,
+    resource_id: ResourceId,
     feat_type: GeneralFeatType,
-    reset: RestType,
     description: str,
     mechanics: FeatureMechanics | None = None,
 ) -> ResourceTracker:
     return ResourceTracker(
-        id=resource_id.value,
+        id=enum_key(resource_id),
         name=enum_label(feat_type),
         currentUses=1,
         maxUses=1,
-        reset=reset,
         activation=TimeEconomy.SPECIAL,
         description=description,
         mechanics=mechanics,
+        resource=resource_id,
     )
 
 
@@ -1234,6 +1223,7 @@ def mage_slayer_mechanics() -> FeatureMechanics:
                     RollOutcomePredicate(RollOutcome.FAILURE),
                 ],
                 operations=[ReplaceRollOutcome(RollOutcome.SUCCESS)],
+                resourceCosts=(ResourceCost(ResourceId.MAGE_SLAYER),),
             )
         ]
     )
@@ -1244,14 +1234,14 @@ def feat_abilities(classes: list[CharacterClassLevel], feats=None) -> list[Sheet
     selected_feats = selected_general_feat_types(feats)
     feat_ability_specs = [
         (GeneralFeatType.HEALER, FeatAbilityId.HEALER, TimeEconomy.ACTION, None, "Use a Healer's Kit to restore hit points or stabilize a creature."),
-        (GeneralFeatType.LUCKY, FeatAbilityId.LUCKY_ADVANTAGE, TimeEconomy.SPECIAL, FeatResourceId.LUCK_POINTS, "Spend 1 Luck Point to gain Advantage on a D20 Test."),
-        (GeneralFeatType.LUCKY, FeatAbilityId.LUCKY_DISADVANTAGE, TimeEconomy.REACTION, FeatResourceId.LUCK_POINTS, "Spend 1 Luck Point to impose Disadvantage on an attack roll against you."),
+        (GeneralFeatType.LUCKY, FeatAbilityId.LUCKY_ADVANTAGE, TimeEconomy.SPECIAL, ResourceId.LUCK_POINTS, "Spend 1 Luck Point to gain Advantage on a D20 Test."),
+        (GeneralFeatType.LUCKY, FeatAbilityId.LUCKY_DISADVANTAGE, TimeEconomy.REACTION, ResourceId.LUCK_POINTS, "Spend 1 Luck Point to impose Disadvantage on an attack roll against you."),
         (GeneralFeatType.OBSERVANT, FeatAbilityId.OBSERVANT_QUICK_SEARCH, TimeEconomy.BONUS_ACTION, None, "Take the Search action as a Bonus Action."),
         (GeneralFeatType.TELEKINETIC, FeatAbilityId.TELEKINETIC_SHOVE, TimeEconomy.BONUS_ACTION, None, "Telekinetically shove one creature you can see within 30 feet."),
-        (GeneralFeatType.BOON_OF_COMBAT_PROWESS, FeatAbilityId.BOON_OF_COMBAT_PROWESS, TimeEconomy.SPECIAL, FeatResourceId.BOON_OF_COMBAT_PROWESS, "Turn a missed melee weapon attack into a hit."),
-        (GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, FeatAbilityId.BOON_OF_DIMENSIONAL_TRAVEL, TimeEconomy.ACTION, FeatResourceId.BOON_OF_DIMENSIONAL_TRAVEL, "Cast Misty Step without a spell slot or components."),
-        (GeneralFeatType.BOON_OF_FATE, FeatAbilityId.BOON_OF_FATE, TimeEconomy.REACTION, FeatResourceId.BOON_OF_FATE, "Roll 1d10 and add or subtract it from another creature's d20 Test."),
-        (GeneralFeatType.BOON_OF_RECOVERY, FeatAbilityId.BOON_OF_RECOVERY, TimeEconomy.BONUS_ACTION, FeatResourceId.BOON_OF_RECOVERY, "Regain hit points."),
+        (GeneralFeatType.BOON_OF_COMBAT_PROWESS, FeatAbilityId.BOON_OF_COMBAT_PROWESS, TimeEconomy.SPECIAL, ResourceId.BOON_OF_COMBAT_PROWESS, "Turn a missed melee weapon attack into a hit."),
+        (GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, FeatAbilityId.BOON_OF_DIMENSIONAL_TRAVEL, TimeEconomy.ACTION, ResourceId.BOON_OF_DIMENSIONAL_TRAVEL, "Cast Misty Step without a spell slot or components."),
+        (GeneralFeatType.BOON_OF_FATE, FeatAbilityId.BOON_OF_FATE, TimeEconomy.REACTION, ResourceId.BOON_OF_FATE, "Roll 1d10 and add or subtract it from another creature's d20 Test."),
+        (GeneralFeatType.BOON_OF_RECOVERY, FeatAbilityId.BOON_OF_RECOVERY, TimeEconomy.BONUS_ACTION, ResourceId.BOON_OF_RECOVERY, "Regain hit points."),
     ]
     for feat_type, ability_id, activation, resource_id, description in feat_ability_specs:
         if feat_type not in selected_feats:
@@ -1262,7 +1252,7 @@ def feat_abilities(classes: list[CharacterClassLevel], feats=None) -> list[Sheet
             source=enum_label(general_feat_category(feat_type)),
             activation=activation,
             description=description,
-            resourceId=resource_id.value if resource_id else None,
+            resourceId=resource_id,
         ))
     for style in selected_fighting_styles(classes):
         definition = FIGHTING_STYLE_FEATS.get(style)

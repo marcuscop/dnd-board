@@ -51,6 +51,7 @@ from dnd_board.rules.shared.effects import (
     SavingThrow,
     SavingThrowEffect,
 )
+from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId, ResourceRecovery, ResourceRecoveryTrigger, spell_slot_resource_id
 
 
 class ArcaneTricksterFeatureType(Enum):
@@ -302,45 +303,48 @@ def rogue_subclass_resources(classes: list[CharacterClassLevel], ability_scores:
     if subclass == RogueSubclassType.ARCANE_TRICKSTER and rogue_level_value >= 3:
         progression = arcane_trickster_spellcasting(rogue_level_value)
         for resource_type, slot_level, max_uses in arcane_trickster_spell_slot_resources(progression):
+            resource_id = spell_slot_resource_id(slot_level)
             resources.append(
                 ResourceTracker(
                     id=enum_key(resource_type),
                     name=enum_label(resource_type),
                     currentUses=max_uses,
                     maxUses=max_uses,
-                    reset=RestType.LONG_REST,
                     activation=TimeEconomy.ACTION,
                     description=f"Spend to cast an Arcane Trickster spell using a level {slot_level} spell slot.",
                     source=enum_label(RogueSubclassType.ARCANE_TRICKSTER),
                     spellSlotLevel=slot_level,
+                    resource=resource_id,
+                    kind=RESOURCE_DEFINITIONS[resource_id].key.kind,
+                    recoveries=RESOURCE_DEFINITIONS[resource_id].recoveries,
                 )
             )
     if subclass == RogueSubclassType.ARCANE_TRICKSTER and rogue_level_value >= 17:
-        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.SPELL_THIEF), enum_label(RogueSubclassResourceType.SPELL_THIEF), 1, 1, RestType.LONG_REST, TimeEconomy.REACTION, "Negate and steal a spell that targets you or includes you in its area after the caster fails an Intelligence save.", source=enum_label(RogueSubclassType.ARCANE_TRICKSTER)))
+        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.SPELL_THIEF), enum_label(RogueSubclassResourceType.SPELL_THIEF), 1, 1, TimeEconomy.REACTION, "Negate and steal a spell that targets you or includes you in its area after the caster fails an Intelligence save.", ResourceId.SPELL_THIEF, source=enum_label(RogueSubclassType.ARCANE_TRICKSTER)))
     if subclass == RogueSubclassType.PHANTOM and rogue_level_value >= 3:
         uses = max(1, ability_modifier(ability_scores.dexterity if ability_scores else 10))
         dice_count = (sneak_attack_dice_count(rogue_level_value) + 1) // 2
-        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.WAILS_FROM_THE_GRAVE), enum_label(RogueSubclassResourceType.WAILS_FROM_THE_GRAVE), uses, uses, RestType.LONG_REST, TimeEconomy.SPECIAL, "Deal Necrotic damage to a second creature after Sneak Attack.", rollActions=[RollAction(RogueSubclassRollActionType.WAILS_FROM_THE_GRAVE_DAMAGE, RogueSubclassResourceType.WAILS_FROM_THE_GRAVE, dice_count, DiceType.D6, resolution=RollResolutionMode.APPLY_DAMAGE, consumesResource=RogueSubclassResourceType.WAILS_FROM_THE_GRAVE, activation=TimeEconomy.SPECIAL, source=enum_label(RogueSubclassType.PHANTOM), damageType=DamageType.NECROTIC)], source=enum_label(RogueSubclassType.PHANTOM)))
+        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.WAILS_FROM_THE_GRAVE), enum_label(RogueSubclassResourceType.WAILS_FROM_THE_GRAVE), uses, uses, TimeEconomy.SPECIAL, "Deal Necrotic damage to a second creature after Sneak Attack.", ResourceId.WAILS_FROM_THE_GRAVE, rollActions=[RollAction(RogueSubclassRollActionType.WAILS_FROM_THE_GRAVE_DAMAGE, RogueSubclassResourceType.WAILS_FROM_THE_GRAVE, dice_count, DiceType.D6, resolution=RollResolutionMode.APPLY_DAMAGE, resourceCosts=(ResourceCost(ResourceId.WAILS_FROM_THE_GRAVE),), activation=TimeEconomy.SPECIAL, source=enum_label(RogueSubclassType.PHANTOM), damageType=DamageType.NECROTIC)], source=enum_label(RogueSubclassType.PHANTOM)))
     if subclass == RogueSubclassType.PHANTOM and rogue_level_value >= 9:
         max_trinkets = 4 if rogue_level_value >= 17 else 3 if rogue_level_value >= 13 else 2
-        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.SOUL_TRINKETS), enum_label(RogueSubclassResourceType.SOUL_TRINKETS), max_trinkets, max_trinkets, RestType.LONG_REST, TimeEconomy.SPECIAL, "Destroy soul trinkets for Phantom benefits or gain more when nearby creatures die.", source=enum_label(RogueSubclassType.PHANTOM)))
-        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.VOICE_OF_DEATH), enum_label(RogueSubclassResourceType.VOICE_OF_DEATH), 1, 1, RestType.SHORT_REST, TimeEconomy.ACTION, "Cast Speak with Dead without spell components.", source=enum_label(RogueSubclassType.PHANTOM)))
+        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.SOUL_TRINKETS), enum_label(RogueSubclassResourceType.SOUL_TRINKETS), max_trinkets, max_trinkets, TimeEconomy.SPECIAL, "Destroy soul trinkets for Phantom benefits or gain more when nearby creatures die.", ResourceId.SOUL_TRINKETS, source=enum_label(RogueSubclassType.PHANTOM)))
+        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.VOICE_OF_DEATH), enum_label(RogueSubclassResourceType.VOICE_OF_DEATH), 1, 1, TimeEconomy.ACTION, "Cast Speak with Dead without spell components.", ResourceId.VOICE_OF_DEATH, source=enum_label(RogueSubclassType.PHANTOM), recoveries=(ResourceRecovery(ResourceRecoveryTrigger.SHORT_REST), ResourceRecovery(ResourceRecoveryTrigger.LONG_REST))))
     if subclass == RogueSubclassType.PHANTOM and rogue_level_value >= 13:
-        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.GHOST_WALK), enum_label(RogueSubclassResourceType.GHOST_WALK), 1, 1, RestType.LONG_REST, TimeEconomy.BONUS_ACTION, "Assume spectral form for 10 minutes; destroy a soul trinket to restore this use.", source=enum_label(RogueSubclassType.PHANTOM)))
+        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.GHOST_WALK), enum_label(RogueSubclassResourceType.GHOST_WALK), 1, 1, TimeEconomy.BONUS_ACTION, "Assume spectral form for 10 minutes; destroy a soul trinket to restore this use.", ResourceId.GHOST_WALK, source=enum_label(RogueSubclassType.PHANTOM)))
     if subclass == RogueSubclassType.SCION_OF_THE_THREE and rogue_level_value >= 3:
         uses = max(1, ability_modifier(ability_scores.intelligence if ability_scores else 10))
-        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.BLOODTHIRST), enum_label(RogueSubclassResourceType.BLOODTHIRST), uses, uses, RestType.LONG_REST, TimeEconomy.REACTION, "Teleport to a newly Bloodied enemy and make one melee attack.", source=enum_label(RogueSubclassType.SCION_OF_THE_THREE)))
+        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.BLOODTHIRST), enum_label(RogueSubclassResourceType.BLOODTHIRST), uses, uses, TimeEconomy.REACTION, "Teleport to a newly Bloodied enemy and make one melee attack.", ResourceId.BLOODTHIRST, source=enum_label(RogueSubclassType.SCION_OF_THE_THREE)))
     if subclass == RogueSubclassType.SOULKNIFE and rogue_level_value >= 3:
         die = psionic_energy_die(rogue_level_value)
         uses = psionic_energy_dice_count(rogue_level_value)
-        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.PSIONIC_ENERGY_DICE), enum_label(RogueSubclassResourceType.PSIONIC_ENERGY_DICE), uses, uses, RestType.LONG_REST, TimeEconomy.SPECIAL, f"Spend Psionic Energy dice ({enum_key(die)}) for Soulknife powers; regain one on Short Rest and all on Long Rest.", rollActions=[
-            RollAction(RogueSubclassRollActionType.PSIONIC_KNACK, RogueSubclassRollActionType.PSIONIC_KNACK, 1, die, resolution=RollResolutionMode.NONE, consumesResource=RogueSubclassResourceType.PSIONIC_ENERGY_DICE, activation=TimeEconomy.SPECIAL, source=enum_label(RogueSubclassType.SOULKNIFE)),
-            RollAction(RogueSubclassRollActionType.PSYCHIC_WHISPERS, RogueSubclassRollActionType.PSYCHIC_WHISPERS, 1, die, resolution=RollResolutionMode.NONE, consumesResource=RogueSubclassResourceType.PSIONIC_ENERGY_DICE, activation=TimeEconomy.ACTION, source=enum_label(RogueSubclassType.SOULKNIFE)),
-        ], source=enum_label(RogueSubclassType.SOULKNIFE)))
+        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.PSIONIC_ENERGY_DICE), enum_label(RogueSubclassResourceType.PSIONIC_ENERGY_DICE), uses, uses, TimeEconomy.SPECIAL, f"Spend Psionic Energy dice ({enum_key(die)}) for Soulknife powers; regain one on Short Rest and all on Long Rest.", ResourceId.SOULKNIFE_PSIONIC_ENERGY_DICE, rollActions=[
+            RollAction(RogueSubclassRollActionType.PSIONIC_KNACK, RogueSubclassRollActionType.PSIONIC_KNACK, 1, die, resolution=RollResolutionMode.NONE, resourceCosts=(ResourceCost(ResourceId.SOULKNIFE_PSIONIC_ENERGY_DICE),), activation=TimeEconomy.SPECIAL, source=enum_label(RogueSubclassType.SOULKNIFE)),
+            RollAction(RogueSubclassRollActionType.PSYCHIC_WHISPERS, RogueSubclassRollActionType.PSYCHIC_WHISPERS, 1, die, resolution=RollResolutionMode.NONE, resourceCosts=(ResourceCost(ResourceId.SOULKNIFE_PSIONIC_ENERGY_DICE),), activation=TimeEconomy.ACTION, source=enum_label(RogueSubclassType.SOULKNIFE)),
+        ], source=enum_label(RogueSubclassType.SOULKNIFE), recoveries=(ResourceRecovery(ResourceRecoveryTrigger.SHORT_REST, 1), ResourceRecovery(ResourceRecoveryTrigger.LONG_REST))))
     if subclass == RogueSubclassType.SOULKNIFE and rogue_level_value >= 13:
-        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.PSYCHIC_VEIL), enum_label(RogueSubclassResourceType.PSYCHIC_VEIL), 1, 1, RestType.LONG_REST, TimeEconomy.ACTION, "Become Invisible for up to 1 hour; spend a Psionic Energy Die to restore this use.", source=enum_label(RogueSubclassType.SOULKNIFE)))
+        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.PSYCHIC_VEIL), enum_label(RogueSubclassResourceType.PSYCHIC_VEIL), 1, 1, TimeEconomy.ACTION, "Become Invisible for up to 1 hour; spend a Psionic Energy Die to restore this use.", ResourceId.PSYCHIC_VEIL, source=enum_label(RogueSubclassType.SOULKNIFE)))
     if subclass == RogueSubclassType.SOULKNIFE and rogue_level_value >= 17:
-        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.REND_MIND), enum_label(RogueSubclassResourceType.REND_MIND), 1, 1, RestType.LONG_REST, TimeEconomy.SPECIAL, "When Psychic Blades deal Sneak Attack, force a Wisdom save or Stun. Spend three Psionic Energy Dice to restore this use.", source=enum_label(RogueSubclassType.SOULKNIFE)))
+        resources.append(ResourceTracker(enum_key(RogueSubclassResourceType.REND_MIND), enum_label(RogueSubclassResourceType.REND_MIND), 1, 1, TimeEconomy.SPECIAL, "When Psychic Blades deal Sneak Attack, force a Wisdom save or Stun. Spend three Psionic Energy Dice to restore this use.", ResourceId.REND_MIND, source=enum_label(RogueSubclassType.SOULKNIFE)))
     return resources
 
 
@@ -360,8 +364,8 @@ def rogue_subclass_abilities(classes: list[CharacterClassLevel]) -> list[SheetAb
                 enum_label(RogueSubclassType.SOULKNIFE),
                 TimeEconomy.SPECIAL,
                 "If your Psychic Blade misses, roll a Psionic Energy Die and add it to the attack roll; expend it only if this turns the miss into a hit.",
-                resourceId=enum_key(RogueSubclassResourceType.PSIONIC_ENERGY_DICE),
-                rollActions=[RollAction(RogueSubclassRollActionType.HOMING_STRIKES, RogueSubclassRollActionType.HOMING_STRIKES, 1, die, consumesResource=RogueSubclassResourceType.PSIONIC_ENERGY_DICE)],
+                resourceId=ResourceId.SOULKNIFE_PSIONIC_ENERGY_DICE,
+                rollActions=[RollAction(RogueSubclassRollActionType.HOMING_STRIKES, RogueSubclassRollActionType.HOMING_STRIKES, 1, die, resourceCosts=(ResourceCost(ResourceId.SOULKNIFE_PSIONIC_ENERGY_DICE),))],
             ),
             SheetAbility(
                 enum_key(RogueSubclassAbilityType.PSYCHIC_TELEPORTATION),
@@ -369,8 +373,8 @@ def rogue_subclass_abilities(classes: list[CharacterClassLevel]) -> list[SheetAb
                 enum_label(RogueSubclassType.SOULKNIFE),
                 TimeEconomy.BONUS_ACTION,
                 "Teleport to an unoccupied space up to 10 times your Psionic Energy Die roll in feet.",
-                resourceId=enum_key(RogueSubclassResourceType.PSIONIC_ENERGY_DICE),
-                rollActions=[RollAction(RogueSubclassRollActionType.PSYCHIC_TELEPORTATION, RogueSubclassRollActionType.PSYCHIC_TELEPORTATION, 1, die, consumesResource=RogueSubclassResourceType.PSIONIC_ENERGY_DICE)],
+                resourceId=ResourceId.SOULKNIFE_PSIONIC_ENERGY_DICE,
+                rollActions=[RollAction(RogueSubclassRollActionType.PSYCHIC_TELEPORTATION, RogueSubclassRollActionType.PSYCHIC_TELEPORTATION, 1, die, resourceCosts=(ResourceCost(ResourceId.SOULKNIFE_PSIONIC_ENERGY_DICE),))],
             ),
         ])
     return abilities
@@ -415,7 +419,7 @@ def rogue_subclass_spells(classes: list[CharacterClassLevel]) -> list[SpellEntry
             SpellEntry(
                 id=SpellId.AUGURY,
                 name=SpellId.AUGURY,
-                status=SpellStatus(source=SpellSource.PHANTOM, castingAbility=AbilityType.CONSTITUTION, resourceId=enum_key(RogueSubclassResourceType.SOUL_TRINKETS)),
+                status=SpellStatus(source=SpellSource.PHANTOM, castingAbility=AbilityType.CONSTITUTION, resourceId=ResourceId.SOUL_TRINKETS),
                 level=2,
                 school=SpellSchool.DIVINATION,
                 castingTime=TimeEconomy.ACTION,
@@ -431,7 +435,7 @@ def rogue_subclass_spells(classes: list[CharacterClassLevel]) -> list[SpellEntry
                 status=SpellStatus(
                     source=SpellSource.PHANTOM,
                     castingAbility=AbilityType.DEXTERITY,
-                    resourceId=enum_key(RogueSubclassResourceType.VOICE_OF_DEATH),
+                    resourceId=ResourceId.VOICE_OF_DEATH,
                     reset=RestType.SHORT_REST,
                 ),
                 level=3,
@@ -524,6 +528,7 @@ def normalized_arcane_trickster_spell(spell: SpellEntry) -> SpellEntry:
         description=spell.description,
         concentration=spell.concentration,
         ritual=spell.ritual,
+        resourceCosts=spell.resourceCosts,
     )
 
 
