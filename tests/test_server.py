@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 from dataclasses import replace
 from io import BytesIO
 
@@ -9,14 +10,39 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from dnd_board import server
+from dnd_board.application.action_service import append_roll_log_entry
+from dnd_board.application.character_state_service import (
+    reset_applies_to_rest,
+    reset_character_for_rest,
+    set_equipment_slot,
+    valid_equipment_slots,
+)
+from dnd_board.application.progression_service import (
+    apply_member_progression_rule,
+    set_member_class_levels,
+)
+from dnd_board.application.persistence import load_room as load_room_save
+from dnd_board.application.room_state import ActiveMaxHitPointIncrease, ActiveMaxHitPointReduction
+from dnd_board.application.resource_service import reset_sheet_resources
 from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
-from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, RogueSubclassAttackType, RogueSubclassRollActionType, arcane_trickster_catalog_spell
+from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, RogueSubclassAttackType, RogueSubclassRollActionType
 from dnd_board.rules.classes.rogue.base import RogueSubclassType
 from dnd_board.rules.classes.wizard.base import WizardSubclassType
 from dnd_board.rules.feats import GeneralFeatType, general_feat_feature
+from dnd_board.rules.equipment import EquipmentId
 from dnd_board.rules.sources import RuleSource, rule_source_label
 from dnd_board.rules.spells import spell_entry, wizard_spell_entry
+from dnd_board.rules.progression import (
+    AbilityScoreGrant,
+    FeatGrant,
+    HitPointChoiceOption,
+    HitPointGrant,
+    ProgressionChoiceId,
+    ProgressionGrantRecord,
+    ProgressionGrantSource,
+    class_hit_die,
+)
 from dnd_board.rules.shared.effects import (
     ActiveOngoingEffect,
     ActiveScheduledEffect,
@@ -53,6 +79,7 @@ from dnd_board.rules.shared.effects import (
     SavingThrow,
     SavingThrowEffect,
     SequenceEffect,
+    WeaponAttackOptionId,
 )
 from dnd_board.rules.shared.resources import ResourceCost, ResourceId, ResourceKind, ResourceRecovery, ResourceRecoveryTrigger
 from dnd_board.character_sheet import (
@@ -64,6 +91,8 @@ from dnd_board.character_sheet import (
     AttackRangeType,
     BattleMasterManeuverType,
     CharacterClassLevel,
+    ClassOptionKind,
+    ClassOptionSelection,
     ClassType,
     ConditionDuration,
     ConditionType,
@@ -79,6 +108,7 @@ from dnd_board.character_sheet import (
     PartyMemberSheet,
     ProficiencyLevel,
     ResourceTracker,
+    RollLogEntry,
     RollPayload,
     RollAction,
     RollLogEntryType,
@@ -102,6 +132,55 @@ from dnd_board.character_sheet import (
 
 def setup_function() -> None:
     server.rooms.clear()
+
+
+def hit_point_grants(class_type: ClassType, *amounts: int) -> list[ProgressionGrantRecord]:
+    return [ProgressionGrantRecord(
+        source=ProgressionGrantSource(ProgressionChoiceId.HIT_POINT_INCREASE, class_type),
+        grants=tuple(
+            HitPointGrant(
+                characterClass=class_type,
+                minimumClassLevel=level,
+                choice=HitPointChoiceOption.FIXED,
+                amount=amount,
+                hitDieResult=class_hit_die(class_type) // 2 + 1,
+            )
+            for level, amount in enumerate(amounts, start=2)
+        ),
+    )]
+
+
+def ability_score_grants(
+    class_type: ClassType,
+    class_level: int,
+    ability: AbilityType,
+    amount: int,
+) -> list[ProgressionGrantRecord]:
+    choice_id = {
+        ClassType.FIGHTER: ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+        ClassType.ROGUE: ProgressionChoiceId.ROGUE_ABILITY_SCORE_IMPROVEMENT,
+        ClassType.WIZARD: ProgressionChoiceId.WIZARD_ABILITY_SCORE_IMPROVEMENT,
+    }[class_type]
+    return [ProgressionGrantRecord(
+        source=ProgressionGrantSource(choice_id, class_type),
+        grants=(AbilityScoreGrant(class_type, class_level, ability, amount),),
+    )]
+
+
+def feat_grants(
+    class_type: ClassType,
+    class_level: int,
+    feat: GeneralFeatType,
+) -> list[ProgressionGrantRecord]:
+    choice_id = {
+        ClassType.FIGHTER: ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+        ClassType.ROGUE: ProgressionChoiceId.ROGUE_ABILITY_SCORE_IMPROVEMENT,
+        ClassType.WIZARD: ProgressionChoiceId.WIZARD_ABILITY_SCORE_IMPROVEMENT,
+    }[class_type]
+    return [ProgressionGrantRecord(
+        source=ProgressionGrantSource(choice_id, class_type),
+        grants=(FeatGrant(class_type, class_level, feat),),
+    )]
 
 
 def write_party_campaign(tmp_path, campaign_id: str, *members: PartyMemberConfig) -> None:
@@ -450,14 +529,23 @@ def test_save_round_trips_suppression_ongoing_and_scheduled_effects(tmp_path, mo
         remainingOccurrences=1,
     )
     room.scheduled_effects["player-2"] = [scheduled]
+    source = RollSource(SheetSectionType.ABILITIES, "fortifyingFeature", "apply")
+    increase = ActiveMaxHitPointIncrease(5, source, "Fortifying Feature")
+    reduction = ActiveMaxHitPointReduction(3, source, "Weakening Feature", RestType.LONG_REST)
+    room.max_hit_point_increases["player-2"] = [increase]
+    room.max_hit_point_reductions["player-2"] = [reduction]
 
     server.save_room_to_disk(room)
 
-    assert server.load_saved_suppressed_conditions(room.id) == {
+    loaded = load_room_save(server.save_path(room.id))
+    assert loaded is not None
+    assert loaded.suppressed_conditions == {
         "player-2": [ConditionType.FRIGHTENED]
     }
-    assert server.load_saved_ongoing_effects(room.id) == {"player-2": [ongoing]}
-    assert server.load_saved_scheduled_effects(room.id) == {"player-2": [scheduled]}
+    assert loaded.ongoing_effects == {"player-2": [ongoing]}
+    assert loaded.scheduled_effects == {"player-2": [scheduled]}
+    assert loaded.max_hit_point_increases == {"player-2": [increase]}
+    assert loaded.max_hit_point_reductions == {"player-2": [reduction]}
 
 
 def test_default_save_path_is_campaign_scoped() -> None:
@@ -1241,7 +1329,7 @@ def test_sheet_roll_permissions_and_payload(tmp_path, monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 12)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 12)
     client = TestClient(server.app)
     room = server.get_or_create_room("sheet-roll-test")
     dm_socket = FakeSocket()
@@ -1307,7 +1395,7 @@ def test_sheet_roll_logs_and_pending_rolls_are_room_visible_to_everyone(tmp_path
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 12)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 12)
     client = TestClient(server.app)
 
     player_roll = client.post("/api/rooms/shared-log-test/sheet/player-1/rolls/saving-throw?playerKey=player-1&ability=strength")
@@ -1346,7 +1434,7 @@ def test_resolved_attack_log_contains_target_condition_roll_breakdown(tmp_path, 
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
 
     attack = client.post("/api/rooms/resolved-roll-breakdown-test/sheet/player-1/rolls/attack?playerKey=player-1")
@@ -1365,7 +1453,7 @@ def test_resolved_attack_log_contains_target_condition_roll_breakdown(tmp_path, 
 
 def test_ad_hoc_dice_roll_is_logged_for_everyone(monkeypatch) -> None:
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: maximum)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: maximum)
 
     response = client.post("/api/rooms/ad-hoc-dice-test/dice?playerKey=player-1&dice=d8&count=3")
     invalid = client.post("/api/rooms/ad-hoc-dice-test/dice?playerKey=player-1&dice=d100&count=1")
@@ -1569,7 +1657,7 @@ def test_indomitable_prompts_on_failed_damage_save_and_can_reroll(tmp_path, monk
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 2)
     rolls = iter([1, 20])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls) if maximum == 20 else 2)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls) if maximum == 20 else 2)
     client = TestClient(server.app)
 
     damage_roll = client.post("/api/rooms/indomitable-interceptor-test/sheet/player-1/spells/harm/rolls/damage?playerKey=player-1").json()["roll"]
@@ -1614,7 +1702,7 @@ def test_resolution_prompt_can_only_be_claimed_once(tmp_path, monkeypatch) -> No
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 2)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1 if maximum == 20 else 2)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1 if maximum == 20 else 2)
     client = TestClient(server.app)
 
     damage_roll = client.post(
@@ -1628,7 +1716,7 @@ def test_resolution_prompt_can_only_be_claimed_once(tmp_path, monkeypatch) -> No
         await asyncio.sleep(0)
 
     monkeypatch.setattr(server, "broadcast_room_state", yielding_broadcast)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 20 if maximum == 20 else 2)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 20 if maximum == 20 else 2)
 
     async def respond_twice():
         return await asyncio.gather(
@@ -1678,7 +1766,7 @@ def test_mage_slayer_prompts_on_failed_spell_int_wis_cha_save(tmp_path, monkeypa
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 3)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1)
     client = TestClient(server.app)
 
     damage_roll = client.post("/api/rooms/mage-slayer-interceptor-test/sheet/player-1/spells/synapticStatic/rolls/damage?playerKey=player-1").json()["roll"]
@@ -1717,7 +1805,7 @@ def test_mage_slayer_intercepts_failed_condition_spell_save(tmp_path, monkeypatc
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1)
     client = TestClient(server.app)
 
     effect_roll = client.post("/api/rooms/mage-slayer-condition-interceptor-test/sheet/player-1/spells/tashaSHideousLaughter/rolls/effect?playerKey=player-1").json()["roll"]
@@ -1858,7 +1946,7 @@ def test_protection_fighting_style_can_impose_disadvantage_on_attack_against_all
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([15, 1])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls, 1))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls, 1))
     client = TestClient(server.app)
 
     attack_roll = client.post(
@@ -1917,7 +2005,7 @@ def test_protection_removes_critical_damage_when_disadvantage_selects_noncritica
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([20, 3, 15])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
 
     attack = client.post(
@@ -1969,7 +2057,7 @@ def test_critical_attack_does_not_double_independent_scheduled_damage(tmp_path, 
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([20, 1, 1, 1])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
     room = server.get_or_create_room("critical-scheduled-damage-test")
     room.scheduled_effects["player-2"] = [ActiveScheduledEffect(
@@ -2038,7 +2126,7 @@ def test_interception_fighting_style_reduces_damage_to_ally(tmp_path, monkeypatc
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([15, 8, 4])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
 
     damage_roll = client.post(
@@ -2099,7 +2187,7 @@ def test_multiple_reductions_stack_against_one_stable_runtime_damage_roll(tmp_pa
         rolled_sides.append(maximum)
         return next(rolls)
 
-    monkeypatch.setattr(server.random, "randint", fixed_roll)
+    monkeypatch.setattr(random, "randint", fixed_roll)
     client = TestClient(server.app)
     room = server.get_or_create_room("runtime-damage-interception-test")
     room.scheduled_effects["player-3"] = [ActiveScheduledEffect(
@@ -2229,7 +2317,7 @@ def test_weapon_damage_stacks_each_eligible_interceptor_before_committing(tmp_pa
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([15, 8, 3, 3])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
 
     attack = client.post(
@@ -2299,7 +2387,7 @@ def test_paused_effect_execution_does_not_overwrite_newer_participant_state(tmp_
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([15, 8])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
 
     attack = client.post(
@@ -2360,7 +2448,7 @@ def test_damage_event_executes_bound_scheduled_and_recurring_children(tmp_path, 
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([15, 8, 1, 4])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
     room = server.get_or_create_room("effect-dispatch-test")
     room.scheduled_effects["player-2"] = [ActiveScheduledEffect(
@@ -2459,7 +2547,7 @@ def test_dispatched_attack_rolls_against_its_bound_target(tmp_path, monkeypatch)
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([15, 8, 2])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
     room = server.get_or_create_room("dispatched-attack-test")
     room.scheduled_effects["player-2"] = [ActiveScheduledEffect(
@@ -2510,25 +2598,131 @@ def test_true_strike_roll_endpoints_use_selected_weapon_and_damage_type(tmp_path
                 equipment=[EquipmentItem(id="longsword", name="Longsword", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND)],
             ),
         ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(armorClass=10),
+        ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([10, 5, 3])
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
 
-    attack = client.post("/api/rooms/true-strike-test/sheet/player-1/spells/trueStrike/rolls/true-strike-attack?playerKey=player-1&attackId=longsword&damageType=radiant")
-    damage = client.post("/api/rooms/true-strike-test/sheet/player-1/spells/trueStrike/rolls/true-strike-damage?playerKey=player-1&attackId=longsword&damageType=slashing")
-    invalid_damage_type = client.post("/api/rooms/true-strike-test/sheet/player-1/spells/trueStrike/rolls/true-strike-damage?playerKey=player-1&attackId=longsword&damageType=fire")
+    sheet_response = client.get("/api/rooms/true-strike-test/sheet/player-1?playerKey=player-1")
+    attack = client.post("/api/rooms/true-strike-test/sheet/player-1/spells/trueStrike/rolls/weapon-attack?playerKey=player-1&equipmentInstanceId=longsword&choiceIndex=0")
+    invalid_weapon = client.post("/api/rooms/true-strike-test/sheet/player-1/spells/trueStrike/rolls/weapon-attack?playerKey=player-1&equipmentInstanceId=club&choiceIndex=0")
+    resolution = client.post(
+        f"/api/rooms/true-strike-test/rolls/{attack.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
 
+    assert sheet_response.status_code == 200
+    assert [control["label"] for control in sheet_response.json()["sheet"]["spells"][0]["controls"]["actions"]] == [
+        "Cast Longsword",
+    ]
     assert attack.status_code == 200
     assert attack.json()["roll"]["source"]["sourceId"] == "trueStrike"
-    assert attack.json()["roll"]["label"] == "Attack Longsword"
-    assert attack.json()["roll"]["damageType"] == "radiant"
-    assert damage.status_code == 200
-    assert damage.json()["roll"]["label"] == "Damage Longsword"
-    assert damage.json()["roll"]["damageType"] == "slashing"
-    assert [component["damageType"] for component in damage.json()["roll"]["damageComponents"]] == ["slashing", "radiant"]
-    assert invalid_damage_type.status_code == 400
+    assert attack.json()["roll"]["label"] == "True Strike"
+    assert attack.json()["roll"]["boundAttackId"] == "longsword"
+    assert attack.json()["roll"]["damageType"] == "slashing"
+    assert [component["damageType"] for component in attack.json()["roll"]["damageComponents"]] == ["slashing", "radiant"]
+    assert resolution.status_code == 200
+    assert resolution.json()["resolution"]["targetHp"]["current"] == 18
+    assert invalid_weapon.status_code == 400
+
+
+def test_shillelagh_persists_bound_weapon_and_selects_attack_modification(tmp_path, monkeypatch) -> None:
+    shillelagh = spell_entry(SpellId.SHILLELAGH)
+    assert shillelagh is not None
+    shillelagh = replace(
+        shillelagh,
+        status=SpellStatus(
+            source=SpellSource.MAGIC_INITIATE,
+            castingAbility=AbilityType.WISDOM,
+        ),
+    )
+    write_party_campaign(
+        tmp_path,
+        "shillelagh-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Caster",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=10, constitution=14, intelligence=10, wisdom=18, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.ROGUE, level=5)],
+                spells=[shillelagh],
+                attacks=[AttackAction("club", "Club", AbilityType.STRENGTH, 1, DiceType.D4, damageType=DamageType.BLUDGEONING)],
+                equipment=[EquipmentItem(id="club", name="Club", definitionId=EquipmentId.CLUB, itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND)],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 5)
+    client = TestClient(server.app)
+
+    cast = client.post(
+        "/api/rooms/shillelagh-test/sheet/player-1/spells/shillelagh/rolls/effect?playerKey=player-1&equipmentInstanceId=club"
+    )
+    resolved = client.post(
+        f"/api/rooms/shillelagh-test/rolls/{cast.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-1"
+    )
+    sheet = client.get("/api/rooms/shillelagh-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    option = enum_key(WeaponAttackOptionId.SPELLCASTING_ABILITY_AND_ALTERNATE_DAMAGE_TYPE)
+    attack = client.post(
+        f"/api/rooms/shillelagh-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=club&weaponOption={option}"
+    )
+    active = sheet["ongoingEffects"][0]
+    removed = client.post(
+        "/api/rooms/shillelagh-test/sheet/player-1/ongoing-effects/remove?playerKey=player-1",
+        json={
+            "resolutionSeed": active["id"]["resolutionSeed"],
+            "effectNodePath": active["id"]["effectNodeId"]["path"],
+        },
+    )
+
+    recast = client.post(
+        "/api/rooms/shillelagh-test/sheet/player-1/spells/shillelagh/rolls/effect?playerKey=player-1&equipmentInstanceId=club"
+    )
+    client.post(
+        f"/api/rooms/shillelagh-test/rolls/{recast.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-1"
+    )
+    released = client.post(
+        "/api/rooms/shillelagh-test/sheet/player-1/equipment/club/slot?playerKey=player-1&slot=carried"
+    )
+    client.post(
+        "/api/rooms/shillelagh-test/sheet/player-1/equipment/club/slot?playerKey=player-1&slot=mainHand"
+    )
+    rest_cast = client.post(
+        "/api/rooms/shillelagh-test/sheet/player-1/spells/shillelagh/rolls/effect?playerKey=player-1&equipmentInstanceId=club"
+    )
+    client.post(
+        f"/api/rooms/shillelagh-test/rolls/{rest_cast.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-1"
+    )
+    rested = client.post(
+        "/api/rooms/shillelagh-test/sheet/rest?playerKey=dm&rest=shortRest"
+    )
+
+    assert cast.status_code == 200
+    assert resolved.status_code == 200
+    assert sheet["attacks"][0]["activeSpellConditions"] == ["shillelagh"]
+    assert len(sheet["attacks"][0]["weaponAttackOptions"]) == 4
+    assert attack.status_code == 200
+    assert attack.json()["roll"]["damageType"] == "force"
+    assert attack.json()["roll"]["damageComponents"][0]["die"] == "1d10"
+    assert attack.json()["roll"]["modifierBreakdown"][0] == {
+        "source": "Wisdom",
+        "value": 4,
+        "description": "",
+    }
+    assert removed.status_code == 200
+    assert removed.json()["sheet"]["ongoingEffects"] == []
+    assert released.status_code == 200
+    assert released.json()["sheet"]["ongoingEffects"] == []
+    rested_sheet = next(sheet for sheet in rested.json()["sheets"] if sheet["id"] == "player-1")
+    assert rested_sheet["ongoingEffects"] == []
 
 
 def test_weapon_spell_requirement_failures_are_logged(tmp_path, monkeypatch) -> None:
@@ -2561,15 +2755,15 @@ def test_weapon_spell_requirement_failures_are_logged(tmp_path, monkeypatch) -> 
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
 
-    true_strike_blocked = client.post("/api/rooms/weapon-spell-block-test/sheet/player-1/spells/trueStrike/rolls/true-strike-attack?playerKey=player-1&attackId=longsword&damageType=radiant")
-    shillelagh_blocked = client.post("/api/rooms/weapon-spell-block-test/sheet/player-1/spells/shillelagh/rolls/effect?playerKey=player-1")
+    true_strike_blocked = client.post("/api/rooms/weapon-spell-block-test/sheet/player-1/spells/trueStrike/rolls/weapon-attack?playerKey=player-1&equipmentInstanceId=longsword&choiceIndex=1")
+    shillelagh_blocked = client.post("/api/rooms/weapon-spell-block-test/sheet/player-1/spells/shillelagh/rolls/effect?playerKey=player-1&equipmentInstanceId=club")
     history = client.get("/api/rooms/weapon-spell-block-test/sheet?playerKey=player-1").json()["rollHistory"]
 
     assert true_strike_blocked.status_code == 400
     assert shillelagh_blocked.status_code == 400
     assert [entry["entryType"] for entry in history] == ["rollBlocked", "rollBlocked"]
-    assert history[0]["roll"]["label"] == "True Strike blocked: requires a wielded proficient weapon"
-    assert history[1]["roll"]["label"] == "Shillelagh blocked: requires a wielded proficient Club or Quarterstaff"
+    assert history[0]["roll"]["label"] == "Bound Weapon Attack blocked: Selected weapon is not eligible for this spell"
+    assert history[1]["roll"]["label"] == "Spell Effect blocked: Selected weapon is not eligible for this spell"
 
 
 def test_hasted_target_rolls_dexterity_spell_saves_with_advantage(tmp_path, monkeypatch) -> None:
@@ -2603,7 +2797,7 @@ def test_hasted_target_rolls_dexterity_spell_saves_with_advantage(tmp_path, monk
             return 4
         return 1
 
-    monkeypatch.setattr(server.random, "randint", fixed_roll)
+    monkeypatch.setattr(random, "randint", fixed_roll)
     client = TestClient(server.app)
 
     damage_response = client.post("/api/rooms/hasted-save-test/sheet/player-1/spells/burningHands/rolls/damage?playerKey=player-1")
@@ -2689,7 +2883,7 @@ def test_damage_triggers_concentration_save_and_clears_sourced_conditions(tmp_pa
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 3)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 3)
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: 4)
     client = TestClient(server.app)
 
@@ -2774,7 +2968,7 @@ def test_outgoing_attack_damage_or_spell_cast_clears_invisibility(tmp_path, monk
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 10)
     client = TestClient(server.app)
 
     attack_response = client.post("/api/rooms/invisibility-clear-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=dagger")
@@ -2828,7 +3022,7 @@ def test_player_can_roll_tashas_hideous_laughter_effect_and_dm_can_preserve_roll
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     server_rolls = iter([1, 2, 20])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(server_rolls) if maximum == 20 else 4)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(server_rolls) if maximum == 20 else 4)
     client = TestClient(server.app)
 
     effect_response = client.post("/api/rooms/tasha-effect-test/sheet/player-1/spells/tashaSHideousLaughter/rolls/effect?playerKey=player-1")
@@ -2872,6 +3066,7 @@ def test_player_can_roll_tashas_hideous_laughter_effect_and_dm_can_preserve_roll
     assert damage_resolution_body["responseRolls"][0]["dice"] == [2, 20]
     assert damage_resolution_body["responseRolls"][0]["die"] == "2d20kh1"
     assert damage_resolution_body["responseRolls"][0]["total"] == 19
+    assert "advantageConditions" not in damage_resolution_body["responseRolls"][0]
 
 
 def test_condition_spell_resolves_save_and_effect_as_one_action(tmp_path, monkeypatch) -> None:
@@ -2896,7 +3091,7 @@ def test_condition_spell_resolves_save_and_effect_as_one_action(tmp_path, monkey
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1)
     client = TestClient(server.app)
 
     effect = client.post("/api/rooms/staged-condition-save-test/sheet/player-1/spells/tashaSHideousLaughter/rolls/effect?playerKey=player-1")
@@ -2941,7 +3136,7 @@ def test_calm_emotions_suppresses_existing_charmed_and_frightened_conditions(tmp
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1)
     client = TestClient(server.app)
 
     effect_response = client.post(
@@ -2995,7 +3190,7 @@ def test_spell_damage_saves_can_negate_and_damage_can_apply_conditions(tmp_path,
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 15 if maximum == 20 else 5)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 15 if maximum == 20 else 5)
     client = TestClient(server.app)
 
     acid_damage = client.post("/api/rooms/spell-save-condition-test/sheet/player-1/spells/acidSplash/rolls/damage?playerKey=player-1")
@@ -3075,7 +3270,7 @@ def test_slow_applies_condition_penalties_and_blocks_reactions(tmp_path, monkeyp
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1 if maximum == 20 else 4)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1 if maximum == 20 else 4)
     client = TestClient(server.app)
 
     effect_response = client.post("/api/rooms/slow-test/sheet/player-1/spells/slow/rolls/effect?playerKey=player-1")
@@ -3276,7 +3471,7 @@ def test_slowed_somatic_spell_check_applies_once_to_attack_spells_and_to_cast_da
             return 10
         return 6
 
-    monkeypatch.setattr(server.random, "randint", fixed_roll)
+    monkeypatch.setattr(random, "randint", fixed_roll)
     client = TestClient(server.app)
 
     damage_response = client.post("/api/rooms/slow-somatic-test/sheet/player-1/spells/chromaticOrb/rolls/damage?playerKey=player-1")
@@ -3309,7 +3504,7 @@ def test_slowed_somatic_spell_failure_logs_and_blocks_spell(tmp_path, monkeypatc
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1)
     client = TestClient(server.app)
 
     response = client.post("/api/rooms/slow-somatic-fail-test/sheet/player-1/spells/thunderwave/rolls/damage?playerKey=player-1")
@@ -3452,7 +3647,11 @@ def test_aid_increases_current_and_max_hit_points_until_long_rest(tmp_path, monk
     assert resolution.json()["resolution"]["targetHp"] == {"current": 28, "max": 45, "temporary": 0}
     assert "increases Hit Point maximum by 5" in resolution.json()["resolution"]["outcome"]
     assert target["hp"] == {"current": 28, "max": 45, "temporary": 0}
-    assert saved_data["maxHitPointIncreases"]["player-2"] == [{"amount": 5, "sourceSpellId": "aid", "sourceName": "Aid"}]
+    assert saved_data["maxHitPointIncreases"]["player-2"] == [{
+        "amount": 5,
+        "source": typed_json_from_value(RollSource(SheetSectionType.SPELLS, "aid", "healing-0")),
+        "sourceName": "Aid",
+    }]
     assert rest_response.status_code == 200
     assert rested_target["hp"] == {"current": 28, "max": 40, "temporary": 0}
 
@@ -3487,7 +3686,7 @@ def test_heroism_applies_temp_hp_and_blocks_frightened_condition(tmp_path, monke
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1)
     client = TestClient(server.app)
 
     temp_response = client.post("/api/rooms/heroism-fear-test/sheet/player-1/spells/heroism/rolls/temporary-hit-points?playerKey=player-1")
@@ -3597,7 +3796,12 @@ def test_harm_failed_save_reduces_max_hit_points_until_long_rest(tmp_path, monke
     assert "reduces Hit Point maximum by 28" in resolution.json()["resolution"]["outcome"]
     assert target["hp"] == {"current": 32, "max": 32, "temporary": 0}
     assert saved_data["maxHitPointReductions"]["player-2"] == [
-        {"amount": 28, "sourceSpellId": "harm", "sourceName": "Harm", "reset": "longRest"}
+        {
+            "amount": 28,
+            "source": typed_json_from_value(RollSource(SheetSectionType.SPELLS, "harm", "damage-0")),
+            "sourceName": "Harm",
+            "reset": "longRest",
+        }
     ]
     assert rest_response.status_code == 200
     assert rested_target["hp"] == {"current": 32, "max": 60, "temporary": 0}
@@ -3666,7 +3870,7 @@ def test_shatter_rolls_disadvantage_for_construct_targets(tmp_path, monkeypatch)
     )
     rolls = iter([18, 2])
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls) if maximum == 20 else 4)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls) if maximum == 20 else 4)
     client = TestClient(server.app)
 
     damage_response = client.post("/api/rooms/shatter-construct-test/sheet/player-1/spells/shatter/rolls/damage?playerKey=player-1")
@@ -3704,7 +3908,7 @@ def test_damage_save_can_force_failure_for_creature_type(tmp_path, monkeypatch) 
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 20 if maximum == 20 else 4)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 20 if maximum == 20 else 4)
     client = TestClient(server.app)
 
     damage_response = client.post("/api/rooms/blight-plant-test/sheet/player-1/spells/blight/rolls/damage?playerKey=player-1")
@@ -3742,7 +3946,7 @@ def test_vampiric_touch_heals_source_for_half_final_damage(tmp_path, monkeypatch
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 15 if maximum == 20 else 4)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 15 if maximum == 20 else 4)
     client = TestClient(server.app)
     room = server.get_or_create_room("vampiric-touch-test")
     room.hit_points["player-1"] = 10
@@ -3787,7 +3991,7 @@ def test_combined_vampiric_touch_attack_respects_uncanny_dodge_before_source_hea
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 15 if maximum == 20 else 4)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 15 if maximum == 20 else 4)
     client = TestClient(server.app)
     room = server.get_or_create_room("vampiric-touch-uncanny-dodge-test")
     room.hit_points["player-1"] = 10
@@ -3833,7 +4037,7 @@ def test_player_can_roll_ability_check_and_saving_throw(tmp_path, monkeypatch) -
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 11)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 11)
 
     check = client.post("/api/rooms/ability-roll-test/sheet/player-1/rolls/ability-check?playerKey=player-1&ability=strength")
     save = client.post("/api/rooms/ability-roll-test/sheet/player-1/rolls/saving-throw?playerKey=player-1&ability=strength")
@@ -3878,10 +4082,13 @@ def test_player_can_update_owned_sheet_resource(tmp_path, monkeypatch) -> None:
             name="Resource Fighter",
             maxHp=36,
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            baseAbilityScores=AbilityScores(strength=14, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4, fightingStyles=[FightingStyleType.DEFENSE])],
-                hitPointIncreases=[8, 8, 8],
-                abilityScoreImprovements=["strength:2"],
+                progressionGrants=[
+                    *hit_point_grants(ClassType.FIGHTER, 8, 8, 8),
+                    *ability_score_grants(ClassType.FIGHTER, 4, AbilityType.STRENGTH, 2),
+                ],
             ),
         ),
     )
@@ -3948,7 +4155,7 @@ def test_attack_resource_costs_are_validated_and_consumed_atomically(tmp_path, m
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: maximum)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: maximum)
     client = TestClient(server.app)
 
     blocked = client.post(
@@ -4390,7 +4597,11 @@ def test_fighter_ability_score_improvement_updates_hp_when_constitution_modifier
             name="ASI Fighter",
             maxHp=36,
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
-            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
+            baseAbilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                progressionGrants=hit_point_grants(ClassType.FIGHTER, 8, 8, 8),
+            ),
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
@@ -4461,7 +4672,7 @@ def test_fighter_ability_score_improvement_rejects_duplicate_feat(tmp_path, monk
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=6)],
-                abilityScoreImprovements=["feat:actor"],
+                progressionGrants=feat_grants(ClassType.FIGHTER, 4, GeneralFeatType.ACTOR),
                 feats=[
                     general_feat_feature("actor")
                 ],
@@ -4521,7 +4732,7 @@ def test_dm_level_up_exposes_pending_fighter_choices_and_applies_them(tmp_path, 
                     enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT,
                     enum_key(SkillType.PERCEPTION): ProficiencyLevel.PROFICIENT,
                 },
-                hitPointIncreases=[8],
+                progressionGrants=hit_point_grants(ClassType.FIGHTER, 8),
             ),
         ),
     )
@@ -4552,7 +4763,7 @@ def test_level_down_prunes_unavailable_fighter_choices_and_hp(tmp_path, monkeypa
         PartyMemberConfig(
             id="player-1",
             name="Level Fighter",
-            maxHp=29,
+            maxHp=28,
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[
@@ -4563,7 +4774,11 @@ def test_level_down_prunes_unavailable_fighter_choices_and_hp(tmp_path, monkeypa
                         fightingStyles=[FightingStyleType.DEFENSE],
                     )
                 ],
-                hitPointIncreases=[8, 9],
+                skills={
+                    enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT,
+                    enum_key(SkillType.PERCEPTION): ProficiencyLevel.PROFICIENT,
+                },
+                progressionGrants=hit_point_grants(ClassType.FIGHTER, 8, 8),
             ),
         ),
     )
@@ -4578,6 +4793,15 @@ def test_level_down_prunes_unavailable_fighter_choices_and_hp(tmp_path, monkeypa
     assert "subclass" not in sheet["classes"][0]
     assert sheet["hp"]["max"] == 20
 
+    releveled = client.post("/api/rooms/level-down-test/sheet/player-1/level?playerKey=dm&delta=1")
+    releveled_sheet = releveled.json()["sheet"]
+
+    assert releveled.status_code == 200
+    assert "subclass" not in releveled_sheet["classes"][0]
+    assert "fighterSubclass" in {
+        choice["id"] for choice in releveled_sheet["pendingChoices"]
+    }
+
 
 def test_level_down_prunes_fighter_ability_score_improvements(tmp_path, monkeypatch) -> None:
     write_party_campaign(
@@ -4588,9 +4812,15 @@ def test_level_down_prunes_fighter_ability_score_improvements(tmp_path, monkeypa
             name="Level Fighter",
             maxHp=36,
             abilityScores=AbilityScores(strength=18, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
+            baseAbilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
-                abilityScoreImprovements=["strength:2"],
+                progressionGrants=ability_score_grants(
+                    ClassType.FIGHTER,
+                    4,
+                    AbilityType.STRENGTH,
+                    2,
+                ),
             ),
         ),
     )
@@ -4616,7 +4846,7 @@ def test_level_down_prunes_fighter_feat_improvements(tmp_path, monkeypatch) -> N
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
-                abilityScoreImprovements=["feat:actor"],
+                progressionGrants=feat_grants(ClassType.FIGHTER, 4, GeneralFeatType.ACTOR),
                 feats=[general_feat_feature("actor")],
             ),
         ),
@@ -4663,7 +4893,7 @@ def test_wizard_level_up_preserves_existing_cantrips_before_new_cantrip_choice(t
                 },
                 spells=[spell for spell_id in [*cantrip_ids, *prepared_ids] if (spell := wizard_spell_entry(spell_id)) is not None],
                 spellbook=[spell for spell_id in spellbook_ids if (spell := wizard_spell_entry(spell_id)) is not None],
-                hitPointIncreases=[4, 4],
+                progressionGrants=hit_point_grants(ClassType.WIZARD, 4, 4),
             ),
         ),
     )
@@ -4700,7 +4930,7 @@ def test_player_can_choose_eldritch_knight_spells(tmp_path, monkeypatch) -> None
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=14, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.ELDRITCH_KNIGHT, fightingStyles=[FightingStyleType.DEFENSE])],
-                hitPointIncreases=[8, 8],
+                progressionGrants=hit_point_grants(ClassType.FIGHTER, 8, 8),
             ),
         ),
     )
@@ -4717,6 +4947,7 @@ def test_player_can_choose_eldritch_knight_spells(tmp_path, monkeypatch) -> None
     assert response.status_code == 200
     assert spells["fireBolt"]["level"] == 0
     assert spells["shield"]["castingAbility"] == "intelligence"
+    assert spells["shield"]["source"] == "eldritchKnight"
     assert spells["findFamiliar"]["school"] == "conjuration"
     assert "eldritchKnightSpells" not in {choice["id"] for choice in sheet["pendingChoices"]}
 
@@ -4732,7 +4963,7 @@ def test_player_can_choose_arcane_trickster_spells(tmp_path, monkeypatch) -> Non
             abilityScores=AbilityScores(strength=10, dexterity=16, constitution=14, intelligence=14, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.ROGUE, level=3, subclass=RogueSubclassType.ARCANE_TRICKSTER)],
-                hitPointIncreases=[7, 7],
+                progressionGrants=hit_point_grants(ClassType.ROGUE, 7, 7),
             ),
         ),
     )
@@ -4774,7 +5005,7 @@ def test_rogue_levels_into_soulknife_and_uses_homing_strikes(tmp_path, monkeypat
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 4)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 4)
     client = TestClient(server.app)
 
     sheet = None
@@ -4827,7 +5058,7 @@ def test_eldritch_knight_spell_choice_rejects_wrong_counts(tmp_path, monkeypatch
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=14, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.ELDRITCH_KNIGHT, fightingStyles=[FightingStyleType.DEFENSE])],
-                hitPointIncreases=[8, 8],
+                progressionGrants=hit_point_grants(ClassType.FIGHTER, 8, 8),
             ),
         ),
     )
@@ -4853,7 +5084,7 @@ def test_eldritch_knight_spell_choice_rejects_too_many_flexible_spells(tmp_path,
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=14, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.ELDRITCH_KNIGHT, fightingStyles=[FightingStyleType.DEFENSE])],
-                hitPointIncreases=[8, 8],
+                progressionGrants=hit_point_grants(ClassType.FIGHTER, 8, 8),
             ),
         ),
     )
@@ -4879,10 +5110,13 @@ def test_level_down_prunes_eldritch_knight_spells(tmp_path, monkeypatch) -> None
             name="Spell Fighter",
             maxHp=58,
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=14, wisdom=12, charisma=8),
+            baseAbilityScores=AbilityScores(strength=14, dexterity=14, constitution=15, intelligence=14, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=7, subclass=FighterSubclassType.ELDRITCH_KNIGHT, fightingStyles=[FightingStyleType.DEFENSE])],
-                hitPointIncreases=[8, 8, 8, 8, 8, 8],
-                abilityScoreImprovements=["strength:2"],
+                progressionGrants=[
+                    *hit_point_grants(ClassType.FIGHTER, 8, 8, 8, 8, 8, 8),
+                    *ability_score_grants(ClassType.FIGHTER, 4, AbilityType.STRENGTH, 2),
+                ],
                 spells=[
                     eldritch_knight_catalog_spell("fireBolt"),
                     eldritch_knight_catalog_spell("mageHand"),
@@ -5005,7 +5239,7 @@ def test_serialized_tracker_recovery_rules_override_definition_defaults() -> Non
         )
     ]
 
-    recovered = server.reset_sheet_resources(room, sheet, RestType.SHORT_REST)
+    recovered = reset_sheet_resources(room, sheet, RestType.SHORT_REST)
 
     assert room.resource_uses[sheet.tokenId] == {"customActionSurge": 1}
     assert recovered[0].resource == ResourceId.ACTION_SURGE
@@ -5074,7 +5308,7 @@ def test_rest_clears_only_conditions_with_matching_durations(tmp_path, monkeypat
 
 def test_sheet_roll_queue_keeps_one_pending_roll_per_source_and_resolves(monkeypatch) -> None:
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 10)
     room = server.get_or_create_room("sheet-roll-queue-test")
     dm_socket = FakeSocket()
     room.players["connection-1"] = server.Player(id="connection-1", name="DM", player_key="dm", websocket=dm_socket, room_id=room.id)
@@ -5100,7 +5334,7 @@ def test_sheet_roll_queue_keeps_one_pending_roll_per_source_and_resolves(monkeyp
 
 def test_player_can_clear_owned_sheet_pending_rolls(monkeypatch) -> None:
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 10)
 
     player_roll = client.post("/api/rooms/sheet-clear-rolls-test/sheet/player-1/rolls/ability-check?playerKey=player-1&ability=strength")
     other_roll = client.post("/api/rooms/sheet-clear-rolls-test/sheet/player-2/rolls/ability-check?playerKey=player-2&ability=dexterity")
@@ -5117,7 +5351,7 @@ def test_player_can_clear_owned_sheet_pending_rolls(monkeypatch) -> None:
 
 def test_sheet_roll_history_keeps_duplicate_rolls_and_caps_at_ten(monkeypatch) -> None:
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 10)
 
     first_roll_ids = []
     for _ in range(11):
@@ -5138,7 +5372,7 @@ def test_sheet_roll_history_keeps_duplicate_rolls_and_caps_at_ten(monkeypatch) -
 
 def test_sheet_roll_history_logs_resolution_after_roll_creation(monkeypatch) -> None:
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 10)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 10)
 
     damage = client.post("/api/rooms/sheet-roll-resolution-history-test/sheet/player-1/rolls/damage?playerKey=player-1")
     resolution = client.post(
@@ -5165,7 +5399,7 @@ def test_tactical_mind_roll_consumes_second_wind_and_has_own_pending_slot(tmp_pa
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 7)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 7)
 
     attack = client.post("/api/rooms/tactical-mind-roll-test/sheet/player-1/rolls/attack?playerKey=player-1")
     tactical_mind = client.post("/api/rooms/tactical-mind-roll-test/sheet/player-1/abilities/tacticalMind/rolls/tacticalMind?playerKey=player-1")
@@ -5204,7 +5438,7 @@ def test_fighter_sheet_exposes_tactical_mind_roll_action(tmp_path, monkeypatch) 
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=2, fightingStyles=[FightingStyleType.DEFENSE])],
-                hitPointIncreases=[8],
+                progressionGrants=hit_point_grants(ClassType.FIGHTER, 8),
             ),
         ),
     )
@@ -5251,7 +5485,7 @@ def test_superior_technique_roll_consumes_superiority_die(tmp_path, monkeypatch)
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 5)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 5)
 
     response = client.post("/api/rooms/superior-technique-roll-test/sheet/player-1/abilities/ambush/rolls/ambush?playerKey=player-1")
     sheet = client.get("/api/rooms/superior-technique-roll-test/sheet/player-1?playerKey=player-1").json()["sheet"]
@@ -5298,7 +5532,7 @@ def test_cavalier_warding_maneuver_roll_consumes_resource(tmp_path, monkeypatch)
         encoding="utf-8",
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 6)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 6)
     client = TestClient(server.app)
 
     response = client.post("/api/rooms/cavalier-campaign/sheet/player-1/abilities/wardingManeuver/rolls/wardingManeuver?playerKey=player-1")
@@ -5317,7 +5551,7 @@ def test_cavalier_warding_maneuver_roll_consumes_resource(tmp_path, monkeypatch)
 
 def test_damage_roll_resolution_reduces_target_hp(monkeypatch) -> None:
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 8)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 8)
     room = server.get_or_create_room("sheet-damage-hp-test")
     target_starting_hp = server.token_to_sheet(room.tokens["player-2"], room.id).hp.max
 
@@ -5353,7 +5587,7 @@ def test_lethal_damage_marks_target_dead(tmp_path, monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 8)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 8)
     client = TestClient(server.app)
     room = server.get_or_create_room("sheet-death-test")
     room.hit_points["player-2"] = 5
@@ -5372,7 +5606,7 @@ def test_lethal_damage_marks_target_dead(tmp_path, monkeypatch) -> None:
 
 def test_damage_roll_resolution_consumes_temporary_hp_first(monkeypatch) -> None:
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 6)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 6)
     room = server.get_or_create_room("sheet-temp-damage-test")
     room.temporary_hit_points["player-2"] = 4
     target_starting_hp = server.token_to_sheet(room.tokens["player-2"], room.id).hp.max
@@ -5438,7 +5672,7 @@ def test_damage_roll_resolution_applies_resistance_vulnerability_and_immunity(tm
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 9)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 9)
     client = TestClient(server.app)
 
     acid_roll = client.post("/api/rooms/damage-defense-test/sheet/player-1/rolls/damage?playerKey=player-1&attackId=acid").json()["roll"]
@@ -5495,7 +5729,7 @@ def test_damage_resistance_reduces_temporary_hp_loss(tmp_path, monkeypatch) -> N
         ),
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 9)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 9)
     client = TestClient(server.app)
     room = server.get_or_create_room("damage-defense-temp-test")
     room.temporary_hit_points["player-2"] = 6
@@ -5509,7 +5743,7 @@ def test_damage_resistance_reduces_temporary_hp_loss(tmp_path, monkeypatch) -> N
 
 def test_second_wind_roll_immediately_heals_source(monkeypatch) -> None:
     client = TestClient(server.app)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 5)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 5)
     room = server.get_or_create_room("sheet-healing-test")
     room.hit_points["player-1"] = 10
     starting_sheet = server.token_to_sheet(room.tokens["player-1"], room.id)
@@ -5543,7 +5777,7 @@ def test_second_wind_roll_immediately_heals_source(monkeypatch) -> None:
 def test_reclaim_potential_roll_resolution_adds_temporary_hp(tmp_path, monkeypatch) -> None:
     client = TestClient(server.app)
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 4)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 4)
     write_party_campaign(
         tmp_path,
         "sheet-temporary-healing-test",
@@ -5570,7 +5804,7 @@ def test_reclaim_potential_roll_resolution_adds_temporary_hp(tmp_path, monkeypat
 def test_battle_master_rally_roll_resolution_adds_temporary_hp_to_ally(tmp_path, monkeypatch) -> None:
     client = TestClient(server.app)
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 5)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 5)
     write_party_campaign(
         tmp_path,
         "sheet-rally-drop-test",
@@ -5585,7 +5819,7 @@ def test_battle_master_rally_roll_resolution_adds_temporary_hp_to_ally(tmp_path,
                         name=ClassType.FIGHTER,
                         level=3,
                         subclass=FighterSubclassType.BATTLE_MASTER,
-                        maneuvers=[BattleMasterManeuverType.RALLY],
+                        classOptions=[ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.RALLY)],
                     )
                 ],
             ),
@@ -5608,7 +5842,7 @@ def test_condition_roll_resolution_applies_condition_on_failed_save(tmp_path, mo
     client = TestClient(server.app)
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([4, 4, 1])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     write_party_campaign(
         tmp_path,
         "sheet-condition-drop-test",
@@ -5623,7 +5857,7 @@ def test_condition_roll_resolution_applies_condition_on_failed_save(tmp_path, mo
                         name=ClassType.FIGHTER,
                         level=3,
                         subclass=FighterSubclassType.ARCANE_ARCHER,
-                        arcaneShots=[ArcaneShotType.SHADOW_ARROW],
+                        classOptions=[ClassOptionSelection(ClassOptionKind.ARCANE_SHOT, ArcaneShotType.SHADOW_ARROW)],
                     )
                 ]
             ),
@@ -5667,7 +5901,7 @@ def test_resolution_records_and_resolves_each_reachable_saving_throw_node(tmp_pa
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([2, 3])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     client = TestClient(server.app)
     room = server.get_or_create_room("nested-save-node-test")
     pending = RollPayload(
@@ -5713,7 +5947,7 @@ def test_resolution_records_and_resolves_each_reachable_saving_throw_node(tmp_pa
 def test_condition_roll_resolution_survives_sheet_poll_without_manifest(tmp_path, monkeypatch) -> None:
     client = TestClient(server.app)
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1)
     room = server.get_or_create_room("generated-condition-drop-test")
     roll = RollPayload(
         id="test-prone-roll",
@@ -5754,7 +5988,7 @@ def test_protection_from_poison_grants_advantage_against_poisoned_condition(tmp_
     client = TestClient(server.app)
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([2, 19])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     room = server.get_or_create_room("poison-protection-save-test")
     room.condition_overrides["player-2"] = [ConditionType.PROTECTION_FROM_POISON]
     poison_roll = RollPayload(
@@ -5801,7 +6035,7 @@ def test_pushing_attack_triggers_visible_strength_save_without_condition(tmp_pat
     client = TestClient(server.app)
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([4, 1])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     write_party_campaign(
         tmp_path,
         "sheet-pushing-drop-test",
@@ -5816,7 +6050,7 @@ def test_pushing_attack_triggers_visible_strength_save_without_condition(tmp_pat
                         name=ClassType.FIGHTER,
                         level=3,
                         subclass=FighterSubclassType.BATTLE_MASTER,
-                        maneuvers=[BattleMasterManeuverType.PUSHING_ATTACK],
+                        classOptions=[ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.PUSHING_ATTACK)],
                     )
                 ],
             ),
@@ -5842,7 +6076,7 @@ def test_grappling_strike_resolves_contested_check_and_applies_grappled(tmp_path
     client = TestClient(server.app)
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([3, 10, 4])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     write_party_campaign(
         tmp_path,
         "sheet-grapple-drop-test",
@@ -5858,7 +6092,7 @@ def test_grappling_strike_resolves_contested_check_and_applies_grappled(tmp_path
                         name=ClassType.FIGHTER,
                         level=3,
                         subclass=FighterSubclassType.BATTLE_MASTER,
-                        maneuvers=[BattleMasterManeuverType.GRAPPLING_STRIKE],
+                        classOptions=[ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.GRAPPLING_STRIKE)],
                     )
                 ],
             ),
@@ -5895,7 +6129,7 @@ def test_grappling_strike_does_not_apply_grappled_when_target_wins_contest(tmp_p
     client = TestClient(server.app)
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
     rolls = iter([1, 2, 18])
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: next(rolls))
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
     write_party_campaign(
         tmp_path,
         "sheet-grapple-fail-drop-test",
@@ -5910,7 +6144,7 @@ def test_grappling_strike_does_not_apply_grappled_when_target_wins_contest(tmp_p
                         name=ClassType.FIGHTER,
                         level=3,
                         subclass=FighterSubclassType.BATTLE_MASTER,
-                        maneuvers=[BattleMasterManeuverType.GRAPPLING_STRIKE],
+                        classOptions=[ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.GRAPPLING_STRIKE)],
                     )
                 ],
             ),
@@ -6013,7 +6247,7 @@ def test_close_quarters_shooter_bonus_is_exposed_in_sheet_roll_payload(tmp_path,
         encoding="utf-8",
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 4)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 4)
 
     response = TestClient(server.app).post("/api/rooms/close-quarters-campaign/sheet/player-1/rolls/attack?playerKey=player-1&attackId=longbow")
     roll = response.json()["roll"]
@@ -6146,7 +6380,7 @@ def test_unarmed_fighting_damage_die_updates_after_equipment_slot_changes(tmp_pa
         encoding="utf-8",
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 5)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 5)
     client = TestClient(server.app)
 
     starting_sheet = client.get("/api/rooms/unarmed-slot-campaign/sheet/player-1?playerKey=player-1").json()["sheet"]
@@ -6185,7 +6419,7 @@ def test_unarmed_fighting_grapple_rider_roll_resolves_as_damage(tmp_path, monkey
         encoding="utf-8",
     )
     monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 3)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 3)
     client = TestClient(server.app)
 
     roll = client.post("/api/rooms/unarmed-rider-campaign/sheet/player-1/abilities/unarmedFighting/rolls/unarmedFighting?playerKey=player-1").json()["roll"]
@@ -6312,36 +6546,36 @@ def test_server_state_helpers_cover_rest_equipment_and_room_edges(tmp_path, monk
     }
     room.temporary_hit_points[sheet.tokenId] = 7
 
-    server.reset_sheet_resources(room, sheet, RestType.SHORT_REST)
-    server.reset_sheet_conditions(room, sheet, RestType.SHORT_REST)
-    server.reset_sheet_temporary_hit_points(room, sheet, RestType.SHORT_REST)
+    reset_character_for_rest(room, sheet, RestType.SHORT_REST, server.character_state_persistence())
     assert room.resource_uses[sheet.tokenId] == {"short": 2}
     assert room.condition_overrides[sheet.tokenId] == [ConditionType.FRIGHTENED, ConditionType.CHARMED]
     assert room.temporary_hit_points[sheet.tokenId] == 7
 
-    server.reset_sheet_resources(room, sheet, RestType.LONG_REST)
-    server.reset_sheet_conditions(room, sheet, RestType.LONG_REST)
-    server.reset_sheet_temporary_hit_points(room, sheet, RestType.LONG_REST)
+    reset_character_for_rest(room, sheet, RestType.LONG_REST, server.character_state_persistence())
     assert room.resource_uses[sheet.tokenId] == {"short": 2, "long": 1}
     assert sheet.tokenId not in room.temporary_hit_points
     assert server.parse_rest_type("short-rest") == RestType.SHORT_REST
     assert server.parse_rest_type("long") == RestType.LONG_REST
-    assert server.reset_applies_to_rest(RestType.NONE, RestType.LONG_REST) is False
+    assert reset_applies_to_rest(RestType.NONE, RestType.LONG_REST) is False
 
     armor = EquipmentItem(id="chain", name="Chain Mail", itemType=EquipmentType.ARMOR, slot=EquipmentSlot.ARMOR, armorCategory=ArmorCategory.HEAVY, armorClass=16)
     sword = EquipmentItem(id="sword", name="Sword", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND)
     shield_item = EquipmentItem(id="shield", name="Shield", itemType=EquipmentType.SHIELD, slot=EquipmentSlot.OFF_HAND)
     sheet.equipment = [armor, sword, shield_item]
-    server.set_equipment_slot(room, sheet, "new-armor", EquipmentSlot.ARMOR)
-    server.set_equipment_slot(room, sheet, "greatsword", EquipmentSlot.TWO_HANDS)
-    server.set_equipment_slot(room, sheet, "dagger", EquipmentSlot.MAIN_HAND)
+    set_equipment_slot(room, sheet, "new-armor", EquipmentSlot.ARMOR)
+    set_equipment_slot(room, sheet, "greatsword", EquipmentSlot.TWO_HANDS)
+    set_equipment_slot(room, sheet, "dagger", EquipmentSlot.MAIN_HAND)
     assert room.equipment_slots[sheet.tokenId]["chain"] == EquipmentSlot.CARRIED
     assert room.equipment_slots[sheet.tokenId]["sword"] == EquipmentSlot.CARRIED
-    assert server.valid_equipment_slots(EquipmentItem(id="gear", name="Gear", itemType=EquipmentType.GEAR, slot=EquipmentSlot.CARRIED)) == {EquipmentSlot.CARRIED}
+    assert valid_equipment_slots(EquipmentItem(id="gear", name="Gear", itemType=EquipmentType.GEAR, slot=EquipmentSlot.CARRIED)) == {EquipmentSlot.CARRIED}
 
     history_roll = RollPayload("roll", "sheet", "token", "player", RollSource(SheetSectionType.ATTACKS, "a", "b"), "A", RollResolutionMode.NONE, "Roll", None, [], DiceType.D20, "d20", 0, [], 0, 1)
-    room.roll_history = [server.RollLogEntry(str(index), server.RollLogEntryType.ROLL_CREATED, index, history_roll) for index in range(server.ROLL_HISTORY_LIMIT + 3)]
-    server.append_roll_log_entry(room, server.RollLogEntry("last", server.RollLogEntryType.ROLL_CREATED, 999, history_roll))
+    room.roll_history = [RollLogEntry(str(index), RollLogEntryType.ROLL_CREATED, index, history_roll) for index in range(server.ROLL_HISTORY_LIMIT + 3)]
+    append_roll_log_entry(
+        room,
+        RollLogEntry("last", RollLogEntryType.ROLL_CREATED, 999, history_roll),
+        server.ROLL_HISTORY_LIMIT,
+    )
     assert len(room.roll_history) == server.ROLL_HISTORY_LIMIT
     assert room.roll_history[-1].id == "last"
 
@@ -6351,10 +6585,16 @@ def test_server_state_helpers_cover_rest_equipment_and_room_edges(tmp_path, monk
 
 
 def test_member_progression_helper_error_and_pruning_paths(monkeypatch) -> None:
-    monkeypatch.setattr(server.random, "randint", lambda minimum, maximum: 1)
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: 1)
     no_asi_member = PartyMemberConfig(id="player-1", name="No ASI", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3)]))
-    server.apply_member_ability_score_improvement(no_asi_member, ["strength"])
-    assert no_asi_member.sheet.abilityScoreImprovements is None
+    with pytest.raises(Exception) as unavailable:
+        apply_member_progression_rule(
+            no_asi_member,
+            ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+            ["strength"],
+        )
+    assert unavailable.value.status_code == 400
+    assert unavailable.value.detail == "Unsupported progression rule"
 
     member = PartyMemberConfig(
         id="player-1",
@@ -6363,18 +6603,29 @@ def test_member_progression_helper_error_and_pruning_paths(monkeypatch) -> None:
         abilityScores=AbilityScores(19, 10, 13, 10, 10, 10),
         sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]),
     )
-    server.apply_member_ability_score_improvement(member, ["strength"])
+    apply_member_progression_rule(
+        member,
+        ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+        ["strength"],
+    )
     assert member.abilityScores.strength == 20
-    assert member.sheet.abilityScoreImprovements == ["strength:1"]
+    assert member.baseAbilityScores == AbilityScores(19, 10, 13, 10, 10, 10)
+    assert member.sheet.progressionGrants is not None
+    assert any(
+        grant == AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityType.STRENGTH, 1)
+        for record in member.sheet.progressionGrants
+        for grant in record.grants
+    )
 
     for values, detail in [
         (["strength", "dexterity", "constitution"], "Choose one ability twice or two abilities once"),
-        (["luck"], "Invalid ability score"),
+        (["luck"], "Invalid ability score or no selected score can be increased"),
         ([], "Choose one ability twice or two abilities once"),
     ]:
         with pytest.raises(Exception) as error:
-            server.apply_member_ability_score_improvement(
+            apply_member_progression_rule(
                 PartyMemberConfig(id="player-1", name="Bad ASI", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)])),
+                ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
                 values,
             )
         assert error.value.status_code == 400
@@ -6382,75 +6633,54 @@ def test_member_progression_helper_error_and_pruning_paths(monkeypatch) -> None:
 
     maxed = PartyMemberConfig(id="player-1", name="Maxed", abilityScores=AbilityScores(20, 20, 20, 20, 20, 20), sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]))
     with pytest.raises(Exception) as max_error:
-        server.apply_member_ability_score_improvement(maxed, ["strength"])
-    assert max_error.value.detail == "Ability scores cannot be increased above 20"
+        apply_member_progression_rule(
+            maxed,
+            ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+            ["strength"],
+        )
+    assert max_error.value.detail == "Invalid ability score or no selected score can be increased"
 
     feat_member = PartyMemberConfig(id="player-1", name="Feat", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)]))
     with pytest.raises(Exception) as invalid_feat:
-        server.apply_member_ability_score_improvement(feat_member, ["feat:not-real"])
+        apply_member_progression_rule(
+            feat_member,
+            ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+            ["feat:not-real"],
+        )
     assert invalid_feat.value.detail == "Invalid feat"
-    server.apply_member_ability_score_improvement(feat_member, ["feat:actor"])
+    apply_member_progression_rule(
+        feat_member,
+        ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+        ["feat:actor"],
+    )
     with pytest.raises(Exception) as duplicate_feat:
-        server.apply_member_ability_score_improvement(PartyMemberConfig(id="player-1", name="Feat", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=8)], feats=feat_member.sheet.feats)), ["feat:actor"])
+        apply_member_progression_rule(
+            PartyMemberConfig(id="player-1", name="Feat", sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=8)], feats=feat_member.sheet.feats)),
+            ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+            ["feat:actor"],
+        )
     assert duplicate_feat.value.detail == "Feat is already selected"
 
-    member.sheet.abilityScoreImprovements = ["strength:1", "feat:actor", "constitution:2"]
-    member.sheet.feats = [general_feat_feature("actor")]
-    member.abilityScores.constitution = 15
-    server.prune_member_ability_score_improvements(member)
-    assert member.sheet.abilityScoreImprovements == ["strength:1"]
-    assert member.sheet.feats is None
-
-
-def test_member_spell_pruning_paths() -> None:
-    shield = eldritch_knight_catalog_spell("shield")
-    mage_hand = arcane_trickster_catalog_spell("mageHand")
-    assert shield is not None
-    assert mage_hand is not None
-    arcane_trickster_mage_hand = replace(
-        mage_hand,
-        status=SpellStatus(
-            source=SpellSource.ARCANE_TRICKSTER,
-            castingAbility=mage_hand.castingAbility,
-            resourceId=mage_hand.resourceId,
-            reset=mage_hand.reset,
+    pruning_member = PartyMemberConfig(
+        id="player-1",
+        name="Pruning Fighter",
+        abilityScores=AbilityScores(12, 10, 10, 10, 10, 10),
+        baseAbilityScores=AbilityScores(10, 10, 10, 10, 10, 10),
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=6)],
+            feats=[general_feat_feature("actor")],
+            progressionGrants=[
+                *ability_score_grants(ClassType.FIGHTER, 4, AbilityType.STRENGTH, 2),
+                *feat_grants(ClassType.FIGHTER, 6, GeneralFeatType.ACTOR),
+            ],
         ),
     )
-    eldritch_knight_shield = replace(
-        shield,
-        status=SpellStatus(
-            source=SpellSource.ELDRITCH_KNIGHT,
-            castingAbility=shield.castingAbility,
-            resourceId=shield.resourceId,
-            reset=shield.reset,
-        ),
+    set_member_class_levels(
+        pruning_member,
+        [CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
     )
-    wizard_shield = shield
-
-    fighter_member = PartyMemberConfig(
-        id="player-1",
-        name="Not EK",
-        sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.CHAMPION)], spells=[eldritch_knight_shield]),
-    )
-    wizard_spell_member = PartyMemberConfig(
-        id="player-2",
-        name="Wizard Spell",
-        sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.CHAMPION)], spells=[wizard_shield]),
-    )
-    rogue_member = PartyMemberConfig(
-        id="player-1",
-        name="Not AT",
-        sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=3, subclass=RogueSubclassType.THIEF)], spells=[arcane_trickster_mage_hand]),
-    )
-
-    server.prune_member_eldritch_knight_spells(PartyMemberConfig(id="player-1", name="No Sheet"))
-    server.prune_member_arcane_trickster_spells(PartyMemberConfig(id="player-1", name="No Spells", sheet=PartyMemberSheet()))
-    server.prune_member_eldritch_knight_spells(fighter_member)
-    server.prune_member_eldritch_knight_spells(wizard_spell_member)
-    server.prune_member_arcane_trickster_spells(rogue_member)
-    assert fighter_member.sheet.spells is None
-    assert wizard_spell_member.sheet.spells == [wizard_shield]
-    assert rogue_member.sheet.spells is None
+    assert pruning_member.abilityScores == AbilityScores(12, 10, 10, 10, 10, 10)
+    assert pruning_member.sheet.feats is None
 
 
 def test_saved_state_and_asset_parsing_fallbacks(tmp_path, monkeypatch) -> None:
@@ -6461,15 +6691,14 @@ def test_saved_state_and_asset_parsing_fallbacks(tmp_path, monkeypatch) -> None:
     bad_path = save_dir / "bad.json"
     bad_path.write_text("{bad", encoding="utf-8")
 
-    assert server.load_saved_tokens("missing") is None
-    assert server.load_saved_tokens("bad") is None
-    assert server.load_saved_fog("bad") == server.default_fog()
-    assert server.load_saved_board_id("bad") == "-"
-    assert server.load_saved_resource_uses("bad") == {}
+    assert load_room_save(save_dir / "missing.json") is None
+    assert load_room_save(bad_path) is None
 
     resources_path = save_dir / "resources.json"
-    resources_path.write_text(json.dumps({"resources": {" Player 1! ": {"Second Wind": "2", "bad": "x"}, "bad": []}}), encoding="utf-8")
-    assert server.load_saved_resource_uses("resources") == {"player1": {"secondwind": 2}}
+    resources_path.write_text(json.dumps({"tokens": [], "resources": {" Player 1! ": {"Second Wind": "2", "bad": "x"}, "bad": []}}), encoding="utf-8")
+    loaded = load_room_save(resources_path)
+    assert loaded is not None
+    assert loaded.resource_uses == {"player1": {"secondwind": 2}}
 
     party_dir = tmp_path / "campaigns" / "party-fallback" / "party"
     party_dir.mkdir(parents=True)

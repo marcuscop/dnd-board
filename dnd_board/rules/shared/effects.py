@@ -17,12 +17,14 @@ from dnd_board.character_sheet import (
     DiceType,
     RestType,
     SkillType,
+    SpellId,
     SpellComponent,
     TimeEconomy,
     WeaponProperty,
     WeaponCategory,
 )
 from dnd_board.rules.shared.resources import ResourceCost
+from dnd_board.rules.equipment import EquipmentId
 
 
 class EffectTarget(Enum):
@@ -327,6 +329,12 @@ class SourceIsSpellPredicate:
 
 
 @dataclass(frozen=True)
+class SourceSpellPredicate:
+    spell: SpellId
+    expected: bool = True
+
+
+@dataclass(frozen=True)
 class SourceHasComponentPredicate:
     component: SpellComponent
 
@@ -455,6 +463,7 @@ Predicate: TypeAlias = (
     TargetIsOwnerPredicate
     | SourceIsAttackPredicate
     | SourceIsSpellPredicate
+    | SourceSpellPredicate
     | SourceHasComponentPredicate
     | TargetHasConditionPredicate
     | PendingEffectAddsConditionPredicate
@@ -491,6 +500,7 @@ class CalculationType(Enum):
     SPEED = auto()
     SPELL_SAVE_DC = auto()
     CONCENTRATION_SAVE = auto()
+    MAXIMUM_HIT_POINTS = auto()
 
 
 class ModifierOperation(Enum):
@@ -555,6 +565,7 @@ class EndingConditionType(Enum):
     OWNER_DEALS_DAMAGE = auto()
     TARGET_SUCCEEDS_SAVE = auto()
     TARGET_TAKES_DAMAGE = auto()
+    REST_COMPLETED = auto()
     MANUAL = auto()
 
 
@@ -729,6 +740,97 @@ class EffectNodeId:
         return EffectNodeId((*self.path, index))
 
 
+class SelectionId(Enum):
+    WEAPON = auto()
+
+
+@dataclass(frozen=True)
+class EquipmentInstanceId:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value:
+            raise ValueError("Equipment instance ID cannot be empty")
+
+
+@dataclass(frozen=True)
+class WeaponEligibility:
+    wielded: bool = True
+    proficient: bool = True
+    equipmentIds: tuple[EquipmentId, ...] = ()
+    properties: tuple[WeaponProperty, ...] = ()
+    attackKinds: tuple[AttackKind, ...] = (AttackKind.STANDARD,)
+
+
+class WeaponAbilityReference(Enum):
+    ORIGINAL = auto()
+    SOURCE_SPELLCASTING = auto()
+
+
+class WeaponDamageTypeReference(Enum):
+    ORIGINAL = auto()
+    FIXED = auto()
+
+
+class WeaponDamageChoice(Enum):
+    NORMAL = auto()
+    RADIANT = auto()
+    FORCE = auto()
+
+
+class WeaponAttackOptionId(Enum):
+    ORIGINAL = auto()
+    SPELLCASTING_ABILITY = auto()
+    ALTERNATE_DAMAGE_TYPE = auto()
+    SPELLCASTING_ABILITY_AND_ALTERNATE_DAMAGE_TYPE = auto()
+
+
+@dataclass(frozen=True)
+class DiceThreshold:
+    minimumLevel: int
+    dice: DiceAmount
+
+    def __post_init__(self) -> None:
+        if self.minimumLevel < 1:
+            raise ValueError("Dice threshold level must be positive")
+
+
+@dataclass(frozen=True)
+class ThresholdDiceExpression:
+    thresholds: tuple[DiceThreshold, ...]
+    basis: ScalingBasis = ScalingBasis.CHARACTER_LEVEL
+
+    def __post_init__(self) -> None:
+        levels = [threshold.minimumLevel for threshold in self.thresholds]
+        if not levels or levels != sorted(set(levels)):
+            raise ValueError("Dice thresholds must be non-empty, unique, and sorted")
+
+
+@dataclass(frozen=True)
+class WeaponAttackModification:
+    ability: WeaponAbilityReference = WeaponAbilityReference.ORIGINAL
+    damageDice: ThresholdDiceExpression | None = None
+    damageType: WeaponDamageTypeReference = WeaponDamageTypeReference.ORIGINAL
+    fixedDamageType: DamageType | None = None
+
+    def __post_init__(self) -> None:
+        if self.damageType == WeaponDamageTypeReference.FIXED and self.fixedDamageType is None:
+            raise ValueError("A fixed weapon damage type requires a damage type")
+
+
+@dataclass(frozen=True)
+class WeaponAttackOption:
+    id: WeaponAttackOptionId
+    label: str
+    modification: WeaponAttackModification
+
+
+@dataclass(frozen=True)
+class EffectSelectionBinding:
+    selection: SelectionId
+    equipmentInstanceId: EquipmentInstanceId
+
+
 @dataclass(frozen=True)
 class EffectRollInput:
     effectNodeId: EffectNodeId
@@ -742,9 +844,17 @@ class EffectAmountInput:
 
 
 @dataclass(frozen=True)
+class EffectSelectionInput:
+    effectNodeId: EffectNodeId
+    selection: SelectionId
+    equipmentInstanceId: EquipmentInstanceId
+
+
+@dataclass(frozen=True)
 class EffectResolutionInputs:
     rolls: list[EffectRollInput] = field(default_factory=list)
     amounts: list[EffectAmountInput] = field(default_factory=list)
+    selections: list[EffectSelectionInput] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -791,6 +901,11 @@ class OccurrenceLimit:
             raise ValueError("Occurrence limit must be positive")
 
 
+class OngoingReplacementPolicy(Enum):
+    STACK = auto()
+    SAME_SOURCE = auto()
+
+
 @dataclass(frozen=True)
 class OngoingEffect:
     duration: EffectDuration
@@ -800,6 +915,9 @@ class OngoingEffect:
     suppressedConditions: list[ConditionType] = field(default_factory=list)
     recurringEffects: list[ScheduledEffect] = field(default_factory=list)
     endingConditions: list[EndingCondition] = field(default_factory=list)
+    weaponAttackModifications: tuple[WeaponAttackModification, ...] = ()
+    weaponAttackOptions: tuple[WeaponAttackOption, ...] = ()
+    replacement: OngoingReplacementPolicy = OngoingReplacementPolicy.STACK
 
 
 @dataclass(frozen=True)
@@ -815,6 +933,8 @@ class ActiveOngoingEffect:
     targetSheetId: str
     sourceLabel: str
     effect: OngoingEffect
+    bindings: tuple[EffectSelectionBinding, ...] = ()
+    sourceSpellId: SpellId | None = None
 
 
 @dataclass(frozen=True)
@@ -846,6 +966,15 @@ class AttackRollEffect:
     attack: AttackRoll
     onHit: EffectNode | None = None
     onMiss: EffectNode | None = None
+    weaponSelection: SelectionId | None = None
+    weaponModification: WeaponAttackModification | None = None
+
+
+@dataclass(frozen=True)
+class SelectWeaponEffect:
+    selection: SelectionId
+    eligibility: WeaponEligibility
+    effect: EffectNode
 
 
 @dataclass(frozen=True)
@@ -916,6 +1045,7 @@ class EffectParticipantBindings:
     sourceSheetId: str
     targetSheetId: str
     ownerSheetId: str
+    selections: tuple[EffectSelectionBinding, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -990,7 +1120,7 @@ class InstallOngoingEffect:
 
 @dataclass(frozen=True)
 class EffectChoice:
-    option: DamageType | ConditionType
+    option: DamageType | ConditionType | WeaponDamageChoice
     effect: EffectNode
 
 
@@ -1017,6 +1147,7 @@ EffectNode: TypeAlias = (
     | ScheduledEffect
     | InstallOngoingEffect
     | ChoiceEffect
+    | SelectWeaponEffect
 )
 
 
@@ -1126,6 +1257,13 @@ class EffectExecutionContext(Protocol):
     def resolve_instance_count(self, instances: InstanceScaling) -> int: ...
 
     def choose_effects(self, choice: ChoiceEffect) -> list[EffectNode]: ...
+
+    def select_weapon(
+        self,
+        node_id: EffectNodeId,
+        selection: SelectionId,
+        eligibility: WeaponEligibility,
+    ) -> EffectParticipantBindings: ...
 
     def schedule_effect(self, node_id: EffectNodeId, effect: ScheduledEffect) -> None: ...
 
@@ -1443,6 +1581,13 @@ class EffectEngine:
             frame.phase = EffectFramePhase.COMMITTED
         elif isinstance(effect, ChoiceEffect):
             self._set_children(frame, context.choose_effects(effect))
+        elif isinstance(effect, SelectWeaponEffect):
+            frame.bindings = context.select_weapon(
+                frame.effectNodeId,
+                effect.selection,
+                effect.eligibility,
+            )
+            self._set_children(frame, [effect.effect])
         else:
             raise TypeError(f"Unsupported effect node: {effect.__class__.__name__}")
         return None
@@ -1543,6 +1688,8 @@ def multiplied_damage_effect(effect: EffectNode, numerator: int, denominator: in
             replace(choice, effect=multiplied_damage_effect(choice.effect, numerator, denominator))
             for choice in effect.choices
         ])
+    if isinstance(effect, SelectWeaponEffect):
+        return replace(effect, effect=multiplied_damage_effect(effect.effect, numerator, denominator))
     return effect
 
 
@@ -1646,6 +1793,9 @@ def replaced_damage_type_effect(effect: EffectNode | None, damage_type: DamageTy
         return replace(effect, effect=replaced) if replaced is not None else None
     if isinstance(effect, ChoiceEffect):
         return replace(effect, choices=[replace(choice, effect=replaced_damage_type_effect(choice.effect, damage_type) or choice.effect) for choice in effect.choices])
+    if isinstance(effect, SelectWeaponEffect):
+        replaced = replaced_damage_type_effect(effect.effect, damage_type)
+        return replace(effect, effect=replaced) if replaced is not None else None
     return effect
 
 
@@ -1717,6 +1867,9 @@ def effect_without_conditions(effect: EffectNode | None, conditions: set[Conditi
             minimum=min(effect.minimum, len(choices)),
             maximum=min(effect.maximum, len(choices)),
         )
+    if isinstance(effect, SelectWeaponEffect):
+        selected = effect_without_conditions(effect.effect, conditions)
+        return replace(effect, effect=selected) if selected is not None else None
     return effect
 
 
@@ -1762,11 +1915,15 @@ def effect_model_types() -> list[type[object]]:
         EffectExecutionResult,
         EffectExecutionStatus,
         EffectAmountInput,
+        EffectSelectionBinding,
+        EffectSelectionInput,
         EffectNodeId,
         EffectResolutionInputs,
         EffectRollInput,
         EffectResultValue,
         EffectTarget,
+        EquipmentId,
+        EquipmentInstanceId,
         EndingCondition,
         EndingConditionType,
         FeatureMechanics,
@@ -1795,6 +1952,7 @@ def effect_model_types() -> list[type[object]]:
         OccurrenceLimit,
         OngoingEffect,
         OngoingEffectId,
+        OngoingReplacementPolicy,
         OwnerWearsArmorPredicate,
         OwnerWearsHeavyArmorPredicate,
         OwnerWieldsExactlyOneOneHandedWeaponPredicate,
@@ -1821,6 +1979,8 @@ def effect_model_types() -> list[type[object]]:
         SavingThrowAbilityPredicate,
         SavingThrowEffect,
         ScalingBasis,
+        SelectionId,
+        SelectWeaponEffect,
         ScheduleEffectOperation,
         ScheduledEffect,
         ScheduledEffectId,
@@ -1834,6 +1994,7 @@ def effect_model_types() -> list[type[object]]:
         SourceWeaponCategoryPredicate,
         SourceIsAttackPredicate,
         SourceIsSpellPredicate,
+        SourceSpellPredicate,
         TargetHasConditionPredicate,
         TargetHasAnyCreatureTypePredicate,
         TargetHasCreatureTypePredicate,
@@ -1841,5 +2002,14 @@ def effect_model_types() -> list[type[object]]:
         TemporaryHitPointsEffect,
         WeaponHasPropertyPredicate,
         WeaponHasAnyPropertyPredicate,
+        WeaponAbilityReference,
+        WeaponAttackModification,
+        WeaponAttackOption,
+        WeaponAttackOptionId,
+        WeaponDamageTypeReference,
+        WeaponDamageChoice,
+        WeaponEligibility,
+        DiceThreshold,
+        ThresholdDiceExpression,
         WithinDistancePredicate,
     ]

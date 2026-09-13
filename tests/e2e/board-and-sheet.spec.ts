@@ -52,8 +52,8 @@ test("sheet view opens a character and creates roll cards", async ({ page }) => 
     .poll(async () => page.locator(".roll-card", { hasText: "Strength" }).count())
     .toBeGreaterThanOrEqual(2);
 
-  await page.getByRole("button", { name: "Attack Roll" }).first().click();
-  await expect(page.locator(".roll-card", { hasText: "Attack Roll" }).filter({ hasText: "Longsword" })).toBeVisible();
+  await page.getByRole("button", { name: "Attack", exact: true }).first().click();
+  await expect(page.locator(".roll-card", { hasText: "Longsword" }).filter({ hasText: "Attacks" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Short Rest" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Long Rest" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Level up Marina" })).toHaveCount(0);
@@ -100,8 +100,8 @@ test("sheet roll cards distinguish draggable target rolls and can be cleared", a
   await expect(checkRoll).toBeVisible();
   await expect(checkRoll).not.toHaveClass(/draggable/);
 
-  await page.getByRole("button", { name: "Attack Roll" }).first().click();
-  const attackRoll = page.locator(".roll-card", { hasText: "Attack Roll" }).first();
+  await page.getByRole("button", { name: "Attack", exact: true }).first().click();
+  const attackRoll = page.locator(".roll-card", { hasText: "Longsword" }).filter({ hasText: "Attacks" }).first();
   await expect(attackRoll).toBeVisible();
   await expect(attackRoll).toHaveClass(/draggable/);
 

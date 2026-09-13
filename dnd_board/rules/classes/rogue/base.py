@@ -16,10 +16,14 @@ from dnd_board.character_sheet import (
     SheetAbility,
     SheetFeature,
     TimeEconomy,
+    ProficiencyLevel,
+    ProgressionChoiceType,
+    SkillType,
     enum_key,
     enum_label,
 )
 from dnd_board.rules.sources import RuleSource, rule_source_label
+from dnd_board.rules.feats import FeatCategory
 from dnd_board.rules.shared.effects import (
     ApplyEffect,
     AttackerIsVisiblePredicate,
@@ -42,6 +46,7 @@ from dnd_board.rules.shared.effects import (
     TargetIsOwnerPredicate,
 )
 from dnd_board.rules.shared.resources import ResourceId
+from dnd_board.rules.shared.progression_definitions import ClassProgressionDefinition, ProgressionChoiceId, ProgressionChoicePresentation, SkillProgressionDefinition
 
 
 class RogueFeatureType(Enum):
@@ -155,6 +160,87 @@ ROGUE_LEVELS: dict[int, RogueProgression] = {
     19: RogueProgression(19, 6, (RogueFeatureType.EPIC_BOON,), 10),
     20: RogueProgression(20, 6, (RogueFeatureType.STROKE_OF_LUCK,), 10),
 }
+
+
+ROGUE_PROGRESSION_DEFINITION = ClassProgressionDefinition(
+    characterClass=ClassType.ROGUE,
+    abilityScoreImprovementLevels=tuple(
+        level
+        for level, progression in ROGUE_LEVELS.items()
+        if RogueFeatureType.ABILITY_SCORE_IMPROVEMENT in progression.features
+    ),
+    epicBoonLevel=next(
+        level
+        for level, progression in ROGUE_LEVELS.items()
+        if RogueFeatureType.EPIC_BOON in progression.features
+    ),
+    subclasses=tuple(RogueSubclassType),
+    abilityScoreImprovementChoice=ProgressionChoiceId.ROGUE_ABILITY_SCORE_IMPROVEMENT,
+    abilityScoreImprovementPresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.ABILITY_SCORE_IMPROVEMENT,
+        "Ability Score Improvement",
+        "Increase one ability score by 2, increase two ability scores by 1, or choose a feat.",
+    ),
+    abilityScoreImprovementFeatCategories=(FeatCategory.GENERAL,),
+    epicBoonChoice=ProgressionChoiceId.ROGUE_EPIC_BOON,
+    epicBoonPresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.FEAT,
+        "Epic Boon",
+        "Choose an Epic Boon feat or another General feat for which you qualify.",
+    ),
+    epicBoonFeatCategories=(FeatCategory.EPIC_BOON, FeatCategory.GENERAL),
+    subclassChoice=ProgressionChoiceId.ROGUE_SUBCLASS,
+    subclassPresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.SUBCLASS,
+        "Roguish Archetype",
+        "Choose a Rogue archetype.",
+    ),
+    skillChoices=(
+        SkillProgressionDefinition(
+            ProgressionChoiceId.ROGUE_SKILL_PROFICIENCIES,
+            ProgressionChoicePresentation(
+                ProgressionChoiceType.SKILL_PROFICIENCIES,
+                "Rogue Skill Proficiencies",
+                "Choose Rogue skill proficiencies.",
+            ),
+            (
+                SkillType.ACROBATICS,
+                SkillType.ATHLETICS,
+                SkillType.DECEPTION,
+                SkillType.INSIGHT,
+                SkillType.INTIMIDATION,
+                SkillType.INVESTIGATION,
+                SkillType.PERCEPTION,
+                SkillType.PERSUASION,
+                SkillType.SLEIGHT_OF_HAND,
+                SkillType.STEALTH,
+            ),
+            4,
+        ),
+        SkillProgressionDefinition(
+            ProgressionChoiceId.ROGUE_EXPERTISE,
+            ProgressionChoicePresentation(
+                ProgressionChoiceType.EXPERTISE,
+                "Expertise",
+                "Choose proficient skills to receive Expertise.",
+            ),
+            tuple(SkillType),
+            0,
+            ProficiencyLevel.EXPERTISE,
+            requiresExistingProficiency=True,
+            countsByClassLevel=tuple(2 if level < 6 else 4 for level in range(1, 21)),
+            grantMinimumLevels=(1, 1, 6, 6),
+        ),
+    ),
+)
+
+
+def rogue_skill_proficiency_count(rogue: CharacterClassLevel) -> int:
+    return ROGUE_PROGRESSION_DEFINITION.skillChoices[0].count if rogue.level >= 1 else 0
+
+
+def rogue_skill_option_types() -> list[SkillType]:
+    return list(ROGUE_PROGRESSION_DEFINITION.skillChoices[0].candidates)
 
 
 def rogue_level(classes: list[CharacterClassLevel]) -> int:

@@ -219,6 +219,7 @@ def equipment_item(value: str | EquipmentId, *, quantity: int = 1, name: str | N
     return EquipmentItem(
         id=equipment_item_id(definition.equipmentId, name),
         name=name or definition.name,
+        definitionId=definition.equipmentId,
         quantity=quantity,
         weight=definition.weightLb * quantity,
         notes=notes or definition.notes,

@@ -30,7 +30,7 @@ from dnd_board.character_builder import (
 from dnd_board.character_sheet import AbilityScores, AbilityType, ClassType, DamageType, EquipmentType, FightingStyleType, PartyManifest, ProficiencyLevel, RestType, SkillType, SpellId, SpellSource, enum_key, enum_label, typed_json_to_value
 from dnd_board.rules.backgrounds import BackgroundEquipmentChoice, BackgroundFeatureType, BackgroundType, ToolType, background_definition, background_equipment, background_feats, background_skill_proficiencies, background_tool_options
 from dnd_board.rules.feats import GeneralFeatType
-from dnd_board.rules.progression import ProgressionChoiceId
+from dnd_board.rules.progression import HitPointGrant, ProgressionChoiceId
 from dnd_board.rules.species import SpeciesTraitType, SpeciesType
 
 
@@ -155,6 +155,8 @@ def test_character_builder_builds_level_one_rogue_with_background_tool_and_packa
     assert member.id == "player-2"
     assert member.name == "Dwarf Rogue"
     assert member.abilityScores == AbilityScores(8, 17, 15, 13, 10, 12)
+    assert member.baseAbilityScores == request.ability_scores
+    assert member.baseAbilityScores is not request.ability_scores
     assert member.maxHp == fixed_max_hp(ClassType.ROGUE, 1, AbilityScores(8, 17, 15, 13, 10, 12), SpeciesType.DWARF, BackgroundType.CRIMINAL)
     assert member.maxHp == 11
     assert member.sheet.race == "Dwarf"
@@ -175,8 +177,11 @@ def test_character_builder_builds_level_one_rogue_with_background_tool_and_packa
     assert member.sheet.classes[0].name == ClassType.ROGUE
     assert member.sheet.classes[0].level == 1
     assert member.sheet.classes[0].subclass is None
-    assert member.sheet.hitPointIncreases is None
-    assert member.sheet.abilityScoreImprovements is None
+    assert not any(
+        isinstance(grant, HitPointGrant)
+        for record in member.sheet.progressionGrants or []
+        for grant in record.grants
+    )
     assert member.sheet.equipment
     equipment = {item.name: item for item in member.sheet.equipment}
     assert equipment["Dagger"].quantity == 2
@@ -333,6 +338,17 @@ def test_character_builder_builds_level_one_wizard_spellbook_and_prepared_spells
         SpellId.LIGHT,
     ]
     assert [spell.id for spell in member.sheet.spells if spell.source == SpellSource.WIZARD and spell.level > 0] == [
+        SpellId.MAGIC_MISSILE,
+        SpellId.SHIELD,
+        SpellId.DETECT_MAGIC,
+        SpellId.SLEEP,
+    ]
+    prepared_record = next(
+        record
+        for record in member.sheet.progressionGrants or []
+        if record.source.rule == ProgressionChoiceId.WIZARD_PREPARED_SPELLS
+    )
+    assert [grant.spell for grant in prepared_record.grants] == [
         SpellId.MAGIC_MISSILE,
         SpellId.SHIELD,
         SpellId.DETECT_MAGIC,

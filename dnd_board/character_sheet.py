@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING, Any, Union, get_args, get_origin, get_type_hin
 from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId, ResourceKey, ResourceKind, ResourceRecovery, ResourceState, ResourceUpdate
 
 if TYPE_CHECKING:
-    from dnd_board.rules.shared.effects import ActiveOngoingEffect, ActiveScheduledEffect, AppliedEffectResult, CalculationType, DiceAmount, EffectNode, EffectNodeId, EffectResolutionInputs, FeatureMechanics, Interaction, ModifierOperation
+    from dnd_board.rules.shared.effects import ActiveOngoingEffect, ActiveScheduledEffect, AppliedEffectResult, CalculationType, DiceAmount, EffectNode, EffectNodeId, EffectResolutionInputs, FeatureMechanics, Interaction, ModifierOperation, WeaponAttackOption
     from dnd_board.rules.shared.character_effects import ResolvedCharacterEffect
+    from dnd_board.rules.equipment import EquipmentId
+    from dnd_board.rules.progression import ProgressionGrantRecord
 
 
 class TokenKind(Enum):
@@ -73,6 +75,7 @@ class SheetSectionType(Enum):
 class ProgressionChoiceType(Enum):
     HIT_POINTS = auto()
     ABILITY_SCORE_IMPROVEMENT = auto()
+    FEAT = auto()
     SKILL_PROFICIENCIES = auto()
     EXPERTISE = auto()
     SUBCLASS = auto()
@@ -892,7 +895,6 @@ class ConditionType(Enum):
     SHIELDED = auto()
     SHIELD_OF_FAITH = auto()
     SLOWED = auto()
-    SHILLELAGH = auto()
     STABLE = auto()
     STUNNED = auto()
     SYNAPTIC_STATIC = auto()
@@ -1075,6 +1077,29 @@ class ClassType(Enum):
     WIZARD = auto()
 
 
+CLASS_HIT_DICE: dict[ClassType, int] = {
+    ClassType.ADVENTURER: 8,
+    ClassType.ARTIFICER: 8,
+    ClassType.BARD: 8,
+    ClassType.CLERIC: 8,
+    ClassType.CREATURE: 8,
+    ClassType.DRUID: 8,
+    ClassType.FIGHTER: 10,
+    ClassType.PALADIN: 10,
+    ClassType.RANGER: 10,
+    ClassType.ROGUE: 8,
+    ClassType.SORCERER: 6,
+    ClassType.WARLOCK: 8,
+    ClassType.WIZARD: 6,
+}
+
+
+class ClassOptionKind(Enum):
+    MANEUVER = "maneuver"
+    ARCANE_SHOT = "arcaneShot"
+    RUNE = "rune"
+
+
 class FightingStyleType(Enum):
     ARCHERY = auto()
     BLIND_FIGHTING = auto()
@@ -1178,6 +1203,7 @@ class AttackAction:
     activeSpellConditions: list[SpellId] | None = None
     mechanics: FeatureMechanics | None = None
     resourceCosts: tuple[ResourceCost, ...] = ()
+    weaponAttackOptions: list[WeaponAttackOption] | None = None
 
     @api_field
     def damageDie(self) -> str:
@@ -1220,6 +1246,21 @@ class RollSource:
     actionId: str
 
 
+@dataclass(frozen=True)
+class ClassOptionSelection:
+    kind: ClassOptionKind
+    option: BattleMasterManeuverType | ArcaneShotType | RuneType
+
+    def __post_init__(self) -> None:
+        option_type = {
+            ClassOptionKind.MANEUVER: BattleMasterManeuverType,
+            ClassOptionKind.ARCANE_SHOT: ArcaneShotType,
+            ClassOptionKind.RUNE: RuneType,
+        }[self.kind]
+        if not isinstance(self.option, option_type):
+            raise ValueError("Class option does not match its kind")
+
+
 @dataclass
 class CharacterClassLevel:
     name: ClassType
@@ -1227,9 +1268,14 @@ class CharacterClassLevel:
     subclass: Enum | None = None
     fightingStyle: FightingStyleType | None = None
     fightingStyles: list[FightingStyleType] | None = None
-    maneuvers: list[BattleMasterManeuverType] | None = None
-    arcaneShots: list[ArcaneShotType] | None = None
-    runes: list[RuneType] | None = None
+    classOptions: list[ClassOptionSelection] | None = None
+
+    def selected_options(self, kind: ClassOptionKind) -> list[BattleMasterManeuverType | ArcaneShotType | RuneType]:
+        return [
+            selection.option
+            for selection in self.classOptions or []
+            if selection.kind == kind
+        ]
 
 
 @dataclass
@@ -1385,6 +1431,7 @@ class SpellEntry:
 class EquipmentItem:
     id: str
     name: str
+    definitionId: EquipmentId | None = None
     equipped: bool = False
     quantity: int = 1
     weight: float = 0.0
@@ -1406,6 +1453,8 @@ class PartyMemberSheet:
     speed: int | None = None
     proficiencyBonus: int | None = None
     skills: dict[str, ProficiencyLevel] | None = None
+    baseSkills: dict[str, ProficiencyLevel] | None = None
+    progressionGrants: list[ProgressionGrantRecord] | None = None
     savingThrowProficiencies: list[AbilityType] | None = None
     proficiencies: list[str] | None = None
     feats: list[SheetFeature] | None = None
@@ -1414,8 +1463,6 @@ class PartyMemberSheet:
     resources: list[ResourceTracker] | None = None
     spells: list[SpellEntry] | None = None
     spellbook: list[SpellEntry] | None = None
-    hitPointIncreases: list[int] | None = None
-    abilityScoreImprovements: list[str] | None = None
     conditions: list[ConditionType] | None = None
     creatureTypes: list[CreatureType] | None = None
     damageResistances: list[DamageType] | None = None
@@ -1432,7 +1479,10 @@ class PartyMemberConfig:
     name: str
     image: str | None = None
     maxHp: int | None = None
+    baseMaxHp: int | None = None
+    manualMaxHpAdjustment: int = 0
     abilityScores: AbilityScores | None = None
+    baseAbilityScores: AbilityScores | None = None
     sheet: PartyMemberSheet | None = None
 
 
@@ -1534,6 +1584,7 @@ class RollPayload:
     damageSaveForcedFailureCreatureTypes: list[CreatureType] | None = None
     targetCreatureTypes: list[CreatureType] | None = None
     resourcesSpent: list[ResourceUpdate] | None = None
+    boundAttackId: str | None = None
     pendingEffect: EffectNode | None = None
     effectInputs: EffectResolutionInputs | None = None
     criticalHit: bool | None = None
@@ -1682,8 +1733,6 @@ def build_character_sheet(
     subclass_abilities = default_subclass_abilities(classes)
     abilities = [*resource_roll_abilities(resources), *feat_abilities, *subclass_abilities]
     features = default_features(classes)
-    hit_point_increases = sheet_config.hitPointIncreases if sheet_config and sheet_config.hitPointIncreases else []
-    ability_score_improvements = sheet_config.abilityScoreImprovements if sheet_config and sheet_config.abilityScoreImprovements else []
     feat_eligibility_sheet = SimpleNamespace(
         race=sheet_config.race if sheet_config and sheet_config.race else "",
         background=sheet_config.background if sheet_config and sheet_config.background else "",
@@ -1695,7 +1744,15 @@ def build_character_sheet(
         abilities=abilities,
         spells=configured_spells,
     )
-    pending_choices = default_progression_choices(classes, configured_spells, hit_point_increases, ability_score_improvements, skill_proficiencies, configured_feats, feat_eligibility_sheet, spellbook=configured_spellbook)
+    pending_choices = default_progression_choices(
+        classes,
+        configured_spells,
+        skill_proficiencies,
+        configured_feats,
+        feat_eligibility_sheet,
+        spellbook=configured_spellbook,
+        progression_grants=sheet_config.progressionGrants if sheet_config else None,
+    )
     spells = [*default_spells(classes), *default_spellcasting_spells(classes, configured_spells)]
     if sheet_config:
         features = [*(sheet_config.traits or []), *features, *(sheet_config.features or []), *(sheet_config.feats or [])]
@@ -1706,7 +1763,6 @@ def build_character_sheet(
     attacks = sheet_config.attacks if sheet_config and sheet_config.attacks else default_attacks(kind)
     attacks = default_feat_attacks(classes, equipment, attacks)
     attacks = [attack_action_with_default_mechanics(attack) for attack in attacks]
-    max_hp += default_feat_hit_point_bonus(configured_feats, total_level)
     speed = (sheet_config.speed if sheet_config and sheet_config.speed is not None else 30) + default_feat_speed_bonus(configured_feats)
 
     sheet = CharacterSheet(
@@ -1748,11 +1804,16 @@ def build_character_sheet(
         equipment=equipment,
         purse=purse,
     )
-    return replace(sheet, attacks=[effective_attack_action(sheet, attack) for attack in attacks])
+    return sheet
 
 
-def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
-    action = effective_attack_action(sheet, action)
+def build_attack_roll_payload(
+    sheet: CharacterSheet,
+    roller: str,
+    action: AttackAction,
+    weapon_option: str | None = None,
+) -> RollPayload:
+    action = effective_attack_action(sheet, action, weapon_option)
     ability_score = getattr(sheet.abilityScores, enum_key(action.ability))
     modifier_breakdown = [
         RollModifierBreakdown(source=enum_label(action.ability), value=ability_modifier(ability_score)),
@@ -1793,8 +1854,13 @@ def build_attack_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
     )
 
 
-def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
-    action = effective_attack_action(sheet, action)
+def build_damage_roll_payload(
+    sheet: CharacterSheet,
+    roller: str,
+    action: AttackAction,
+    weapon_option: str | None = None,
+) -> RollPayload:
+    action = effective_attack_action(sheet, action, weapon_option)
     direct_damage = None
     if action.mechanics is not None:
         from dnd_board.rules.shared.character_effects import direct_damage_effect_at
@@ -1856,10 +1922,15 @@ def build_damage_roll_payload(sheet: CharacterSheet, roller: str, action: Attack
     )
 
 
-def build_combined_attack_roll_payload(sheet: CharacterSheet, roller: str, action: AttackAction) -> RollPayload:
-    action = effective_attack_action(sheet, action)
-    attack_roll = build_attack_roll_payload(sheet, roller, action)
-    damage_roll = build_damage_roll_payload(sheet, roller, action)
+def build_combined_attack_roll_payload(
+    sheet: CharacterSheet,
+    roller: str,
+    action: AttackAction,
+    weapon_option: str | None = None,
+) -> RollPayload:
+    action = effective_attack_action(sheet, action, weapon_option)
+    attack_roll = build_attack_roll_payload(sheet, roller, action, weapon_option)
+    damage_roll = build_damage_roll_payload(sheet, roller, action, weapon_option)
     pending_effect = None
     effect_inputs = None
     effect_node_ids = []
@@ -1930,10 +2001,14 @@ def attack_action_with_default_mechanics(action: AttackAction) -> AttackAction:
     )
 
 
-def effective_attack_action(sheet: CharacterSheet, action: AttackAction) -> AttackAction:
-    if shillelagh_applies_to_attack(sheet, action):
-        return shillelagh_attack_action(sheet, action)
-    return action
+def effective_attack_action(
+    sheet: CharacterSheet,
+    action: AttackAction,
+    weapon_option: str | None = None,
+) -> AttackAction:
+    from dnd_board.rules.shared.weapon_effects import ongoing_weapon_attack
+
+    return ongoing_weapon_attack(sheet, action, weapon_option)
 
 
 def weapon_attack_is_wielded(sheet: CharacterSheet, action: AttackAction) -> bool:
@@ -1953,157 +2028,6 @@ def attack_equipment_item(sheet: CharacterSheet, action: AttackAction) -> Equipm
         ),
         None,
     )
-
-
-def true_strike_weapon_attacks(sheet: CharacterSheet) -> list[AttackAction]:
-    return [
-        action
-        for action in sheet.attacks
-        if action.proficient
-        and action.attackKind == AttackKind.STANDARD
-        and action.attackType != AttackActionType.UNARMED_STRIKE
-        and weapon_attack_is_wielded(sheet, action)
-        and action.damageDiceCount > 0
-    ]
-
-
-def true_strike_weapon_attack(sheet: CharacterSheet, attack_id: str) -> AttackAction | None:
-    return next((action for action in true_strike_weapon_attacks(sheet) if action.id == attack_id), None)
-
-
-def true_strike_action_id(attack: AttackAction, damage_type: DamageType, roll_type: RollResolutionMode) -> str:
-    return f"true-strike-{enum_key(roll_type)}-{attack.id}-{enum_key(damage_type)}"
-
-
-def true_strike_attack_action(sheet: CharacterSheet, spell: SpellEntry, attack: AttackAction, damage_type: DamageType) -> AttackAction:
-    return replace(
-        attack,
-        ability=spell_casting_ability(sheet, spell),
-        damageType=damage_type,
-        activation=spell.castingTime,
-        activeSpellConditions=unique_spell_ids([*(attack.activeSpellConditions or []), SpellId.TRUE_STRIKE]),
-    )
-
-
-def build_true_strike_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, attack: AttackAction, damage_type: DamageType) -> RollPayload:
-    action = true_strike_attack_action(sheet, spell, attack, damage_type)
-    payload = build_attack_roll_payload(sheet, roller, action)
-    return replace(
-        payload,
-        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=true_strike_action_id(attack, damage_type, RollResolutionMode.ATTACK_VS_ARMOR_CLASS)),
-        sourceLabel=f"{enum_label(spell.name)}: {attack.name}",
-        label=f"Attack {attack.name}",
-        damageType=damage_type,
-    )
-
-
-def build_true_strike_damage_roll_payload(sheet: CharacterSheet, roller: str, spell: SpellEntry, attack: AttackAction, damage_type: DamageType) -> RollPayload:
-    action = true_strike_attack_action(sheet, spell, attack, damage_type)
-    payload = build_damage_roll_payload(sheet, roller, action)
-    radiant_bonus = true_strike_radiant_bonus_component(sheet, spell)
-    components = [
-        RollDamageComponent(
-            damageType=payload.damageType or damage_type,
-            dice=payload.dice,
-            diceType=payload.diceType,
-            die=payload.die,
-            modifier=payload.modifier,
-            modifierBreakdown=payload.modifierBreakdown,
-            total=payload.total,
-        )
-    ]
-    if radiant_bonus is not None:
-        components.append(radiant_bonus)
-    return replace(
-        payload,
-        source=RollSource(section=SheetSectionType.SPELLS, sourceId=enum_key(spell.id), actionId=true_strike_action_id(attack, damage_type, RollResolutionMode.APPLY_DAMAGE)),
-        sourceLabel=f"{enum_label(spell.name)}: {attack.name}",
-        label=f"Damage {attack.name}",
-        damageType=damage_type,
-        damageComponents=components if len(components) > 1 else None,
-        total=sum(component.total for component in components),
-        dice=[roll for component in components for roll in component.dice],
-        die="+".join(component.die for component in components),
-    )
-
-
-def true_strike_radiant_bonus_component(sheet: CharacterSheet, spell: SpellEntry) -> RollDamageComponent | None:
-    if spell.mechanics is None:
-        return None
-    from dnd_board.rules.shared.character_effects import direct_damage_effect_at, roll_effect_amount
-
-    effect = direct_damage_effect_at(spell.mechanics, 0)
-    if effect is None:
-        return None
-    dice, dice_type, modifier_breakdown, total = roll_effect_amount(effect.amount, effect.scaling, sheet, spell, None)
-    if not dice:
-        return None
-    return RollDamageComponent(
-        damageType=effect.damageType,
-        dice=dice,
-        diceType=dice_type,
-        die=dice_formula(len(dice), dice_type),
-        modifier=sum(part.value for part in modifier_breakdown),
-        modifierBreakdown=modifier_breakdown,
-        total=total,
-    )
-
-
-SHILLELAGH_WEAPON_IDS: tuple[str, ...] = ("club", "quarterstaff")
-
-
-def shillelagh_weapon_attacks(sheet: CharacterSheet) -> list[AttackAction]:
-    return [
-        action
-        for action in sheet.attacks
-        if action.proficient
-        and action.attackKind == AttackKind.STANDARD
-        and action.id in SHILLELAGH_WEAPON_IDS
-        and weapon_attack_is_wielded(sheet, action)
-    ]
-
-
-def shillelagh_applies_to_attack(sheet: CharacterSheet, action: AttackAction) -> bool:
-    return (
-        SpellId.TRUE_STRIKE not in (action.activeSpellConditions or [])
-        and ConditionType.SHILLELAGH in sheet.conditions
-        and any(candidate.id == action.id for candidate in shillelagh_weapon_attacks(sheet))
-    )
-
-
-def shillelagh_attack_action(sheet: CharacterSheet, action: AttackAction) -> AttackAction:
-    return attack_action_with_default_mechanics(replace(
-        action,
-        ability=shillelagh_casting_ability(sheet),
-        damageDiceCount=shillelagh_damage_dice_count(sheet),
-        damageDiceType=shillelagh_damage_dice_type(sheet),
-        damageType=DamageType.FORCE,
-        activeSpellConditions=unique_spell_ids([*(action.activeSpellConditions or []), SpellId.SHILLELAGH]),
-        mechanics=None,
-    ))
-
-
-def shillelagh_casting_ability(sheet: CharacterSheet) -> AbilityType:
-    spell = next((candidate for candidate in sheet.spells if candidate.id == SpellId.SHILLELAGH), None)
-    if spell is not None:
-        return spell_casting_ability(sheet, spell)
-    return AbilityType.WISDOM
-
-
-def shillelagh_damage_dice_count(sheet: CharacterSheet) -> int:
-    total_level = sum(character_class.level for character_class in sheet.classes) or 1
-    return 2 if total_level >= 17 else 1
-
-
-def shillelagh_damage_dice_type(sheet: CharacterSheet) -> DiceType:
-    total_level = sum(character_class.level for character_class in sheet.classes) or 1
-    if total_level >= 17:
-        return DiceType.D6
-    if total_level >= 11:
-        return DiceType.D12
-    if total_level >= 5:
-        return DiceType.D10
-    return DiceType.D8
 
 
 def unique_spell_ids(spells: list[SpellId]) -> list[SpellId]:
@@ -3201,11 +3125,9 @@ def apply_condition_outcomes(current_conditions: list[ConditionType], outcomes: 
     for condition in ConditionType:
         if any(f"gains {enum_label(condition)}" in outcome for outcome in outcomes) and condition not in next_conditions:
             next_conditions.append(condition)
-    if ConditionType.PROTECTION_FROM_POISON in next_conditions and ConditionType.POISONED in next_conditions:
-        next_conditions.remove(ConditionType.POISONED)
-    if ConditionType.DEAD in next_conditions:
-        next_conditions = [condition for condition in next_conditions if condition != ConditionType.UNCONSCIOUS]
-    return next_conditions
+    from dnd_board.rules.shared.condition_effects import normalize_conditions
+
+    return normalize_conditions(next_conditions)
 
 
 def generated_ability_scores(seed: str) -> AbilityScores:
@@ -3401,6 +3323,7 @@ def apply_equipment_slot_overrides(equipment: list[EquipmentItem], overrides: di
         EquipmentItem(
             id=item.id,
             name=item.name,
+            definitionId=item.definitionId,
             equipped=overrides.get(item.id, item.slot) != EquipmentSlot.CARRIED,
             quantity=item.quantity,
             weight=item.weight,
@@ -3427,12 +3350,6 @@ def default_feat_abilities(classes: list[CharacterClassLevel], feats: list[Sheet
     from dnd_board.rules.feats import feat_abilities
 
     return feat_abilities(classes, feats)
-
-
-def default_feat_hit_point_bonus(feats: list[SheetFeature], total_level: int) -> int:
-    from dnd_board.rules.feats import feat_hit_point_bonus
-
-    return feat_hit_point_bonus(feats, total_level)
 
 
 def default_feat_speed_bonus(feats: list[SheetFeature]) -> int:
@@ -3500,17 +3417,24 @@ def hydrated_spell_entries(spells: list[SpellEntry]) -> list[SpellEntry]:
 def default_progression_choices(
     classes: list[CharacterClassLevel],
     spells: list[SpellEntry],
-    hit_point_increases: list[int],
-    ability_score_improvements: list[str],
     skill_proficiencies: dict[str, ProficiencyLevel] | None = None,
     feats: list[SheetFeature] | None = None,
     feat_eligibility_sheet=None,
     *,
     spellbook: list[SpellEntry] | None = None,
+    progression_grants: list[ProgressionGrantRecord] | None = None,
 ) -> list[ProgressionChoice]:
     from dnd_board.rules.progression import progression_choices
 
-    return progression_choices(classes, spells, hit_point_increases, ability_score_improvements, skill_proficiencies or {}, feats, feat_eligibility_sheet, spellbook=spellbook)
+    return progression_choices(
+        classes,
+        spells,
+        skill_proficiencies or {},
+        feats,
+        feat_eligibility_sheet,
+        spellbook=spellbook,
+        progression_grants=progression_grants,
+    )
 
 
 def default_armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:
@@ -3651,7 +3575,9 @@ def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> An
     if not isinstance(raw_fields, dict):
         return None
 
-    from dnd_board.rules.shared.effects import AppliedEffectResult, EffectNode, FeatureMechanics, Interaction
+    from dnd_board.rules.shared.effects import AppliedEffectResult, EffectNode, FeatureMechanics, Interaction, WeaponAttackOption
+    from dnd_board.rules.equipment import EquipmentId
+    from dnd_board.rules.progression import ProgressionGrantRecord
 
     type_hints = get_type_hints(
         model_type,
@@ -3660,6 +3586,9 @@ def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> An
             "EffectNode": EffectNode,
             "FeatureMechanics": FeatureMechanics,
             "Interaction": Interaction,
+            "EquipmentId": EquipmentId,
+            "ProgressionGrantRecord": ProgressionGrantRecord,
+            "WeaponAttackOption": WeaponAttackOption,
         },
     )
     kwargs: dict[str, Any] = {}
@@ -3714,6 +3643,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
     from dnd_board.rules.shared.combat_superiority import BattleMasterResourceType, MonsterHunterSuperiorityActionType, ScoutSuperiorityActionType
     from dnd_board.rules.shared.effects import effect_model_types
     from dnd_board.rules.shared.resources import resource_model_types
+    from dnd_board.rules.progression import progression_model_types
 
     return {
         type_.__name__: type_
@@ -3734,6 +3664,8 @@ def typed_json_registry() -> dict[str, type[Any]]:
             FighterSubclassResourceType,
             FighterSubclassRollActionType,
             CharacterClassLevel,
+            ClassOptionKind,
+            ClassOptionSelection,
             ClassType,
             CurrencyUnit,
             CreatureType,
@@ -3771,6 +3703,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             RollModifierEffectTarget,
             RollModifierType,
             RollResolutionMode,
+            RollSource,
             ResolutionInterceptorPrompt,
             ResolutionInterceptorTrigger,
             ResolutionInterceptorType,
@@ -3803,6 +3736,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             SpellTargeting,
             SheetFeature,
             SheetAbility,
+            SheetSectionType,
             ScoutSuperiorityActionType,
             TimeEconomy,
             WeaponProperty,
@@ -3814,6 +3748,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             WizardSubclassType,
             *effect_model_types(),
             *resource_model_types(),
+            *progression_model_types(),
         ]
     }
 

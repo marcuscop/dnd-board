@@ -6,6 +6,10 @@ from enum import Enum, auto
 from dnd_board.character_sheet import (
     BattleMasterManeuverType,
     CharacterClassLevel,
+    ClassOptionKind,
+    ClassType,
+    FightingStyleType,
+    ProgressionChoiceType,
     AbilityType,
     ConditionType,
     RollModifierType,
@@ -48,6 +52,12 @@ from dnd_board.rules.shared.effects import (
     SavingThrow,
     SavingThrowEffect,
 )
+from dnd_board.rules.shared.progression_definitions import (
+    ClassOptionProgressionDefinition,
+    ProgressionChoiceId,
+    ProgressionChoicePresentation,
+)
+from dnd_board.rules.classes.fighter.base import FighterSubclassType
 
 
 class BattleMasterFeatureType(Enum):
@@ -322,6 +332,35 @@ def battle_master_features(character_class: CharacterClassLevel, fighter_level_v
         for progression in BATTLE_MASTER_FEATURE_PROGRESSION
         if fighter_level_value >= progression.minimum_level
     ]
+
+
+def battle_master_maneuver_grant_levels(fighter_level_value: int) -> tuple[int, ...]:
+    levels: list[int] = []
+    for minimum_level, total_count in ((3, 3), (7, 5), (10, 7), (15, 9)):
+        if fighter_level_value >= minimum_level:
+            levels.extend([minimum_level] * (total_count - len(levels)))
+    return tuple(levels)
+
+
+BATTLE_MASTER_MANEUVER_PROGRESSION_DEFINITION = ClassOptionProgressionDefinition(
+    ProgressionChoiceId.BATTLE_MASTER_MANEUVERS,
+    ProgressionChoicePresentation(
+        ProgressionChoiceType.BATTLE_MASTER_MANEUVERS,
+        "Battle Master Maneuvers",
+        "Choose maneuvers known for Battle Master or Superior Technique.",
+    ),
+    ClassType.FIGHTER,
+    ClassOptionKind.MANEUVER,
+    tuple(BattleMasterManeuverType),
+    tuple(
+        (maneuver, battle_master_maneuver_label(maneuver))
+        for maneuver in BattleMasterManeuverType
+    ),
+    1,
+    tuple(battle_master_maneuver_grant_levels(level) for level in range(1, 21)),
+    additionalFightingStyle=FightingStyleType.SUPERIOR_TECHNIQUE,
+    grantSubclass=FighterSubclassType.BATTLE_MASTER,
+)
 
 
 def battle_master_feature(progression: BattleMasterFeatureProgression) -> SheetFeature:

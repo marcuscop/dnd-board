@@ -67,6 +67,7 @@ from dnd_board.rules.shared.effects import (
     EffectParticipantBindings,
     EffectResolutionInputs,
     EffectResultValue,
+    EffectSelectionBinding,
     EndingConditionType,
     EffectTarget,
     FeatureMechanics,
@@ -79,6 +80,7 @@ from dnd_board.rules.shared.effects import (
     MovementType,
     OngoingEffect,
     OngoingEffectId,
+    OngoingReplacementPolicy,
     Modifier,
     ModifierScope,
     OwnerWearsArmorPredicate,
@@ -96,6 +98,10 @@ from dnd_board.rules.shared.effects import (
     SavingThrow,
     SavingThrowEffect,
     ScalingBasis,
+    SelectionId,
+    SelectWeaponEffect,
+    EquipmentInstanceId,
+    WeaponEligibility,
     ScheduledEffect,
     ScheduledEffectId,
     SequenceEffect,
@@ -111,6 +117,7 @@ from dnd_board.rules.shared.effects import (
     SourceDamageAbilityModifierPredicate,
     SourceIsAttackPredicate,
     SourceIsSpellPredicate,
+    SourceSpellPredicate,
     SourceUsesTimeEconomyPredicate,
     SourceWeaponCategoryPredicate,
     SavingThrowAbilityPredicate,
@@ -238,6 +245,10 @@ class CharacterEffectExecutionContext:
         self.criticalDamagePreparedNodes: set[EffectNodeId] = set()
         self.pendingDamages: dict[EffectNodeId, PendingDamage] = {}
         self.amountInputs = {entry.effectNodeId: entry.amount for entry in roll.effectInputs.amounts} if roll.effectInputs else {}
+        self.selectionInputs = {
+            entry.effectNodeId: entry
+            for entry in roll.effectInputs.selections
+        } if roll.effectInputs else {}
         self.distanceFeet = distance_feet
         self.attackerVisible = attacker_visible
         self.lastSavingThrow: SavingThrow | None = None
@@ -653,6 +664,10 @@ class CharacterEffectExecutionContext:
             elif isinstance(predicate, SourceIsSpellPredicate):
                 if self.roll.source.section != SheetSectionType.SPELLS:
                     return False
+            elif isinstance(predicate, SourceSpellPredicate):
+                source_spell = self.source_spell()
+                if (source_spell is not None and source_spell.id == predicate.spell) != predicate.expected:
+                    return False
             elif isinstance(predicate, SourceHasComponentPredicate):
                 source_spell = self.source_spell()
                 if source_spell is None or predicate.component not in source_spell.components:
@@ -788,7 +803,8 @@ class CharacterEffectExecutionContext:
     def source_attack(self):
         if self.source is None:
             return None
-        return next((attack for attack in self.source.attacks if attack.id == self.roll.source.sourceId), None)
+        attack_id = self.roll.boundAttackId or self.roll.source.sourceId
+        return next((attack for attack in self.source.attacks if attack.id == attack_id), None)
 
     def source_time_economy(self):
         spell = self.source_spell()
@@ -803,6 +819,27 @@ class CharacterEffectExecutionContext:
     def choose_effects(self, choice: ChoiceEffect) -> list[EffectNode]:
         raise TypeError("Effect choices must be selected before rolling")
 
+    def select_weapon(
+        self,
+        node_id: EffectNodeId,
+        selection: SelectionId,
+        eligibility: WeaponEligibility,
+    ) -> EffectParticipantBindings:
+        from dnd_board.rules.shared.weapon_effects import selected_weapon_attack
+
+        selected = self.selectionInputs.get(node_id)
+        if selected is None or selected.selection != selection:
+            raise ValueError("Weapon selection must be resolved before applying its effect")
+        source = self.source or self.target
+        if selected_weapon_attack(source, selected.equipmentInstanceId.value, eligibility) is None:
+            raise ValueError("Selected weapon is not eligible for this effect")
+        bindings = tuple(
+            binding
+            for binding in self._bindings.selections
+            if binding.selection != selection
+        ) + (EffectSelectionBinding(selection, selected.equipmentInstanceId),)
+        return replace(self._bindings, selections=bindings)
+
     def schedule_effect(self, node_id: EffectNodeId, effect: ScheduledEffect) -> None:
         source_sheet_id = self.source.id if self.source is not None else self.target.id
         self.scheduledEffects.append(ActiveScheduledEffect(
@@ -816,12 +853,25 @@ class CharacterEffectExecutionContext:
 
     def install_ongoing_effect(self, node_id: EffectNodeId, effect: OngoingEffect) -> None:
         source_sheet_id = self.source.id if self.source is not None else self.target.id
+        source_spell = self.source_spell()
+        if effect.replacement == OngoingReplacementPolicy.SAME_SOURCE:
+            source_spell_id = source_spell.id if source_spell is not None else None
+            self.ongoingEffects[:] = [
+                active
+                for active in self.ongoingEffects
+                if not (
+                    active.sourceSheetId == source_sheet_id
+                    and active.sourceSpellId == source_spell_id
+                )
+            ]
         self.ongoingEffects.append(ActiveOngoingEffect(
             id=OngoingEffectId(self.roll.createdAt, node_id),
             sourceSheetId=source_sheet_id,
             targetSheetId=self.target.id,
             sourceLabel=self.roll.sourceLabel,
             effect=effect,
+            bindings=self._bindings.selections,
+            sourceSpellId=source_spell.id if source_spell is not None else None,
         ))
 
 
@@ -943,6 +993,7 @@ def ongoing_effects_after_ending(
     *,
     source_sheet_id: str | None = None,
     target_sheet_id: str | None = None,
+    equipment_instance_id: str | None = None,
 ) -> list[ActiveOngoingEffect]:
     return [
         active
@@ -950,6 +1001,13 @@ def ongoing_effects_after_ending(
         if not (
             (source_sheet_id is None or active.sourceSheetId == source_sheet_id)
             and (target_sheet_id is None or active.targetSheetId == target_sheet_id)
+            and (
+                equipment_instance_id is None
+                or any(
+                    binding.equipmentInstanceId.value == equipment_instance_id
+                    for binding in active.bindings
+                )
+            )
             and any(condition.endingCondition == ending for condition in active.effect.endingConditions)
         )
     ]
@@ -982,6 +1040,8 @@ def activated_effect_label(effect: EffectNode | None, fallback: str) -> str:
 
 def direct_target_creature_types(effect: EffectNode | None) -> list[character_sheet.CreatureType] | None:
     if isinstance(effect, ActivatedEffect):
+        return direct_target_creature_types(effect.effect)
+    if isinstance(effect, SelectWeaponEffect):
         return direct_target_creature_types(effect.effect)
     if isinstance(effect, ConditionalEffect):
         for predicate in effect.predicates:
@@ -1028,6 +1088,8 @@ def first_saving_throw_effect(effect: EffectNode | None) -> SavingThrowEffect | 
         children = [effect.effect]
     elif isinstance(effect, ChoiceEffect):
         children = [choice.effect for choice in effect.choices]
+    elif isinstance(effect, SelectWeaponEffect):
+        children = [effect.effect]
     for child in children:
         if (saving_throw := first_saving_throw_effect(child)) is not None:
             return saving_throw
@@ -1121,6 +1183,14 @@ def next_unresolved_saving_throw(
             predicate_matches=predicate_matches,
             node_id=node_id.child(0),
         )
+    if isinstance(effect, SelectWeaponEffect):
+        return next_unresolved_saving_throw(
+            effect.effect,
+            outcomes,
+            attack_outcome=attack_outcome,
+            predicate_matches=predicate_matches,
+            node_id=node_id.child(0),
+        )
     return None
 
 
@@ -1142,6 +1212,8 @@ def first_attack_roll_effect(effect: EffectNode | None) -> AttackRollEffect | No
         children = [effect.effect]
     elif isinstance(effect, ChoiceEffect):
         children = [choice.effect for choice in effect.choices]
+    elif isinstance(effect, SelectWeaponEffect):
+        children = [effect.effect]
     for child in children:
         if (attack := first_attack_roll_effect(child)) is not None:
             return attack
@@ -1169,6 +1241,8 @@ def first_contested_check_effect(
         children = [(0, effect.effect)]
     elif isinstance(effect, ChoiceEffect):
         children = [(index, choice.effect) for index, choice in enumerate(effect.choices)]
+    elif isinstance(effect, SelectWeaponEffect):
+        children = [(0, effect.effect)]
     for index, child in children:
         if (found := first_contested_check_effect(child, node_id.child(index))) is not None:
             return found
@@ -1206,6 +1280,8 @@ def distinct_damage_effects(effect: EffectNode | None) -> list[DamageEffect]:
             visit(node.onTargetWin)
         elif isinstance(node, RepeatedEffect):
             visit(node.effect)
+        elif isinstance(node, SelectWeaponEffect):
+            visit(node.effect)
 
     visit(effect)
     return found
@@ -1234,6 +1310,8 @@ def damage_effect_nodes(
         children = [(0, effect.effect)]
     elif isinstance(effect, ChoiceEffect):
         children = [(index, choice.effect) for index, choice in enumerate(effect.choices)]
+    elif isinstance(effect, SelectWeaponEffect):
+        children = [(0, effect.effect)]
     return [
         found
         for index, child in children
@@ -1267,6 +1345,8 @@ def damage_effect_roll_groups(
     elif isinstance(effect, ChoiceEffect):
         branches = [(index, choice.effect) for index, choice in enumerate(effect.choices)]
     elif isinstance(effect, RepeatedEffect):
+        return damage_effect_roll_groups(effect.effect, node_id.child(0))
+    elif isinstance(effect, SelectWeaponEffect):
         return damage_effect_roll_groups(effect.effect, node_id.child(0))
     groups: list[tuple[list[EffectNodeId], DamageEffect]] = []
     for index, branch in branches:
@@ -1322,6 +1402,8 @@ def first_applied_effect(effect: EffectNode | None, effect_type: type[AppliedEff
             ),
             None,
         )
+    if isinstance(effect, SelectWeaponEffect):
+        return first_applied_effect(effect.effect, effect_type)
     return None
 
 
@@ -1349,6 +1431,8 @@ def applied_effect_targets(effect: EffectNode | None) -> set[EffectTarget]:
         return applied_effect_targets(effect.effect)
     if isinstance(effect, ChoiceEffect):
         return set().union(*(applied_effect_targets(choice.effect) for choice in effect.choices))
+    if isinstance(effect, SelectWeaponEffect):
+        return applied_effect_targets(effect.effect)
     return set()
 
 
@@ -1381,6 +1465,8 @@ def added_condition_types(effect: EffectNode | None) -> list[ConditionType]:
         elif isinstance(node, ChoiceEffect):
             for choice in node.choices:
                 visit(choice.effect)
+        elif isinstance(node, SelectWeaponEffect):
+            visit(node.effect)
 
     visit(effect)
     return conditions
@@ -1414,6 +1500,8 @@ def condition_change_effects(effect: EffectNode | None) -> list[ConditionChangeE
         elif isinstance(node, ChoiceEffect):
             for choice in node.choices:
                 visit(choice.effect)
+        elif isinstance(node, SelectWeaponEffect):
+            visit(node.effect)
 
     visit(effect)
     return changes
@@ -1464,6 +1552,9 @@ def _reduced_damage_effect_node(effect: EffectNode, remaining: int) -> tuple[Eff
             replace(choice, effect=_reduced_damage_effect_node(choice.effect, remaining)[0])
             for choice in effect.choices
         ]), remaining
+    if isinstance(effect, SelectWeaponEffect):
+        child, remaining = _reduced_damage_effect_node(effect.effect, remaining)
+        return replace(effect, effect=child), remaining
     return effect, remaining
 
 
@@ -1510,6 +1601,8 @@ def resolved_damage_totals_effect_node(effect: EffectNode, totals: dict[characte
             replace(choice, effect=resolved_damage_totals_effect_node(choice.effect, totals))
             for choice in effect.choices
         ])
+    if isinstance(effect, SelectWeaponEffect):
+        return replace(effect, effect=resolved_damage_totals_effect_node(effect.effect, totals))
     return effect
 
 
@@ -1563,6 +1656,8 @@ def resolved_amount_effect_node(effect: EffectNode, rolled_amount: int) -> Effec
             replace(choice, effect=resolved_amount_effect_node(choice.effect, rolled_amount))
             for choice in effect.choices
         ])
+    if isinstance(effect, SelectWeaponEffect):
+        return replace(effect, effect=resolved_amount_effect_node(effect.effect, rolled_amount))
     return effect
 
 

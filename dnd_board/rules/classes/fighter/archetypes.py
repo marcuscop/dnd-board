@@ -7,6 +7,8 @@ from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
     ArcaneShotType,
+    ClassOptionKind,
+    ClassType,
     ConditionType,
     DamageType,
     DiceType,
@@ -16,6 +18,7 @@ from dnd_board.character_sheet import (
     RollModifierType,
     RollResolutionMode,
     RuneType,
+    ProgressionChoiceType,
     SheetAbility,
     SheetFeature,
     SpellConeArea,
@@ -59,6 +62,17 @@ from dnd_board.rules.shared.effects import (
     SequenceEffect,
 )
 from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId, spell_slot_resource_id
+from dnd_board.rules.shared.progression_definitions import (
+    ClassOptionProgressionDefinition,
+    ProgressionChoiceId,
+    ProgressionChoicePresentation,
+    SpellChoiceProgressionDefinition,
+    SpellCollection,
+    SpellConstraint,
+    SpellPool,
+    SpellProgressionDefinition,
+    grant_minimum_levels,
+)
 
 
 class ChampionFeatureType(Enum):
@@ -1862,6 +1876,8 @@ def normalized_spellcasting_spells(classes, spells: list[SpellEntry]) -> list[Sp
         return spells
     return [
         normalized_eldritch_knight_spell(spell)
+        if spell.source == SpellSource.ELDRITCH_KNIGHT
+        else spell
         for spell in spells
     ]
 
@@ -1871,7 +1887,7 @@ def normalized_eldritch_knight_spell(spell: SpellEntry) -> SpellEntry:
         id=spell.id,
         name=spell.name,
         status=SpellStatus(
-            source=spell.source or SpellSource.ELDRITCH_KNIGHT,
+            source=SpellSource.ELDRITCH_KNIGHT,
             castingAbility=AbilityType.INTELLIGENCE,
             resourceId=spell.resourceId,
             reset=spell.reset,
@@ -1951,46 +1967,6 @@ def eldritch_knight_flexible_spell_count(spells: list[SpellEntry]) -> int:
     return sum(1 for spell in spells if spell.level > 0 and not is_eldritch_knight_school_spell(spell))
 
 
-def is_eldritch_knight_spell_selection_valid(fighter_level_value: int, spells: list[SpellEntry]) -> bool:
-    if fighter_level_value < 3:
-        return not spells
-    progression = eldritch_knight_spellcasting(fighter_level_value)
-    max_spell_level = eldritch_knight_max_spell_level(fighter_level_value)
-    cantrips = [spell for spell in spells if spell.level == 0]
-    leveled_spells = [spell for spell in spells if spell.level > 0]
-    return (
-        len(cantrips) == progression.cantrips_known
-        and len(leveled_spells) == progression.spells_known
-        and all(spell.level <= max_spell_level for spell in leveled_spells)
-        and eldritch_knight_flexible_spell_count(leveled_spells) <= eldritch_knight_flexible_spell_limit(fighter_level_value)
-    )
-
-
-def pruned_eldritch_knight_spells(fighter_level_value: int, spells: list[SpellEntry]) -> list[SpellEntry]:
-    if fighter_level_value < 3:
-        return []
-    progression = eldritch_knight_spellcasting(fighter_level_value)
-    max_spell_level = eldritch_knight_max_spell_level(fighter_level_value)
-    flexible_limit = eldritch_knight_flexible_spell_limit(fighter_level_value)
-    cantrips: list[SpellEntry] = []
-    leveled_spells: list[SpellEntry] = []
-    flexible_count = 0
-    for spell in spells:
-        if spell.level == 0:
-            if len(cantrips) < progression.cantrips_known:
-                cantrips.append(spell)
-            continue
-        if spell.level > max_spell_level or len(leveled_spells) >= progression.spells_known:
-            continue
-        if is_eldritch_knight_school_spell(spell):
-            leveled_spells.append(spell)
-            continue
-        if flexible_count < flexible_limit:
-            leveled_spells.append(spell)
-            flexible_count += 1
-    return [*cantrips, *leveled_spells]
-
-
 def is_eldritch_knight_school_spell(spell: SpellEntry) -> bool:
     return spell.school in {SpellSchool.ABJURATION, SpellSchool.EVOCATION}
 
@@ -2017,12 +1993,67 @@ def resource_ability(
 
 
 def selected_arcane_shots(character_class) -> list[ArcaneShotType]:
-    return character_class.arcaneShots or list(ArcaneShotType)
+    selected = character_class.selected_options(ClassOptionKind.ARCANE_SHOT)
+    return [shot for shot in selected if isinstance(shot, ArcaneShotType)] or list(ArcaneShotType)
 
 
 def eldritch_knight_spellcasting(fighter_level_value: int) -> EldritchKnightSpellcastingProgression:
     eligible_level = max(level for level in ELDRITCH_KNIGHT_SPELLCASTING if fighter_level_value >= level)
     return ELDRITCH_KNIGHT_SPELLCASTING[eligible_level]
+
+
+_ELDRITCH_KNIGHT_CANTRIP_COUNTS = tuple(
+    eldritch_knight_spellcasting(level).cantrips_known if level >= 3 else 0
+    for level in range(1, 21)
+)
+_ELDRITCH_KNIGHT_SPELL_COUNTS = tuple(
+    eldritch_knight_spellcasting(level).spells_known if level >= 3 else 0
+    for level in range(1, 21)
+)
+
+ELDRITCH_KNIGHT_SPELL_PROGRESSION_DEFINITION = SpellProgressionDefinition(
+    ProgressionChoiceId.ELDRITCH_KNIGHT_SPELLS,
+    ProgressionChoicePresentation(
+        ProgressionChoiceType.SPELLS,
+        "Eldritch Knight Spells",
+        "Choose known Eldritch Knight cantrips and wizard spells from the curated starter catalog.",
+    ),
+    3,
+    (
+        SpellChoiceProgressionDefinition(
+            SpellPool.CLASS_SPELL_LIST,
+            _ELDRITCH_KNIGHT_CANTRIP_COUNTS,
+            (SpellConstraint.CANTRIP,),
+            SpellCollection.KNOWN,
+            SpellSource.ELDRITCH_KNIGHT,
+            poolClass=ClassType.WIZARD,
+            supplementalSpells=tuple(ELDRITCH_KNIGHT_SPELL_CATALOG),
+            supplementalSpellEntries=tuple(ELDRITCH_KNIGHT_SPELL_CATALOG.values()),
+            grantMinimumLevels=grant_minimum_levels(_ELDRITCH_KNIGHT_CANTRIP_COUNTS, 3),
+        ),
+        SpellChoiceProgressionDefinition(
+            SpellPool.CLASS_SPELL_LIST,
+            _ELDRITCH_KNIGHT_SPELL_COUNTS,
+            (SpellConstraint.NON_CANTRIP,),
+            SpellCollection.KNOWN,
+            SpellSource.ELDRITCH_KNIGHT,
+            poolClass=ClassType.WIZARD,
+            supplementalSpells=tuple(ELDRITCH_KNIGHT_SPELL_CATALOG),
+            supplementalSpellEntries=tuple(ELDRITCH_KNIGHT_SPELL_CATALOG.values()),
+            maximumSpellLevelsByClassLevel=tuple(
+                eldritch_knight_max_spell_level(level)
+                for level in range(1, 21)
+            ),
+            grantMinimumLevels=grant_minimum_levels(_ELDRITCH_KNIGHT_SPELL_COUNTS, 3),
+            preferredSchools=(SpellSchool.ABJURATION, SpellSchool.EVOCATION),
+            unrestrictedCountsByClassLevel=tuple(
+                eldritch_knight_flexible_spell_limit(level) if level >= 3 else 0
+                for level in range(1, 21)
+            ),
+        ),
+    ),
+    FighterSubclassType.ELDRITCH_KNIGHT,
+)
 
 
 def eldritch_knight_spell_slot_resources(
@@ -2174,12 +2205,71 @@ def arcane_shot_description(arcane_shot: ArcaneShotType, fighter_level_value: in
 
 
 def selected_runes(character_class, fighter_level_value: int) -> list[RuneType]:
-    configured = character_class.runes or list(RuneType)
+    selected = character_class.selected_options(ClassOptionKind.RUNE)
+    configured = [rune for rune in selected if isinstance(rune, RuneType)] or list(RuneType)
     return [rune for rune in configured if rune_minimum_level(rune) <= fighter_level_value]
 
 
 def rune_minimum_level(rune: RuneType) -> int:
     return 7 if rune in {RuneType.HILL_RUNE, RuneType.STORM_RUNE} else 3
+
+
+def arcane_archer_shot_grant_levels(fighter_level_value: int) -> tuple[int, ...]:
+    if fighter_level_value < 3:
+        return ()
+    levels = [3, 3]
+    if fighter_level_value >= 7:
+        levels.append(7)
+    if fighter_level_value >= 15:
+        levels.append(15)
+    return tuple(levels)
+
+
+def rune_knight_rune_grant_levels(fighter_level_value: int) -> tuple[int, ...]:
+    if fighter_level_value < 3:
+        return ()
+    levels = [3, 3]
+    if fighter_level_value >= 7:
+        levels.append(7)
+    if fighter_level_value >= 10:
+        levels.append(10)
+    if fighter_level_value >= 15:
+        levels.append(15)
+    return tuple(levels)
+
+
+ARCANE_ARCHER_SHOT_PROGRESSION_DEFINITION = ClassOptionProgressionDefinition(
+    ProgressionChoiceId.ARCANE_ARCHER_SHOTS,
+    ProgressionChoicePresentation(
+        ProgressionChoiceType.ARCANE_SHOTS,
+        "Arcane Shot Options",
+        "Choose Arcane Shot options known.",
+    ),
+    ClassType.FIGHTER,
+    ClassOptionKind.ARCANE_SHOT,
+    tuple(ArcaneShotType),
+    tuple((shot, enum_label(shot)) for shot in ArcaneShotType),
+    3,
+    tuple(arcane_archer_shot_grant_levels(level) for level in range(1, 21)),
+    FighterSubclassType.ARCANE_ARCHER,
+)
+
+RUNE_KNIGHT_RUNE_PROGRESSION_DEFINITION = ClassOptionProgressionDefinition(
+    ProgressionChoiceId.RUNE_KNIGHT_RUNES,
+    ProgressionChoicePresentation(
+        ProgressionChoiceType.RUNES,
+        "Rune Knight Runes",
+        "Choose runes known. Hill and Storm require Fighter level 7.",
+    ),
+    ClassType.FIGHTER,
+    ClassOptionKind.RUNE,
+    tuple(RuneType),
+    tuple((rune, enum_label(rune)) for rune in RuneType),
+    3,
+    tuple(rune_knight_rune_grant_levels(level) for level in range(1, 21)),
+    FighterSubclassType.RUNE_KNIGHT,
+    candidateMinimumLevels=tuple((rune, rune_minimum_level(rune)) for rune in RuneType),
+)
 
 
 def rune_uses(fighter_level_value: int) -> int:

@@ -174,7 +174,7 @@ export type ConditionType =
   | "wardingBond"
   | "zoneOfTruth";
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
-export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "skillProficiencies" | "expertise" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
+export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "feat" | "skillProficiencies" | "expertise" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
 export type DamageType =
   | "acid"
   | "bludgeoning"
@@ -341,6 +341,21 @@ export type FeatureMechanics = {
   passiveModifiers: unknown[];
   interactions: unknown[];
 };
+export type SpellControlKind = "attack" | "damage" | "healing" | "temporaryHitPoints" | "effect" | "boundWeaponAttack" | "boundWeaponEffect";
+export type SpellActionControl = {
+  kind: SpellControlKind;
+  label: string;
+  effectIndex?: number;
+  instanceCount: number;
+  choices: { index: number; label: string }[];
+  attackId?: string;
+  damageType?: DamageType;
+};
+export type SpellControlProjection = {
+  requiresSpellSlot: boolean;
+  actions: SpellActionControl[];
+  castOptions: { slotLevel: number; actions: SpellActionControl[] }[];
+};
 export type ResourceKind = "spellSlot" | "featureUse" | "itemCharge" | "ammunition" | "action" | "bonusAction" | "reaction";
 export type ResourceId =
   | "spellSlot"
@@ -447,6 +462,7 @@ export type AttackAction = {
   activeSpellConditions?: string[];
   mechanics?: FeatureMechanics;
   resourceCosts: ResourceCost[];
+  weaponAttackOptions?: Array<{ id: string; label: string }>;
 };
 
 export type RollAction = {
@@ -727,6 +743,7 @@ export type CharacterSheet = {
     resetLabel: string;
     mechanics?: FeatureMechanics;
     resourceCosts?: ResourceCost[];
+    controls: SpellControlProjection;
   }[];
   spellbook: {
     id: string;
@@ -763,7 +780,7 @@ export type CharacterSheet = {
     spellIdLabel: string;
     spellName: string;
   };
-  ongoingEffects: unknown[];
+  ongoingEffects: ActiveOngoingEffect[];
   suppressedConditions: ConditionType[];
   creatureTypes: CreatureType[];
   creatureTypesLabel: string[];
@@ -794,6 +811,17 @@ export type CharacterSheet = {
     copper: number;
     silver: number;
     gold: number;
+  };
+};
+
+export type ActiveOngoingEffect = {
+  id: {
+    resolutionSeed: number;
+    effectNodeId: { path: number[] };
+  };
+  sourceLabel: string;
+  effect: {
+    endingConditions: Array<{ endingCondition: string }>;
   };
 };
 

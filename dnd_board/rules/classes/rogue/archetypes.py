@@ -11,10 +11,12 @@ from dnd_board.character_sheet import (
     AttackKind,
     AttackRangeType,
     CharacterClassLevel,
+    ClassType,
     ConditionType,
     DamageType,
     DiceType,
     ResourceTracker,
+    ProgressionChoiceType,
     RestType,
     RollAction,
     RollResolutionMode,
@@ -40,6 +42,7 @@ from dnd_board.character_sheet import (
     proficiency_bonus_for_level,
 )
 from dnd_board.rules.classes.rogue.base import RogueSubclassType, rogue_subclass_label
+from dnd_board.rules.classes.fighter.archetypes import ELDRITCH_KNIGHT_SPELL_CATALOG
 from dnd_board.rules.shared.effects import (
     ApplyEffect,
     ConditionChangeEffect,
@@ -52,6 +55,16 @@ from dnd_board.rules.shared.effects import (
     SavingThrowEffect,
 )
 from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId, ResourceRecovery, ResourceRecoveryTrigger, spell_slot_resource_id
+from dnd_board.rules.shared.progression_definitions import (
+    ProgressionChoiceId,
+    ProgressionChoicePresentation,
+    SpellChoiceProgressionDefinition,
+    SpellCollection,
+    SpellConstraint,
+    SpellPool,
+    SpellProgressionDefinition,
+    grant_minimum_levels,
+)
 
 
 class ArcaneTricksterFeatureType(Enum):
@@ -460,12 +473,83 @@ def normalized_arcane_trickster_spells(classes: list[CharacterClassLevel], spell
     character_class = rogue_subclass_class(classes)
     if character_class is None or character_class.subclass != RogueSubclassType.ARCANE_TRICKSTER:
         return spells
-    return [normalized_arcane_trickster_spell(spell) for spell in spells]
+    return [
+        normalized_arcane_trickster_spell(spell)
+        if spell.source == SpellSource.ARCANE_TRICKSTER
+        else spell
+        for spell in spells
+    ]
 
 
 def arcane_trickster_spellcasting(rogue_level_value: int) -> ArcaneTricksterSpellcastingProgression:
     eligible_level = max(level for level in ARCANE_TRICKSTER_SPELLCASTING if rogue_level_value >= level)
     return ARCANE_TRICKSTER_SPELLCASTING[eligible_level]
+
+
+_ARCANE_TRICKSTER_CANTRIP_COUNTS = tuple(
+    arcane_trickster_spellcasting(level).cantrips_known if level >= 3 else 0
+    for level in range(1, 21)
+)
+_ARCANE_TRICKSTER_SPELL_COUNTS = tuple(
+    arcane_trickster_spellcasting(level).spells_known if level >= 3 else 0
+    for level in range(1, 21)
+)
+
+ARCANE_TRICKSTER_SPELL_PROGRESSION_DEFINITION = SpellProgressionDefinition(
+    ProgressionChoiceId.ARCANE_TRICKSTER_SPELLS,
+    ProgressionChoicePresentation(
+        ProgressionChoiceType.SPELLS,
+        "Arcane Trickster Spells",
+        "Choose Arcane Trickster cantrips and wizard spells from the curated starter catalog. Mage Hand is required.",
+    ),
+    3,
+    (
+        SpellChoiceProgressionDefinition(
+            SpellPool.CLASS_SPELL_LIST,
+            _ARCANE_TRICKSTER_CANTRIP_COUNTS,
+            (SpellConstraint.CANTRIP,),
+            SpellCollection.KNOWN,
+            SpellSource.ARCANE_TRICKSTER,
+            poolClass=ClassType.WIZARD,
+            supplementalSpells=tuple(dict.fromkeys((
+                *ELDRITCH_KNIGHT_SPELL_CATALOG,
+                SpellId.MIND_SLIVER,
+                SpellId.CHARM_PERSON,
+                SpellId.DISGUISE_SELF,
+                SpellId.FOG_CLOUD,
+            ))),
+            grantMinimumLevels=grant_minimum_levels(_ARCANE_TRICKSTER_CANTRIP_COUNTS, 3),
+            requiredSpells=(SpellId.MAGE_HAND,),
+        ),
+        SpellChoiceProgressionDefinition(
+            SpellPool.CLASS_SPELL_LIST,
+            _ARCANE_TRICKSTER_SPELL_COUNTS,
+            (SpellConstraint.NON_CANTRIP,),
+            SpellCollection.KNOWN,
+            SpellSource.ARCANE_TRICKSTER,
+            poolClass=ClassType.WIZARD,
+            supplementalSpells=tuple(dict.fromkeys((
+                *ELDRITCH_KNIGHT_SPELL_CATALOG,
+                SpellId.MIND_SLIVER,
+                SpellId.CHARM_PERSON,
+                SpellId.DISGUISE_SELF,
+                SpellId.FOG_CLOUD,
+            ))),
+            maximumSpellLevelsByClassLevel=tuple(
+                (
+                    0 if level < 3
+                    else 4 if arcane_trickster_spellcasting(level).fourth_level_slots
+                    else 3 if arcane_trickster_spellcasting(level).third_level_slots
+                    else 2 if arcane_trickster_spellcasting(level).second_level_slots
+                    else 1
+                )
+                for level in range(1, 21)
+            ),
+            grantMinimumLevels=grant_minimum_levels(_ARCANE_TRICKSTER_SPELL_COUNTS, 3),
+        ),
+    ),
+    RogueSubclassType.ARCANE_TRICKSTER,
+)
 
 
 def arcane_trickster_spell_slot_resources(progression: ArcaneTricksterSpellcastingProgression) -> list[tuple[RogueSubclassResourceType, int, int]]:
@@ -530,20 +614,6 @@ def normalized_arcane_trickster_spell(spell: SpellEntry) -> SpellEntry:
         ritual=spell.ritual,
         resourceCosts=spell.resourceCosts,
     )
-
-
-def is_arcane_trickster_spell_selection_valid(rogue_level_value: int, spells: list[SpellEntry]) -> bool:
-    progression = arcane_trickster_spellcasting(rogue_level_value)
-    cantrips = [spell for spell in spells if spell.level == 0]
-    leveled = [spell for spell in spells if spell.level > 0]
-    return len(cantrips) == progression.cantrips_known and len(leveled) == progression.spells_known and any(spell.id == SpellId.MAGE_HAND for spell in cantrips)
-
-
-def pruned_arcane_trickster_spells(rogue_level_value: int, spells: list[SpellEntry]) -> list[SpellEntry]:
-    progression = arcane_trickster_spellcasting(rogue_level_value)
-    cantrips = [spell for spell in spells if spell.level == 0][: progression.cantrips_known]
-    leveled = [spell for spell in spells if spell.level > 0][: progression.spells_known]
-    return [*cantrips, *leveled]
 
 
 def subclass_feature(progression: SubclassFeatureProgression, rogue_level_value: int) -> SheetFeature:

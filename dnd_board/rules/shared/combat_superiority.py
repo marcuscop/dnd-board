@@ -7,6 +7,7 @@ from dnd_board.character_sheet import (
     AbilityType,
     BattleMasterManeuverType,
     CharacterClassLevel,
+    ClassOptionKind,
     ClassType,
     DiceType,
     FightingStyleType,
@@ -145,7 +146,7 @@ def selected_battle_master_maneuvers(classes: list[CharacterClassLevel]) -> list
 
     maneuvers: list[BattleMasterManeuverType] = []
     for character_class in classes:
-        for maneuver in character_class.maneuvers or []:
+        for maneuver in character_class.selected_options(ClassOptionKind.MANEUVER):
             if maneuver not in maneuvers:
                 maneuvers.append(maneuver)
     if maneuvers:

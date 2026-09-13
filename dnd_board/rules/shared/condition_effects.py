@@ -43,6 +43,7 @@ from dnd_board.rules.shared.effects import (
 class ConditionDefinition:
     condition: ConditionType
     ongoingEffect: OngoingEffect
+    replacesConditions: tuple[ConditionType, ...] = ()
 
 
 def modifier(
@@ -126,8 +127,13 @@ def attack_disadvantage(*, incoming: bool = False) -> Modifier:
 CONDITION_DEFINITIONS: dict[ConditionType, ConditionDefinition] = {}
 
 
-def define(condition: ConditionType, effect: OngoingEffect) -> None:
-    CONDITION_DEFINITIONS[condition] = ConditionDefinition(condition, effect)
+def define(
+    condition: ConditionType,
+    effect: OngoingEffect,
+    *,
+    replaces: tuple[ConditionType, ...] = (),
+) -> None:
+    CONDITION_DEFINITIONS[condition] = ConditionDefinition(condition, effect, replaces)
 
 
 for condition, die, calculations, operation in (
@@ -274,6 +280,13 @@ for condition in (
         defenses=tuple(current.ongoingEffect.damageDefenses if current else []),
     ))
 
+current_dead = CONDITION_DEFINITIONS[ConditionType.DEAD].ongoingEffect
+define(ConditionType.DEAD, ongoing(
+    *current_dead.modifiers,
+    interactions=(*current_dead.interactions, prevent_conditions(ConditionType.UNCONSCIOUS)),
+    defenses=tuple(current_dead.damageDefenses),
+), replaces=(ConditionType.UNCONSCIOUS,))
+
 define(ConditionType.HEROISM, ongoing(interactions=(prevent_conditions(ConditionType.FRIGHTENED),)))
 define(ConditionType.CALM_EMOTIONS_IMMUNITY, ongoing(
     interactions=(prevent_conditions(ConditionType.CHARMED, ConditionType.FRIGHTENED),),
@@ -288,7 +301,7 @@ define(ConditionType.PROTECTION_FROM_POISON, ongoing(
     ),
     interactions=(prevent_conditions(ConditionType.POISONED),),
     defenses=(DamageDefenseEffect(DamageDefenseType.RESISTANCE, DamageType.POISON, operation=CollectionOperation.ADD),),
-))
+), replaces=(ConditionType.POISONED,))
 
 define(ConditionType.BARKSKIN, ongoing(modifier(CalculationType.ARMOR_CLASS, ModifierOperation.MINIMUM, FixedAmount(17))))
 define(ConditionType.MAGE_ARMOR, ongoing(Modifier(
@@ -384,6 +397,21 @@ def prevented_conditions(
                 if isinstance(operation, PreventCondition):
                     prevented.update(operation.conditions)
     return prevented
+
+
+def normalize_conditions(conditions: list[ConditionType]) -> list[ConditionType]:
+    unique = list(dict.fromkeys(conditions))
+    replaced = {
+        replaced_condition
+        for condition in unique
+        if (definition := condition_definition(condition)) is not None
+        for replaced_condition in definition.replacesConditions
+    }
+    return [
+        condition
+        for condition in unique
+        if condition not in replaced
+    ]
 
 
 def preventing_condition(

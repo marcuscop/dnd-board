@@ -49,6 +49,7 @@ from dnd_board.character_sheet import (
     TimeEconomy,
     TokenKind,
     build_attack_roll_payload,
+    build_combined_attack_roll_payload,
     build_character_sheet,
     build_damage_roll_payload,
     build_roll_action_payload,
@@ -58,8 +59,7 @@ from dnd_board.character_sheet import (
     build_spell_damage_roll_payload,
     build_spell_healing_roll_payload,
     build_spell_temporary_hit_points_roll_payload,
-    build_true_strike_attack_roll_payload,
-    build_true_strike_damage_roll_payload,
+    attack_roll_with_critical_damage,
     resolve_roll_against_target,
     RollSource,
     ability_modifier,
@@ -83,8 +83,6 @@ from dnd_board.character_sheet import (
     saving_throw_total,
     spell_area_label,
     spell_target_range_label,
-    true_strike_weapon_attacks,
-    shillelagh_weapon_attacks,
     text_list,
     to_float,
     typed_json_from_value,
@@ -96,12 +94,20 @@ from dnd_board.character_sheet import (
     condition_adjusted_speed_for_exhaustion,
     condition_armor_class_bonus,
 )
+from dnd_board.rules.shared.weapon_effects import (
+    build_bound_weapon_spell_attack_payload,
+    build_bound_weapon_spell_effect_payload,
+    eligible_weapon_attacks,
+    weapon_selection_effect,
+)
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
-from dnd_board.rules.shared.character_effects import added_condition_types, condition_change_effects
+from dnd_board.rules.equipment import EquipmentId
+from dnd_board.rules.shared.character_effects import added_condition_types, condition_change_effects, first_damage_effect
 from dnd_board.rules.shared.effects import (
     ApplyEffect,
     ConditionChangeEffect,
     ConditionOperation,
+    DiceAmount,
     DifficultyClass,
     DifficultyClassType,
     EndingConditionType,
@@ -109,6 +115,7 @@ from dnd_board.rules.shared.effects import (
     SavingThrow,
     SavingThrowEffect,
     SequenceEffect,
+    WeaponAttackOptionId,
 )
 from dnd_board.rules.shared.resources import ResourceCost, ResourceId
 from dnd_board.rules.spells import cleric_spell_entry, paladin_spell_entry, spell_damage_effect, spell_entry, spell_scaling, wizard_spell_entry
@@ -621,7 +628,7 @@ def test_creature_type_limited_condition_only_applies_to_matching_targets() -> N
 
 
 def test_true_strike_uses_spellcasting_ability_with_proficient_weapon_and_scaling_bonus(monkeypatch) -> None:
-    rolls = iter([10, 5, 3, 8, 4])
+    rolls = iter([10, 5, 3])
     monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(rolls))
     true_strike = wizard_spell_entry(SpellId.TRUE_STRIKE)
     assert true_strike is not None
@@ -633,29 +640,21 @@ def test_true_strike_uses_spellcasting_ability_with_proficient_weapon_and_scalin
         equipment=[EquipmentItem(id="longsword", name="Longsword", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND)],
     )
 
-    eligible_attacks = true_strike_weapon_attacks(sheet)
-    attack_roll = build_true_strike_attack_roll_payload(sheet, "player-1", true_strike, longsword, DamageType.RADIANT)
-    damage_roll = build_true_strike_damage_roll_payload(sheet, "player-1", true_strike, longsword, DamageType.SLASHING)
-    radiant_damage_roll = build_true_strike_damage_roll_payload(sheet, "player-1", true_strike, longsword, DamageType.RADIANT)
+    root = true_strike.mechanics.activatedEffects[0]
+    selection = weapon_selection_effect(root)
+    assert selection is not None
+    eligible = eligible_weapon_attacks(sheet, selection[1].eligibility)
+    roll = build_bound_weapon_spell_attack_payload(sheet, "player-1", true_strike, 0, "longsword", 0)
 
-    assert [attack.id for attack in eligible_attacks] == ["longsword"]
-    assert attack_roll.source.section == SheetSectionType.SPELLS
-    assert attack_roll.source.sourceId == "trueStrike"
-    assert attack_roll.label == "Attack Longsword"
-    assert attack_roll.damageType == DamageType.RADIANT
-    assert [(part.source, part.value) for part in attack_roll.modifierBreakdown] == [("Intelligence", 3), ("Proficiency", 3)]
-    assert attack_roll.total == 16
-    assert damage_roll.source.sourceId == "trueStrike"
-    assert damage_roll.label == "Damage Longsword"
-    assert damage_roll.damageType == DamageType.SLASHING
-    assert damage_roll.die == "1d8+1d6"
-    assert damage_roll.total == 11
-    assert damage_roll.damageComponents is not None
-    assert [(component.damageType, component.total) for component in damage_roll.damageComponents] == [(DamageType.SLASHING, 8), (DamageType.RADIANT, 3)]
-    assert radiant_damage_roll.damageType == DamageType.RADIANT
-    assert radiant_damage_roll.total == 15
-    assert radiant_damage_roll.damageComponents is not None
-    assert [(component.damageType, component.total) for component in radiant_damage_roll.damageComponents] == [(DamageType.RADIANT, 11), (DamageType.RADIANT, 4)]
+    assert [attack.id for attack in eligible] == ["longsword"]
+    assert roll.source.section == SheetSectionType.SPELLS
+    assert roll.source.sourceId == "trueStrike"
+    assert roll.boundAttackId == "longsword"
+    assert roll.label == "True Strike"
+    assert [(part.source, part.value) for part in roll.modifierBreakdown] == [("Intelligence", 3), ("Proficiency", 3)]
+    assert roll.total == 16
+    assert roll.damageComponents is not None
+    assert [(component.damageType, component.total) for component in roll.damageComponents] == [(DamageType.SLASHING, 8), (DamageType.RADIANT, 3)]
 
 
 def test_shillelagh_projects_to_wielded_proficient_club_or_quarterstaff(monkeypatch) -> None:
@@ -667,24 +666,52 @@ def test_shillelagh_projects_to_wielded_proficient_club_or_quarterstaff(monkeypa
     carried_staff = AttackAction("quarterstaff", "Quarterstaff", AbilityType.STRENGTH, 1, DiceType.D6, damageType=DamageType.BLUDGEONING)
     sheet = replace(
         spell_sheet(11, [shillelagh]),
-        conditions=[ConditionType.SHILLELAGH],
         attacks=[club, carried_staff],
         equipment=[
-            EquipmentItem(id="club", name="Club", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND),
-            EquipmentItem(id="quarterstaff", name="Quarterstaff", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.CARRIED),
+            EquipmentItem(id="club", name="Club", definitionId=EquipmentId.CLUB, itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND),
+            EquipmentItem(id="quarterstaff", name="Quarterstaff", definitionId=EquipmentId.QUARTERSTAFF, itemType=EquipmentType.WEAPON, slot=EquipmentSlot.OFF_HAND),
         ],
     )
+    cast = build_bound_weapon_spell_effect_payload(sheet, "player-1", shillelagh, 0, "club")
+    imbued = resolve_roll_against_target(cast, sheet, sheet)
+    assert imbued.sheetUpdates is not None
+    ongoing = imbued.sheetUpdates[0].ongoingEffects
+    assert ongoing is not None
+    active_sheet = replace(sheet, ongoingEffects=ongoing)
+    option = enum_key(WeaponAttackOptionId.SPELLCASTING_ABILITY_AND_ALTERNATE_DAMAGE_TYPE)
+    attack_roll = build_attack_roll_payload(active_sheet, "player-1", club, option)
+    damage_roll = build_damage_roll_payload(active_sheet, "player-1", club, option)
 
-    attack_roll = build_attack_roll_payload(sheet, "player-1", club)
-    damage_roll = build_damage_roll_payload(sheet, "player-1", club)
-
-    assert [attack.id for attack in shillelagh_weapon_attacks(sheet)] == ["club"]
+    assert ongoing[0].bindings[0].equipmentInstanceId.value == "club"
     assert attack_roll.damageType == DamageType.FORCE
     assert [(part.source, part.value) for part in attack_roll.modifierBreakdown] == [("Intelligence", 3), ("Proficiency", 4)]
     assert attack_roll.total == 17
     assert damage_roll.damageType == DamageType.FORCE
     assert damage_roll.die == "1d12"
     assert damage_roll.total == 8
+
+    critical_rolls = iter([20, 1, 1])
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda minimum, maximum: next(critical_rolls))
+    combined = build_combined_attack_roll_payload(active_sheet, "player-1", club, option)
+    critical = attack_roll_with_critical_damage(combined)
+    authored_damage = first_damage_effect(combined.pendingEffect)
+    assert authored_damage is not None
+    assert isinstance(authored_damage.amount, DiceAmount)
+    assert authored_damage.amount.diceType == DiceType.D12
+    assert critical.damageComponents[0].die == "2d12"
+
+    recast = build_bound_weapon_spell_effect_payload(
+        active_sheet,
+        "player-1",
+        shillelagh,
+        0,
+        "quarterstaff",
+    )
+    replaced_imbuement = resolve_roll_against_target(recast, active_sheet, active_sheet)
+    replaced_ongoing = replaced_imbuement.sheetUpdates[0].ongoingEffects
+    assert replaced_ongoing is not None
+    assert len(replaced_ongoing) == 1
+    assert replaced_ongoing[0].bindings[0].equipmentInstanceId.value == "quarterstaff"
 
 
 def test_shared_parsing_and_armor_helpers_cover_edge_cases() -> None:

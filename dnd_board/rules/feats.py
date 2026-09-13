@@ -426,10 +426,27 @@ class GeneralFeatDefinition:
     prerequisites: tuple[FeatPrerequisite, ...]
     description: str
     repeatable: bool = False
+    mechanics: FeatureMechanics = field(default_factory=FeatureMechanics)
 
 
-def general_feat(feat_type: GeneralFeatType, source: RuleSource, description: str, prerequisites: tuple[FeatPrerequisite, ...] = (), repeatable: bool = False, category: FeatCategory = FeatCategory.GENERAL) -> GeneralFeatDefinition:
-    return GeneralFeatDefinition(featType=feat_type, source=source, category=category, prerequisites=prerequisites, description=description, repeatable=repeatable)
+def general_feat(
+    feat_type: GeneralFeatType,
+    source: RuleSource,
+    description: str,
+    prerequisites: tuple[FeatPrerequisite, ...] = (),
+    repeatable: bool = False,
+    category: FeatCategory = FeatCategory.GENERAL,
+    mechanics: FeatureMechanics | None = None,
+) -> GeneralFeatDefinition:
+    return GeneralFeatDefinition(
+        featType=feat_type,
+        source=source,
+        category=category,
+        prerequisites=prerequisites,
+        description=description,
+        repeatable=repeatable,
+        mechanics=mechanics or FeatureMechanics(),
+    )
 
 
 def level_prerequisite(minimum_level: int) -> FeatPrerequisite:
@@ -561,7 +578,20 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.TAVERN_BRAWLER: general_feat(GeneralFeatType.TAVERN_BRAWLER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Constitution; improve improvised weapons, unarmed strikes, and grapples."),
     GeneralFeatType.TELEKINETIC: general_feat(GeneralFeatType.TELEKINETIC, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; improve mage hand and shove telekinetically."),
     GeneralFeatType.TELEPATHIC: general_feat(GeneralFeatType.TELEPATHIC, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; speak telepathically and cast detect thoughts."),
-    GeneralFeatType.TOUGH: general_feat(GeneralFeatType.TOUGH, RuleSource.PLAYERS_HANDBOOK_2024, "Increase hit point maximum by 2 per level."),
+    GeneralFeatType.TOUGH: general_feat(
+        GeneralFeatType.TOUGH,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "Increase hit point maximum by 2 per level.",
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.MAXIMUM_HIT_POINTS,
+            ModifierOperation.ADD,
+            amount=CalculatedAmount(
+                AmountCalculation.SOURCE_CHARACTER_LEVEL,
+                multiplier=2,
+            ),
+            description="Increase maximum hit points by 2 per character level.",
+        )]),
+    ),
     GeneralFeatType.VIGOR_OF_THE_HILL_GIANT: general_feat(GeneralFeatType.VIGOR_OF_THE_HILL_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; improve prone resistance and Hit Dice healing.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.HILL_STRIKE))),
     GeneralFeatType.WAR_CASTER: general_feat(GeneralFeatType.WAR_CASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve concentration saves, somatic casting, and reaction spellcasting.", (spellcasting_prerequisite(),)),
     GeneralFeatType.WEAPON_MASTER: general_feat(GeneralFeatType.WEAPON_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain weapon proficiencies."),
@@ -587,7 +617,19 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.ABILITY_SCORE_IMPROVEMENT: general_feat(GeneralFeatType.ABILITY_SCORE_IMPROVEMENT, RuleSource.PLAYERS_HANDBOOK_2024, 'Ability Score Improvement 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.MARTIAL_WEAPON_TRAINING: general_feat(GeneralFeatType.MARTIAL_WEAPON_TRAINING, RuleSource.PLAYERS_HANDBOOK_2024, 'Martial Weapon Training 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.SHIFTING_COMBATANT: general_feat(GeneralFeatType.SHIFTING_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, 'Shifting Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
-    GeneralFeatType.SPEEDY: general_feat(GeneralFeatType.SPEEDY, RuleSource.PLAYERS_HANDBOOK_2024, 'Speedy 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.SPEEDY: general_feat(
+        GeneralFeatType.SPEEDY,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        'Speedy 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.',
+        (level_prerequisite(4),),
+        category=FeatCategory.GENERAL,
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.SPEED,
+            ModifierOperation.ADD,
+            amount=FixedAmount(10),
+            description="Increase Speed by 10 feet.",
+        )]),
+    ),
     GeneralFeatType.TACTICAL_COMBATANT: general_feat(GeneralFeatType.TACTICAL_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, 'Tactical Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.COLD_CASTER: general_feat(GeneralFeatType.COLD_CASTER, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Cold Caster 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.DRAGONSCARRED: general_feat(GeneralFeatType.DRAGONSCARRED, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Dragonscarred 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
@@ -616,7 +658,19 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL: general_feat(GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Dimensional Travel 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
     GeneralFeatType.BOON_OF_ENERGY_RESISTANCE: general_feat(GeneralFeatType.BOON_OF_ENERGY_RESISTANCE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Energy Resistance 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
     GeneralFeatType.BOON_OF_FATE: general_feat(GeneralFeatType.BOON_OF_FATE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Fate 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
-    GeneralFeatType.BOON_OF_FORTITUDE: general_feat(GeneralFeatType.BOON_OF_FORTITUDE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Fortitude 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_FORTITUDE: general_feat(
+        GeneralFeatType.BOON_OF_FORTITUDE,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        'Boon of Fortitude 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.',
+        (level_prerequisite(19),),
+        category=FeatCategory.EPIC_BOON,
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.MAXIMUM_HIT_POINTS,
+            ModifierOperation.ADD,
+            amount=FixedAmount(40),
+            description="Increase maximum hit points by 40.",
+        )]),
+    ),
     GeneralFeatType.BOON_OF_IRRESISTIBLE_OFFENSE: general_feat(GeneralFeatType.BOON_OF_IRRESISTIBLE_OFFENSE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Irresistible Offense 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
     GeneralFeatType.BOON_OF_RECOVERY: general_feat(GeneralFeatType.BOON_OF_RECOVERY, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Recovery 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
     GeneralFeatType.BOON_OF_SKILL: general_feat(GeneralFeatType.BOON_OF_SKILL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Skill 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
@@ -964,19 +1018,6 @@ def fighting_style_features(classes: list[CharacterClassLevel]):
     return features
 
 
-def general_feat_options(selected_feats=None, sheet=None):
-    from dnd_board.character_sheet import ProgressionChoiceOption
-
-    selected = set(selected_general_feat_keys(selected_feats))
-    return [
-        ProgressionChoiceOption(value=enum_key(feat_type), label=enum_label(feat_type))
-        for feat_type, definition in GENERAL_FEATS.items()
-        if general_feat_category(feat_type) == FeatCategory.GENERAL
-        if definition.repeatable or enum_key(feat_type) not in selected
-        if sheet is None or general_feat_prerequisites_met(feat_type, sheet)
-    ]
-
-
 def general_feat_feature(feat_key: str):
     from dnd_board.character_sheet import SheetFeature
 
@@ -991,6 +1032,7 @@ def general_feat_feature(feat_key: str):
         source=rule_source_label(definition.source),
         activation=TimeEconomy.PASSIVE,
         description=f"{definition.description}{prerequisite}",
+        mechanics=definition.mechanics,
     )
 
 
@@ -1288,23 +1330,76 @@ def feat_abilities(classes: list[CharacterClassLevel], feats=None) -> list[Sheet
 
 
 def feat_hit_point_bonus(feats, total_level: int) -> int:
-    selected_feats = selected_general_feat_types(feats)
-    bonus = 0
-    if GeneralFeatType.BOON_OF_FORTITUDE in selected_feats:
-        bonus += 40
-    return bonus
+    return sum(
+        resolved_character_modifier_amount(modifier, total_level)
+        for definition, modifier in selected_general_feat_modifiers(
+            feats,
+            CalculationType.MAXIMUM_HIT_POINTS,
+        )
+    )
+
+
+def feat_hit_point_bonus_per_level(feats) -> int:
+    return sum(
+        modifier.amount.multiplier
+        for _definition, modifier in selected_general_feat_modifiers(
+            feats,
+            CalculationType.MAXIMUM_HIT_POINTS,
+        )
+        if isinstance(modifier.amount, CalculatedAmount)
+        and modifier.amount.calculation == AmountCalculation.SOURCE_CHARACTER_LEVEL
+    )
+
+
+def feat_static_hit_point_bonus(feats) -> int:
+    return sum(
+        modifier.amount.value
+        for _definition, modifier in selected_general_feat_modifiers(
+            feats,
+            CalculationType.MAXIMUM_HIT_POINTS,
+        )
+        if isinstance(modifier.amount, FixedAmount)
+    )
 
 
 def feat_speed_bonus(feats) -> int:
     selected_feats = selected_general_feat_types(feats)
-    bonus = 0
-    if GeneralFeatType.SPEEDY in selected_feats:
-        bonus += 10
+    bonus = sum(
+        resolved_character_modifier_amount(modifier, 0)
+        for _definition, modifier in selected_general_feat_modifiers(
+            feats,
+            CalculationType.SPEED,
+        )
+    )
     if GeneralFeatType.MOBILE in selected_feats:
         bonus += 10
     if GeneralFeatType.BOON_OF_SPEED in selected_feats:
         bonus += 30
     return bonus
+
+
+def selected_general_feat_modifiers(
+    feats,
+    calculation: CalculationType,
+) -> list[tuple[GeneralFeatDefinition, Modifier]]:
+    return [
+        (definition, modifier)
+        for feat_type in selected_general_feat_types(feats)
+        if (definition := GENERAL_FEATS.get(feat_type)) is not None
+        for modifier in definition.mechanics.passiveModifiers
+        if modifier.calculation == calculation
+    ]
+
+
+def resolved_character_modifier_amount(modifier: Modifier, total_level: int) -> int:
+    if isinstance(modifier.amount, FixedAmount):
+        return modifier.amount.value
+    if (
+        isinstance(modifier.amount, CalculatedAmount)
+        and modifier.amount.calculation == AmountCalculation.SOURCE_CHARACTER_LEVEL
+    ):
+        return total_level * modifier.amount.multiplier
+    return 0
 
 
 def feat_initiative_bonus(feats, proficiency_bonus: int) -> int:

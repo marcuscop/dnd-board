@@ -7,8 +7,10 @@ from dnd_board.character_sheet import (
     AbilityType,
     CharacterClassLevel,
     ClassType,
+    ProgressionChoiceType,
     ResourceTracker,
     SheetFeature,
+    SkillType,
     SpellEntry,
     SpellId,
     SpellSource,
@@ -17,8 +19,20 @@ from dnd_board.character_sheet import (
     enum_label,
 )
 from dnd_board.rules.sources import RuleSource, rule_source_label
+from dnd_board.rules.feats import FeatCategory
 from dnd_board.rules.spells import SpellListType, spell_entries_for_list, spell_entry_for_list
 from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceId, spell_slot_resource_id
+from dnd_board.rules.shared.progression_definitions import (
+    ClassProgressionDefinition,
+    ProgressionChoiceId,
+    ProgressionChoicePresentation,
+    SkillProgressionDefinition,
+    SpellChoiceProgressionDefinition,
+    SpellCollection,
+    SpellConstraint,
+    SpellPool,
+    SpellProgressionDefinition,
+)
 
 
 class WizardFeatureType(Enum):
@@ -137,6 +151,141 @@ WIZARD_LEVELS: dict[int, WizardProgression] = {
     19: WizardProgression(19, 6, (WizardFeatureType.EPIC_BOON,), 5, 24, (4, 3, 3, 3, 3, 2, 1, 1, 1)),
     20: WizardProgression(20, 6, (WizardFeatureType.SIGNATURE_SPELLS,), 5, 25, (4, 3, 3, 3, 3, 2, 2, 1, 1)),
 }
+
+
+WIZARD_PROGRESSION_DEFINITION = ClassProgressionDefinition(
+    characterClass=ClassType.WIZARD,
+    abilityScoreImprovementLevels=tuple(
+        level
+        for level, progression in WIZARD_LEVELS.items()
+        if WizardFeatureType.ABILITY_SCORE_IMPROVEMENT in progression.features
+    ),
+    epicBoonLevel=next(
+        level
+        for level, progression in WIZARD_LEVELS.items()
+        if WizardFeatureType.EPIC_BOON in progression.features
+    ),
+    subclasses=tuple(WizardSubclassType),
+    abilityScoreImprovementChoice=ProgressionChoiceId.WIZARD_ABILITY_SCORE_IMPROVEMENT,
+    abilityScoreImprovementPresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.ABILITY_SCORE_IMPROVEMENT,
+        "Ability Score Improvement",
+        "Increase one ability score by 2, increase two ability scores by 1, or choose a feat.",
+    ),
+    abilityScoreImprovementFeatCategories=(FeatCategory.GENERAL,),
+    epicBoonChoice=ProgressionChoiceId.WIZARD_EPIC_BOON,
+    epicBoonPresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.FEAT,
+        "Epic Boon",
+        "Choose an Epic Boon feat or another General feat for which you qualify.",
+    ),
+    epicBoonFeatCategories=(FeatCategory.EPIC_BOON, FeatCategory.GENERAL),
+    subclassChoice=ProgressionChoiceId.WIZARD_SUBCLASS,
+    subclassPresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.SUBCLASS,
+        "Arcane Tradition",
+        "Choose a Wizard subclass.",
+    ),
+    skillChoices=(SkillProgressionDefinition(
+        ProgressionChoiceId.WIZARD_SKILL_PROFICIENCIES,
+        ProgressionChoicePresentation(
+            ProgressionChoiceType.SKILL_PROFICIENCIES,
+            "Wizard Skill Proficiencies",
+            "Choose Wizard skill proficiencies.",
+        ),
+        (
+            SkillType.ARCANA,
+            SkillType.HISTORY,
+            SkillType.INSIGHT,
+            SkillType.INVESTIGATION,
+            SkillType.MEDICINE,
+            SkillType.RELIGION,
+        ),
+        2,
+    ),),
+    spellChoices=(
+        SpellProgressionDefinition(
+            ProgressionChoiceId.WIZARD_CANTRIPS,
+            ProgressionChoicePresentation(
+                ProgressionChoiceType.SPELLS,
+                "Wizard Cantrips",
+                "Choose Wizard cantrips known.",
+            ),
+            1,
+            (SpellChoiceProgressionDefinition(
+                pool=SpellPool.CLASS_SPELL_LIST,
+                countsByClassLevel=tuple(WIZARD_LEVELS[level].cantrips_known for level in range(1, 21)),
+                constraints=(SpellConstraint.CANTRIP,),
+                destination=SpellCollection.KNOWN,
+                source=SpellSource.WIZARD,
+                poolClass=ClassType.WIZARD,
+                grantMinimumLevels=tuple(
+                    next(level for level in range(1, 21) if WIZARD_LEVELS[level].cantrips_known >= slot)
+                    for slot in range(1, max(entry.cantrips_known for entry in WIZARD_LEVELS.values()) + 1)
+                ),
+            ),),
+        ),
+        SpellProgressionDefinition(
+            ProgressionChoiceId.WIZARD_SPELLBOOK_SPELLS,
+            ProgressionChoicePresentation(
+                ProgressionChoiceType.SPELLS,
+                "Wizard Spellbook",
+                "Choose level 1+ Wizard spells in your spellbook.",
+            ),
+            1,
+            (SpellChoiceProgressionDefinition(
+                pool=SpellPool.CLASS_SPELL_LIST,
+                countsByClassLevel=tuple(6 + ((level - 1) * 2) for level in range(1, 21)),
+                constraints=(
+                    SpellConstraint.NON_CANTRIP,
+                    SpellConstraint.WITHIN_AVAILABLE_SPELL_LEVEL,
+                ),
+                destination=SpellCollection.SPELLBOOK,
+                source=SpellSource.WIZARD,
+                poolClass=ClassType.WIZARD,
+                maximumSpellLevelsByClassLevel=tuple(
+                    max(
+                        (index + 1 for index, slots in enumerate(progression.spell_slots) if slots),
+                        default=1,
+                    )
+                    for progression in WIZARD_LEVELS.values()
+                ),
+                grantMinimumLevels=tuple(
+                    1 if slot <= 6 else ((slot - 6 + 1) // 2) + 1
+                    for slot in range(1, 45)
+                ),
+            ),),
+        ),
+        SpellProgressionDefinition(
+            ProgressionChoiceId.WIZARD_PREPARED_SPELLS,
+            ProgressionChoicePresentation(
+                ProgressionChoiceType.SPELLS,
+                "Wizard Prepared Spells",
+                "Choose prepared Wizard spells from your spellbook.",
+            ),
+            1,
+            (SpellChoiceProgressionDefinition(
+                pool=SpellPool.CHARACTER_COLLECTION,
+                countsByClassLevel=tuple(WIZARD_LEVELS[level].prepared_spells for level in range(1, 21)),
+                constraints=(
+                    SpellConstraint.NON_CANTRIP,
+                    SpellConstraint.WITHIN_AVAILABLE_SPELL_LEVEL,
+                ),
+                destination=SpellCollection.PREPARED,
+                source=SpellSource.WIZARD,
+                poolCollection=SpellCollection.SPELLBOOK,
+                maximumSpellLevelsByClassLevel=tuple(
+                    max(
+                        (index + 1 for index, slots in enumerate(progression.spell_slots) if slots),
+                        default=1,
+                    )
+                    for progression in WIZARD_LEVELS.values()
+                ),
+                minimumPoolSizesByClassLevel=tuple(6 + ((level - 1) * 2) for level in range(1, 21)),
+            ),),
+        ),
+    ),
+)
 
 
 def wizard_level(classes: list[CharacterClassLevel]) -> int:
@@ -320,64 +469,8 @@ def wizard_spellbook_spell_options(wizard_level_value: int) -> list[SpellEntry]:
     return wizard_prepared_spell_options(wizard_level_value)
 
 
-def is_wizard_cantrip_selection_valid(wizard_level_value: int, spells: list[SpellEntry]) -> bool:
-    progression = WIZARD_LEVELS[min(max(1, wizard_level_value), max(WIZARD_LEVELS))]
-    return (
-        len(spells) == progression.cantrips_known
-        and len({spell.id for spell in spells}) == len(spells)
-        and all(spell.source == SpellSource.WIZARD and spell.level == 0 for spell in spells)
-    )
-
-
-def is_wizard_prepared_spell_selection_valid(wizard_level_value: int, spells: list[SpellEntry]) -> bool:
-    progression = WIZARD_LEVELS[min(max(1, wizard_level_value), max(WIZARD_LEVELS))]
-    max_spell_level = max_prepared_spell_level(progression)
-    return (
-        len(spells) == progression.prepared_spells
-        and len({spell.id for spell in spells}) == len(spells)
-        and all(spell.source == SpellSource.WIZARD and 0 < spell.level <= max_spell_level for spell in spells)
-    )
-
-
-def is_wizard_spellbook_selection_valid(wizard_level_value: int, spells: list[SpellEntry]) -> bool:
-    progression = WIZARD_LEVELS[min(max(1, wizard_level_value), max(WIZARD_LEVELS))]
-    max_spell_level = max_prepared_spell_level(progression)
-    return (
-        len(spells) == 6 + ((progression.level - 1) * 2)
-        and len({spell.id for spell in spells}) == len(spells)
-        and all(spell.source == SpellSource.WIZARD and 0 < spell.level <= max_spell_level for spell in spells)
-    )
-
-
-def wizard_spellbook_spells(spells: list[SpellEntry]) -> list[SpellEntry]:
-    return [spell for spell in spells if spell.source == SpellSource.WIZARD and spell.level > 0]
-
-
-def wizard_cantrips(spells: list[SpellEntry]) -> list[SpellEntry]:
-    return [spell for spell in spells if spell.source == SpellSource.WIZARD and spell.level == 0]
-
-
-def wizard_prepared_spells(spells: list[SpellEntry]) -> list[SpellEntry]:
-    return [spell for spell in spells if spell.source == SpellSource.WIZARD and spell.level > 0]
-
-
 def wizard_catalog_spell(value: str | SpellId) -> SpellEntry | None:
     return spell_entry_for_list(value, SpellListType.WIZARD, source=SpellSource.WIZARD, casting_ability=AbilityType.INTELLIGENCE)
-
-
-def pruned_wizard_spells(wizard_level_value: int, spells: list[SpellEntry]) -> list[SpellEntry]:
-    progression = WIZARD_LEVELS[min(max(1, wizard_level_value), max(WIZARD_LEVELS))]
-    max_spell_level = max_prepared_spell_level(progression)
-    cantrips = [spell for spell in spells if spell.source == SpellSource.WIZARD and spell.level == 0][: progression.cantrips_known]
-    prepared = [spell for spell in spells if spell.source == SpellSource.WIZARD and 0 < spell.level <= max_spell_level][: progression.prepared_spells]
-    return [*cantrips, *prepared]
-
-
-def pruned_wizard_spellbook(wizard_level_value: int, spellbook: list[SpellEntry]) -> list[SpellEntry]:
-    progression = WIZARD_LEVELS[min(max(1, wizard_level_value), max(WIZARD_LEVELS))]
-    max_spell_level = max_prepared_spell_level(progression)
-    spell_count = 6 + ((progression.level - 1) * 2)
-    return [spell for spell in spellbook if spell.source == SpellSource.WIZARD and 0 < spell.level <= max_spell_level][:spell_count]
 
 
 def max_prepared_spell_level(progression: WizardProgression) -> int:
@@ -388,24 +481,11 @@ def max_prepared_spell_level(progression: WizardProgression) -> int:
 
 
 def wizard_skill_proficiency_count(wizard: CharacterClassLevel) -> int:
-    return 2 if wizard.level >= 1 else 0
+    return WIZARD_PROGRESSION_DEFINITION.skillChoices[0].count if wizard.level >= 1 else 0
 
 
 def wizard_skill_option_types() -> list[SkillType]:
-    from dnd_board.character_sheet import SkillType
-
-    return [
-        SkillType.ARCANA,
-        SkillType.HISTORY,
-        SkillType.INSIGHT,
-        SkillType.INVESTIGATION,
-        SkillType.MEDICINE,
-        SkillType.RELIGION,
-    ]
-
-
-def wizard_asi_levels_up_to(wizard_level: int) -> int:
-    return sum(1 for level in [4, 8, 12, 16, 19] if wizard_level >= level)
+    return list(WIZARD_PROGRESSION_DEFINITION.skillChoices[0].candidates)
 
 
 def dedupe_features(features: list[SheetFeature]) -> list[SheetFeature]:

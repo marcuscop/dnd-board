@@ -75,6 +75,7 @@ from dnd_board.rules.shared.effects import (
     FeatureMechanics,
     FixedAmount,
     HealingEffect,
+    InstallOngoingEffect,
     InstanceScaling,
     Interaction,
     InteractionDecision,
@@ -84,6 +85,8 @@ from dnd_board.rules.shared.effects import (
     MaximumHitPointsOperation,
     MovementEffect,
     MovementType,
+    OngoingEffect,
+    OngoingReplacementPolicy,
     PromptResponder,
     RepeatedEffect,
     RestEffect,
@@ -91,12 +94,25 @@ from dnd_board.rules.shared.effects import (
     SavingThrow,
     SavingThrowEffect,
     ScalingBasis,
+    SelectionId,
+    SelectWeaponEffect,
     SequenceEffect,
     SourceIsSpellPredicate,
+    SourceSpellPredicate,
     TargetHasCreatureTypePredicate,
     TargetHasAnyCreatureTypePredicate,
     TemporaryHitPointsEffect,
+    ThresholdDiceExpression,
+    DiceThreshold,
+    WeaponAbilityReference,
+    WeaponAttackModification,
+    WeaponAttackOption,
+    WeaponAttackOptionId,
+    WeaponDamageChoice,
+    WeaponDamageTypeReference,
+    WeaponEligibility,
 )
+from dnd_board.rules.equipment import EquipmentId
 from dnd_board.rules.shared.resources import ResourceCost, ResourceId
 
 
@@ -110,6 +126,19 @@ class SpellListType(Enum):
     SORCERER = "Sorcerer"
     WARLOCK = "Warlock"
     WIZARD = "Wizard"
+
+
+CLASS_SPELL_LISTS: dict[ClassType, SpellListType] = {
+    ClassType.ARTIFICER: SpellListType.ARTIFICER,
+    ClassType.BARD: SpellListType.BARD,
+    ClassType.CLERIC: SpellListType.CLERIC,
+    ClassType.DRUID: SpellListType.DRUID,
+    ClassType.PALADIN: SpellListType.PALADIN,
+    ClassType.RANGER: SpellListType.RANGER,
+    ClassType.SORCERER: SpellListType.SORCERER,
+    ClassType.WARLOCK: SpellListType.WARLOCK,
+    ClassType.WIZARD: SpellListType.WIZARD,
+}
 
 
 CLASS_SPELL_LISTS: dict[ClassType, SpellListType] = {
@@ -649,6 +678,24 @@ def spell_entries_for_list(
     ]
 
 
+def class_spell_entries(
+    character_class: ClassType,
+    *,
+    source: SpellSource,
+    casting_ability: AbilityType,
+    maximum_level: int | None = None,
+) -> list[SpellEntry]:
+    spell_list = CLASS_SPELL_LISTS.get(character_class)
+    if spell_list is None:
+        return []
+    return spell_entries_for_list(
+        spell_list,
+        maximum_level=maximum_level,
+        source=source,
+        casting_ability=casting_ability,
+    )
+
+
 def spell_entry_for_list(
     value: str | SpellId,
     spell_list: SpellListType,
@@ -1025,6 +1072,113 @@ def saving_throw_condition_mechanics(
     )])
 
 
+def true_strike_mechanics() -> FeatureMechanics:
+    radiant_bonus = ApplyEffect(DamageEffect(
+        DiceAmount(0, DiceType.D6),
+        DamageType.RADIANT,
+        scaling=[AmountScaling(
+            ScalingBasis.CHARACTER_LEVEL,
+            interval=1,
+            additionalDice=DiceAmount(1, DiceType.D6),
+            thresholds=[5, 11, 17],
+        )],
+    ))
+    return FeatureMechanics(activatedEffects=[ActivatedEffect(
+        label="Cast",
+        effect=SelectWeaponEffect(
+            SelectionId.WEAPON,
+            WeaponEligibility(),
+            ChoiceEffect(choices=[
+                EffectChoice(
+                    WeaponDamageChoice.NORMAL,
+                    AttackRollEffect(
+                        AttackRoll(AttackRollType.WEAPON),
+                        onHit=radiant_bonus,
+                        weaponSelection=SelectionId.WEAPON,
+                        weaponModification=WeaponAttackModification(
+                            ability=WeaponAbilityReference.SOURCE_SPELLCASTING,
+                        ),
+                    ),
+                ),
+                EffectChoice(
+                    WeaponDamageChoice.RADIANT,
+                    AttackRollEffect(
+                        AttackRoll(AttackRollType.WEAPON),
+                        onHit=radiant_bonus,
+                        weaponSelection=SelectionId.WEAPON,
+                        weaponModification=WeaponAttackModification(
+                            ability=WeaponAbilityReference.SOURCE_SPELLCASTING,
+                            damageType=WeaponDamageTypeReference.FIXED,
+                            fixedDamageType=DamageType.RADIANT,
+                        ),
+                    ),
+                ),
+            ]),
+        ),
+    )])
+
+
+def shillelagh_mechanics() -> FeatureMechanics:
+    source_ability = WeaponAttackModification(
+        ability=WeaponAbilityReference.SOURCE_SPELLCASTING,
+    )
+    force_damage = WeaponAttackModification(
+        damageType=WeaponDamageTypeReference.FIXED,
+        fixedDamageType=DamageType.FORCE,
+    )
+    source_ability_force_damage = WeaponAttackModification(
+        ability=WeaponAbilityReference.SOURCE_SPELLCASTING,
+        damageType=WeaponDamageTypeReference.FIXED,
+        fixedDamageType=DamageType.FORCE,
+    )
+    return FeatureMechanics(activatedEffects=[ActivatedEffect(
+        label="Imbue",
+        effect=SelectWeaponEffect(
+            SelectionId.WEAPON,
+            WeaponEligibility(equipmentIds=(EquipmentId.CLUB, EquipmentId.QUARTERSTAFF)),
+            InstallOngoingEffect(OngoingEffect(
+                duration=EffectDuration(EffectDurationType.MANUAL),
+                endingConditions=(
+                    EndingCondition(EndingConditionType.MANUAL),
+                    EndingCondition(EndingConditionType.SOURCE_UNEQUIPPED),
+                    EndingCondition(EndingConditionType.REST_COMPLETED),
+                ),
+                weaponAttackModifications=(WeaponAttackModification(
+                    damageDice=ThresholdDiceExpression((
+                        DiceThreshold(1, DiceAmount(1, DiceType.D8)),
+                        DiceThreshold(5, DiceAmount(1, DiceType.D10)),
+                        DiceThreshold(11, DiceAmount(1, DiceType.D12)),
+                        DiceThreshold(17, DiceAmount(2, DiceType.D6)),
+                    )),
+                ),),
+                weaponAttackOptions=(
+                    WeaponAttackOption(
+                        WeaponAttackOptionId.ORIGINAL,
+                        "Normal ability / normal damage",
+                        WeaponAttackModification(),
+                    ),
+                    WeaponAttackOption(
+                        WeaponAttackOptionId.SPELLCASTING_ABILITY,
+                        "Spellcasting ability / normal damage",
+                        source_ability,
+                    ),
+                    WeaponAttackOption(
+                        WeaponAttackOptionId.ALTERNATE_DAMAGE_TYPE,
+                        "Normal ability / Force damage",
+                        force_damage,
+                    ),
+                    WeaponAttackOption(
+                        WeaponAttackOptionId.SPELLCASTING_ABILITY_AND_ALTERNATE_DAMAGE_TYPE,
+                        "Spellcasting ability / Force damage",
+                        source_ability_force_damage,
+                    ),
+                ),
+                replacement=OngoingReplacementPolicy.SAME_SOURCE,
+            )),
+        ),
+    )])
+
+
 SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(
         entry=SpellEntry(
@@ -1078,7 +1232,7 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.RAY_OF_FROST, name=SpellId.RAY_OF_FROST, level=0, school=SpellSchool.EVOCATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", mechanics=spell_attack_damage_mechanics(1, DiceType.D8, DamageType.COLD, scaling=cantrip_damage_scaling(DiceType.D8))), spellLists=(SpellListType.ARTIFICER, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:ray-of-frost'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.RESISTANCE, name=SpellId.RESISTANCE, level=0, school=SpellSchool.ABJURATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", concentration=True, mechanics=FeatureMechanics(activatedEffects=spell_damage_resistance_effects())), spellLists=(SpellListType.ARTIFICER, SpellListType.CLERIC, SpellListType.DRUID), url='http://dnd2024.wikidot.com/spell:resistance'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.SACRED_FLAME, name=SpellId.SACRED_FLAME, level=0, school=SpellSchool.EVOCATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", mechanics=FeatureMechanics(activatedEffects=[saving_throw_damage_node(1, DiceType.D8, DamageType.RADIANT, AbilityType.DEXTERITY, scaling=cantrip_damage_scaling(DiceType.D8))])), spellLists=(SpellListType.CLERIC,), url='http://dnd2024.wikidot.com/spell:sacred-flame'),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.SHILLELAGH, name=SpellId.SHILLELAGH, level=0, school=SpellSchool.TRANSMUTATION, castingTime=TimeEconomy.BONUS_ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", mechanics=FeatureMechanics(activatedEffects=[spell_condition_effect(ConditionType.SHILLELAGH, trigger=SpellEffectTrigger.ON_CAST, target=SpellEffectTarget.SELF, action_label="Imbue", description="While active, a held Club or Quarterstaff can use your spellcasting ability for attack and damage, and its damage die becomes d8, d10 at level 5, d12 at level 11, and 2d6 at level 17. Force damage choice and weapon override are tracked manually.")])), spellLists=(SpellListType.DRUID,), url='http://dnd2024.wikidot.com/spell:shillelagh', material=True),
+    SpellCatalogRecord(entry=SpellEntry(id=SpellId.SHILLELAGH, name=SpellId.SHILLELAGH, level=0, school=SpellSchool.TRANSMUTATION, castingTime=TimeEconomy.BONUS_ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="Imbue one wielded Club or Quarterstaff. Recasting replaces your previous Shillelagh effect.", mechanics=shillelagh_mechanics()), spellLists=(SpellListType.DRUID,), url='http://dnd2024.wikidot.com/spell:shillelagh', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.SHOCKING_GRASP, name=SpellId.SHOCKING_GRASP, level=0, school=SpellSchool.EVOCATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.TOUCH), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", mechanics=spell_attack_damage_mechanics(1, DiceType.D8, DamageType.LIGHTNING, scaling=cantrip_damage_scaling(DiceType.D8))), spellLists=(SpellListType.ARTIFICER, SpellListType.SORCERER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:shocking-grasp'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.SORCEROUS_BURST, name=SpellId.SORCEROUS_BURST, level=0, school=SpellSchool.EVOCATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=120), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", mechanics=FeatureMechanics(activatedEffects=[*spell_damage_type_choice_effects(1, DiceType.D8, (DamageType.ACID, DamageType.COLD, DamageType.FIRE, DamageType.LIGHTNING, DamageType.POISON, DamageType.PSYCHIC, DamageType.THUNDER), trigger=SpellEffectTrigger.ON_HIT, attack=SpellAttackType.RANGED_SPELL_ATTACK, scaling=[spell_scaling(SpellScalingType.CANTRIP_LEVEL, dice_count=1, dice_type=DiceType.D8, description="Damage increases at character levels 5, 11, and 17.")], description="If any d8 rolls an 8, use the matching bonus damage button manually. Extra dice are limited by your spellcasting ability modifier."), *spell_damage_type_choice_effects(1, DiceType.D8, (DamageType.ACID, DamageType.COLD, DamageType.FIRE, DamageType.LIGHTNING, DamageType.POISON, DamageType.PSYCHIC, DamageType.THUNDER), action_prefix="Bonus", trigger=SpellEffectTrigger.SPECIAL, description="Manual bonus die for Sorcerous Burst when a matching damage die rolls an 8.")])), spellLists=(SpellListType.SORCERER,), url='http://dnd2024.wikidot.com/spell:sorcerous-burst'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.SPARE_THE_DYING, name=SpellId.SPARE_THE_DYING, level=0, school=SpellSchool.NECROMANCY, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=15), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", mechanics=FeatureMechanics(activatedEffects=[spell_condition_effect(ConditionType.STABLE, trigger=SpellEffectTrigger.ON_CAST, scaling=[spell_scaling(SpellScalingType.CANTRIP_LEVEL, description="Range doubles at character levels 5, 11, and 17; update range manually when needed.")], action_label="Stabilize", description="Choose a creature within range that has 0 Hit Points and isn't dead. The creature becomes Stable.")])), spellLists=(SpellListType.ARTIFICER, SpellListType.CLERIC, SpellListType.DRUID), url='http://dnd2024.wikidot.com/spell:spare-the-dying'),
@@ -1087,7 +1241,7 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.THORN_WHIP, name=SpellId.THORN_WHIP, level=0, school=SpellSchool.TRANSMUTATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", mechanics=spell_attack_damage_mechanics(1, DiceType.D6, DamageType.PIERCING, scaling=cantrip_damage_scaling(DiceType.D6))), spellLists=(SpellListType.ARTIFICER, SpellListType.DRUID), url='http://dnd2024.wikidot.com/spell:thorn-whip', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.THUNDERCLAP, name=SpellId.THUNDERCLAP, level=0, school=SpellSchool.EVOCATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF, area=SpellRadiusArea(radiusFeet=5)), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.SOMATIC], description="", mechanics=FeatureMechanics(activatedEffects=[saving_throw_damage_node(1, DiceType.D6, DamageType.THUNDER, AbilityType.CONSTITUTION, scaling=cantrip_damage_scaling(DiceType.D6))])), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.DRUID, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:thunderclap'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.TOLL_THE_DEAD, name=SpellId.TOLL_THE_DEAD, level=0, school=SpellSchool.NECROMANCY, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", mechanics=FeatureMechanics(activatedEffects=[spell_damage_effect(1, DiceType.D8, DamageType.NECROTIC, saving_throw=spell_save(AbilityType.WISDOM), scaling=[spell_scaling(SpellScalingType.CANTRIP_LEVEL, dice_count=1, dice_type=DiceType.D8, description="Damage increases at character levels 5, 11, and 17.")], action_label="Healthy", description="Use this damage if the target is missing no Hit Points."), spell_damage_effect(1, DiceType.D12, DamageType.NECROTIC, saving_throw=spell_save(AbilityType.WISDOM), scaling=[spell_scaling(SpellScalingType.CANTRIP_LEVEL, dice_count=1, dice_type=DiceType.D12, description="Damage increases at character levels 5, 11, and 17.")], action_label="Wounded", description="Use this damage if the target is missing any Hit Points.")])), spellLists=(SpellListType.CLERIC, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:toll-the-dead'),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.TRUE_STRIKE, name=SpellId.TRUE_STRIKE, level=0, school=SpellSchool.DIVINATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="Make one weapon attack with the weapon used in the spell's casting. Use your spellcasting ability for the attack and damage rolls instead of Strength or Dexterity, and choose Radiant or the weapon's normal damage type. Extra Radiant damage starts at character level 5; temporary weapon attack overrides are tracked manually.", mechanics=FeatureMechanics(activatedEffects=[spell_damage_effect(0, DiceType.D6, DamageType.RADIANT, trigger=SpellEffectTrigger.ON_HIT, scaling=[spell_scaling(SpellScalingType.CANTRIP_LEVEL, dice_count=1, dice_type=DiceType.D6, description="Extra Radiant damage is 1d6 at character level 5, 2d6 at 11, and 3d6 at 17.")], action_label="Radiant Bonus", description="Roll this only at character level 5 or higher after the spell's weapon attack deals damage.")])), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:true-strike', material=True),
+    SpellCatalogRecord(entry=SpellEntry(id=SpellId.TRUE_STRIKE, name=SpellId.TRUE_STRIKE, level=0, school=SpellSchool.DIVINATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="Select a wielded proficient weapon, use your spellcasting ability, and choose its normal damage type or Radiant.", mechanics=true_strike_mechanics()), spellLists=(SpellListType.ARTIFICER, SpellListType.BARD, SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:true-strike', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.VICIOUS_MOCKERY, name=SpellId.VICIOUS_MOCKERY, level=0, school=SpellSchool.ENCHANTMENT, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL], description="", mechanics=FeatureMechanics(activatedEffects=[spell_damage_effect(1, DiceType.D6, DamageType.PSYCHIC, saving_throw=spell_save(AbilityType.WISDOM), scaling=[spell_scaling(SpellScalingType.CANTRIP_LEVEL, dice_count=1, dice_type=DiceType.D6, description="Damage increases at character levels 5, 11, and 17.")], description="On a failed save, the target has Disadvantage on the next attack roll it makes before the end of its next turn.")])), spellLists=(SpellListType.BARD,), url='http://dnd2024.wikidot.com/spell:vicious-mockery'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.WORD_OF_RADIANCE, name=SpellId.WORD_OF_RADIANCE, level=0, school=SpellSchool.EVOCATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF, area=SpellRadiusArea(radiusFeet=5)), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.MATERIAL], description="", mechanics=FeatureMechanics(activatedEffects=[saving_throw_damage_node(1, DiceType.D6, DamageType.RADIANT, AbilityType.CONSTITUTION, scaling=cantrip_damage_scaling(DiceType.D6))])), spellLists=(SpellListType.CLERIC,), url='http://dnd2024.wikidot.com/spell:word-of-radiance', material=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.ALARM, name=SpellId.ALARM, level=1, school=SpellSchool.ABJURATION, castingTime=TimeEconomy.SPECIAL, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.HOUR, amount=8), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", ritual=True, castingDuration=SpellDuration(SpellDurationUnit.MINUTE, amount=1)), spellLists=(SpellListType.ARTIFICER, SpellListType.RANGER, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:alarm', material=True),
@@ -1392,7 +1546,7 @@ SPELL_CATALOG_RECORDS: tuple[SpellCatalogRecord, ...] = (
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.CONJURE_ANIMALS, name=SpellId.CONJURE_ANIMALS, level=3, school=SpellSchool.CONJURATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=10, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description="", concentration=True), spellLists=(SpellListType.DRUID, SpellListType.RANGER), url='http://dnd2024.wikidot.com/spell:conjure-animals'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.CONJURE_BARRAGE, name=SpellId.CONJURE_BARRAGE, level=3, school=SpellSchool.CONJURATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF, area=SpellConeArea(60)), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", mechanics=FeatureMechanics(activatedEffects=[spell_damage_effect(5, DiceType.D8, DamageType.FORCE, target=SpellEffectTarget.AREA, saving_throw=spell_save(AbilityType.DEXTERITY, SpellSaveOutcome.HALF_DAMAGE), scaling=[spell_scaling(SpellScalingType.SPELL_SLOT_LEVEL, dice_count=1, dice_type=DiceType.D8, description="Damage increases by 1d8 for each spell slot level above 3.")])])), spellLists=(SpellListType.RANGER,), url='http://dnd2024.wikidot.com/spell:conjure-barrage', material=True, materialCost=True),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.CONJURE_CONSTRUCTS, name=SpellId.CONJURE_CONSTRUCTS, level=3, school=SpellSchool.CONJURATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=10, maximum=True), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC, SpellComponent.MATERIAL], description="", concentration=True), spellLists=(SpellListType.WIZARD,), url='http://dnd2024.wikidot.com/spell:conjure-constructs', material=True),
-    SpellCatalogRecord(entry=SpellEntry(id=SpellId.COUNTERSPELL, name=SpellId.COUNTERSPELL, level=3, school=SpellSchool.ABJURATION, castingTime=TimeEconomy.REACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.SOMATIC], description="", mechanics=FeatureMechanics(interactions=[Interaction(trigger=ResolutionEventType.SPELL_DECLARED, timing=InteractionTiming.BEFORE_EVENT, decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM), predicates=[SourceIsSpellPredicate()], operations=[CancelPendingAction()])])), spellLists=(SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:counterspell'),
+    SpellCatalogRecord(entry=SpellEntry(id=SpellId.COUNTERSPELL, name=SpellId.COUNTERSPELL, level=3, school=SpellSchool.ABJURATION, castingTime=TimeEconomy.REACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.SOMATIC], description="", mechanics=FeatureMechanics(interactions=[Interaction(trigger=ResolutionEventType.SPELL_DECLARED, timing=InteractionTiming.BEFORE_EVENT, decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM), predicates=[SourceIsSpellPredicate(), SourceSpellPredicate(SpellId.COUNTERSPELL, expected=False)], operations=[CancelPendingAction()])])), spellLists=(SpellListType.SORCERER, SpellListType.WARLOCK, SpellListType.WIZARD), url='http://dnd2024.wikidot.com/spell:counterspell'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.CREATE_FOOD_AND_WATER, name=SpellId.CREATE_FOOD_AND_WATER, level=3, school=SpellSchool.CONJURATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=30), duration=SpellDuration(SpellDurationUnit.INSTANTANEOUS), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.ARTIFICER, SpellListType.CLERIC, SpellListType.PALADIN), url='http://dnd2024.wikidot.com/spell:create-food-and-water'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.CRUSADER_S_MANTLE, name=SpellId.CRUSADER_S_MANTLE, level=3, school=SpellSchool.EVOCATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.SELF), duration=SpellDuration(SpellDurationUnit.MINUTE, amount=1, maximum=True), components=[SpellComponent.VERBAL], description="", concentration=True), spellLists=(SpellListType.PALADIN,), url='http://dnd2024.wikidot.com/spell:crusader-s-mantle'),
     SpellCatalogRecord(entry=SpellEntry(id=SpellId.DAYLIGHT, name=SpellId.DAYLIGHT, level=3, school=SpellSchool.EVOCATION, castingTime=TimeEconomy.ACTION, targeting=SpellTargeting(SpellRangeType.DISTANCE, distanceFeet=60), duration=SpellDuration(SpellDurationUnit.HOUR, amount=1), components=[SpellComponent.VERBAL, SpellComponent.SOMATIC], description=""), spellLists=(SpellListType.CLERIC, SpellListType.DRUID, SpellListType.PALADIN, SpellListType.RANGER, SpellListType.SORCERER), url='http://dnd2024.wikidot.com/spell:daylight'),

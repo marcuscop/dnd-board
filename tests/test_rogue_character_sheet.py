@@ -27,8 +27,7 @@ from dnd_board.rules.classes.rogue.archetypes import (
     RogueSubclassAttackType,
     arcane_trickster_catalog_spell,
     arcane_trickster_spell_options,
-    is_arcane_trickster_spell_selection_valid,
-    pruned_arcane_trickster_spells,
+    normalized_arcane_trickster_spell,
     rogue_subclass_attacks,
 )
 from dnd_board.rules.classes.rogue.base import RogueSubclassType, subclass_description
@@ -155,35 +154,15 @@ def test_arcane_trickster_spell_options_expand_with_level() -> None:
     assert "shatter" in level_7_options
 
 
-def test_arcane_trickster_rejects_unknown_spell_and_prunes_to_level() -> None:
-    spells = [
-        arcane_trickster_catalog_spell("fireBolt"),
-        arcane_trickster_catalog_spell("mageHand"),
-        arcane_trickster_catalog_spell("mindSliver"),
-        arcane_trickster_catalog_spell("shield"),
-        arcane_trickster_catalog_spell("magicMissile"),
-        arcane_trickster_catalog_spell("charmPerson"),
-        arcane_trickster_catalog_spell("disguiseSelf"),
-        arcane_trickster_catalog_spell("fogCloud"),
-    ]
-
+def test_arcane_trickster_rejects_unknown_catalog_spell() -> None:
     assert arcane_trickster_catalog_spell("notASpell") is None
-    assert [spell.id for spell in pruned_arcane_trickster_spells(3, [spell for spell in spells if spell is not None])] == [
-        SpellId.FIRE_BOLT,
-        SpellId.MAGE_HAND,
-        SpellId.MIND_SLIVER,
-        SpellId.SHIELD,
-        SpellId.MAGIC_MISSILE,
-        SpellId.CHARM_PERSON,
-    ]
-    assert is_arcane_trickster_spell_selection_valid(3, [spell for spell in spells if spell is not None][:6]) is True
 
 
 def test_arcane_trickster_uses_configured_spells_with_intelligence() -> None:
     sheet = rogue_sheet(
         3,
         subclass=RogueSubclassType.ARCANE_TRICKSTER,
-        spells=[arcane_trickster_catalog_spell("mageHand")],
+        spells=[normalized_arcane_trickster_spell(arcane_trickster_catalog_spell("mageHand"))],
     )
 
     assert sheet.spells[0].id == SpellId.MAGE_HAND

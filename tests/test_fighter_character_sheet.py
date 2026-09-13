@@ -14,6 +14,8 @@ from dnd_board.character_sheet import (
     AttackKind,
     BattleMasterManeuverType,
     CharacterClassLevel,
+    ClassOptionKind,
+    ClassOptionSelection,
     ClassType,
     ConditionType,
     DamageType,
@@ -92,8 +94,6 @@ from dnd_board.rules.classes.fighter.archetypes import (
     eldritch_knight_max_spell_level,
     fighter_subclass_abilities,
     giants_might_die,
-    is_eldritch_knight_spell_selection_valid,
-    pruned_eldritch_knight_spells,
     psionic_energy_die,
 )
 from dnd_board.rules.classes.fighter.battle_master import BATTLE_MASTER_2024_MANEUVERS, BATTLE_MASTER_MANEUVERS
@@ -328,7 +328,7 @@ def test_supported_general_feat_mechanics_are_reflected_on_sheet() -> None:
             name="Feat Fighter",
             owner="player-1",
             avatarUrl=None,
-            maxHp=44,
+            maxHp=84,
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=14, intelligence=10, wisdom=10, charisma=10),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5, fightingStyles=[FightingStyleType.DEFENSE])],
@@ -770,7 +770,7 @@ def test_fighting_style_superior_technique_can_select_one_maneuver() -> None:
                         name=ClassType.FIGHTER,
                         level=1,
                         fightingStyle=FightingStyleType.SUPERIOR_TECHNIQUE,
-                        maneuvers=[BattleMasterManeuverType.TRIP_ATTACK],
+                        classOptions=[ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.TRIP_ATTACK)],
                     )
                 ],
             ),
@@ -818,7 +818,7 @@ def test_battle_master_superior_technique_adds_one_scaled_superiority_die() -> N
                         level=10,
                         subclass=FighterSubclassType.BATTLE_MASTER,
                         fightingStyle=FightingStyleType.SUPERIOR_TECHNIQUE,
-                        maneuvers=[BattleMasterManeuverType.PRECISION_ATTACK],
+                        classOptions=[ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.PRECISION_ATTACK)],
                     )
                 ],
             ),
@@ -1190,46 +1190,11 @@ def test_eldritch_knight_spell_progression_limits_flexible_school_choices() -> N
     assert "sleep" in level_8_after_flexible
 
 
-def test_eldritch_knight_spell_helpers_cover_low_level_and_pruning_branches() -> None:
-    spells = [
-        eldritch_knight_catalog_spell("fireBolt"),
-        eldritch_knight_catalog_spell("mageHand"),
-        eldritch_knight_catalog_spell("minorIllusion"),
-        eldritch_knight_catalog_spell("shield"),
-        eldritch_knight_catalog_spell("magicMissile"),
-        eldritch_knight_catalog_spell("findFamiliar"),
-        eldritch_knight_catalog_spell("sleep"),
-        eldritch_knight_catalog_spell("shatter"),
-    ]
-
+def test_eldritch_knight_spell_helpers_cover_spell_level_progression() -> None:
     assert eldritch_knight_max_spell_level(1) == 0
     assert eldritch_knight_max_spell_level(7) == 2
     assert eldritch_knight_max_spell_level(13) == 3
     assert eldritch_knight_flexible_spell_limit(2) == 0
-    assert is_eldritch_knight_spell_selection_valid(2, []) is True
-    assert is_eldritch_knight_spell_selection_valid(2, [eldritch_knight_catalog_spell("fireBolt")]) is False
-    assert pruned_eldritch_knight_spells(2, [spell for spell in spells if spell is not None]) == []
-    assert [spell.id for spell in pruned_eldritch_knight_spells(3, [spell for spell in spells if spell is not None])] == [
-        SpellId.FIRE_BOLT,
-        SpellId.MAGE_HAND,
-        SpellId.SHIELD,
-        SpellId.MAGIC_MISSILE,
-        SpellId.FIND_FAMILIAR,
-    ]
-    assert [spell.id for spell in pruned_eldritch_knight_spells(3, [spell for spell in spells if spell is not None][:4])] == [
-        SpellId.FIRE_BOLT,
-        SpellId.MAGE_HAND,
-        SpellId.SHIELD,
-    ]
-    assert [spell.id for spell in pruned_eldritch_knight_spells(3, [spell for spell in spells if spell is not None][3:])] == [
-        SpellId.SHIELD,
-        SpellId.MAGIC_MISSILE,
-        SpellId.FIND_FAMILIAR,
-    ]
-    assert [spell.id for spell in pruned_eldritch_knight_spells(3, [spell for spell in [spells[3], spells[5], spells[6], spells[6]] if spell is not None])] == [
-        SpellId.SHIELD,
-        SpellId.FIND_FAMILIAR,
-    ]
 
 
 def test_fighter_helpers_handle_missing_or_nonstandard_fighter_state() -> None:
@@ -1248,8 +1213,6 @@ def test_eldritch_knight_selection_and_defensive_slot_fallback(monkeypatch) -> N
     fire_bolt = eldritch_knight_catalog_spell(SpellId.FIRE_BOLT)
     mage_hand = eldritch_knight_catalog_spell(SpellId.MAGE_HAND)
     assert all(spell is not None for spell in [shield, magic_missile, find_familiar, fire_bolt, mage_hand])
-
-    assert is_eldritch_knight_spell_selection_valid(3, [fire_bolt, mage_hand, shield, magic_missile, find_familiar]) is True
 
     monkeypatch.setitem(
         fighter_archetypes.ELDRITCH_KNIGHT_SPELLCASTING,
@@ -1281,7 +1244,11 @@ def test_fighter_subclass_and_superiority_helpers_handle_duplicate_or_missing_pr
                 name=ClassType.FIGHTER,
                 level=3,
                 subclass=FighterSubclassType.BATTLE_MASTER,
-                maneuvers=[BattleMasterManeuverType.AMBUSH, BattleMasterManeuverType.AMBUSH, BattleMasterManeuverType.TRIP_ATTACK],
+                classOptions=[
+                    ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.AMBUSH),
+                    ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.AMBUSH),
+                    ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.TRIP_ATTACK),
+                ],
             )
         ]
     )
@@ -1308,7 +1275,7 @@ def test_eldritch_knight_uses_configured_spells_with_intelligence() -> None:
             SpellEntry(
                 id=SpellId.SHIELD,
                 name=SpellId.SHIELD,
-                status=SpellStatus(source=SpellSource.WIZARD, castingAbility=AbilityType.WISDOM),
+                status=SpellStatus(source=SpellSource.ELDRITCH_KNIGHT, castingAbility=AbilityType.WISDOM),
                 level=1,
                 school=SpellSchool.ABJURATION,
                 castingTime=TimeEconomy.REACTION,
@@ -1322,7 +1289,7 @@ def test_eldritch_knight_uses_configured_spells_with_intelligence() -> None:
 
     assert sheet.spells[0].name == SpellId.SHIELD
     assert sheet.spells[0].castingAbility == AbilityType.INTELLIGENCE
-    assert sheet.spells[0].source == SpellSource.WIZARD
+    assert sheet.spells[0].source == SpellSource.ELDRITCH_KNIGHT
 
 
 def test_spell_targeting_models_range_and_area_geometry() -> None:
@@ -1453,9 +1420,11 @@ def fighter_sheet(
                         level=level,
                         subclass=subclass,
                         fightingStyle=fighting_style,
-                        maneuvers=maneuvers,
-                        arcaneShots=arcane_shots,
-                        runes=runes,
+                        classOptions=[
+                            *(ClassOptionSelection(ClassOptionKind.MANEUVER, option) for option in maneuvers or []),
+                            *(ClassOptionSelection(ClassOptionKind.ARCANE_SHOT, option) for option in arcane_shots or []),
+                            *(ClassOptionSelection(ClassOptionKind.RUNE, option) for option in runes or []),
+                        ] or None,
                     )
                 ],
                 equipment=equipment,

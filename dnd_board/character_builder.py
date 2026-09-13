@@ -43,7 +43,17 @@ from dnd_board.rules.backgrounds import (
     background_tool_options,
 )
 from dnd_board.rules.shared.resources import ResourceId
-from dnd_board.rules.progression import class_hit_die
+from dnd_board.rules.progression import (
+    FightingStyleGrant,
+    ProgressionChoiceId,
+    ProgressionGrantRecord,
+    ProgressionGrantSource,
+    ProgressionRuleViolation,
+    apply_progression_grants,
+    class_hit_die,
+    evaluate_progression_rule,
+    progression_rule,
+)
 from dnd_board.rules.species import SpeciesType, species_definition, species_hit_point_bonus, species_label, species_traits
 
 
@@ -202,18 +212,35 @@ def build_party_member_config(request: CharacterBuilderRequest) -> PartyMemberCo
         level=CHARACTER_BUILDER_STARTING_LEVEL,
         fightingStyles=[request.fighting_style] if request.fighting_style else None,
     )
-    skills = builder_skill_proficiencies(request.background, request.class_skill_proficiencies, request.class_expertise)
+    base_skills, progression_grants, skills = builder_skill_progression(request, character_class)
+    if request.fighting_style is not None:
+        progression_grants.append(ProgressionGrantRecord(
+            source=ProgressionGrantSource(
+                ProgressionChoiceId.FIGHTER_FIGHTING_STYLES,
+                ClassType.FIGHTER,
+            ),
+            grants=(FightingStyleGrant(
+                ClassType.FIGHTER,
+                CHARACTER_BUILDER_STARTING_LEVEL,
+                request.fighting_style,
+            ),),
+        ))
     return PartyMemberConfig(
         id=request.member_id,
         name=request.name,
         maxHp=fixed_max_hp(request.class_type, CHARACTER_BUILDER_STARTING_LEVEL, request.ability_scores, request.race, request.background),
+        baseMaxHp=class_hit_die(request.class_type),
+        manualMaxHpAdjustment=0,
         abilityScores=request.ability_scores,
+        baseAbilityScores=replace(request.ability_scores),
         sheet=PartyMemberSheet(
             race=species_label(request.race),
             background=background_label(request.background),
             classes=[character_class],
             speed=species.speed,
             skills=skills or None,
+            baseSkills=base_skills or None,
+            progressionGrants=progression_grants or None,
             proficiencies=background_proficiencies(request.tool_proficiency) or None,
             feats=background_feats(request.background) or None,
             traits=species_traits(request.race) or None,
@@ -266,7 +293,10 @@ def background_details() -> dict[str, dict[str, Any]]:
 
 
 def class_details() -> dict[str, dict[str, Any]]:
+    from dnd_board.rules.classes.fighter.base import FIGHTER_PROGRESSION_DEFINITION
+    from dnd_board.rules.classes.rogue.base import ROGUE_PROGRESSION_DEFINITION
     from dnd_board.rules.classes.wizard.base import (
+        WIZARD_PROGRESSION_DEFINITION,
         wizard_cantrip_count,
         wizard_cantrip_options,
         wizard_prepared_spell_count,
@@ -274,22 +304,25 @@ def class_details() -> dict[str, dict[str, Any]]:
         wizard_spellbook_spell_count,
         wizard_spellbook_spell_options,
     )
-    from dnd_board.rules.progression import (
-        fighter_fighting_style_count,
-        fighter_skill_option_types,
-        rogue_expertise_count,
-        rogue_skill_option_types,
-        wizard_skill_option_types,
-    )
+    from dnd_board.rules.progression import fighting_style_acquisition_levels
 
     details: dict[str, dict[str, Any]] = {}
     for class_type in SUPPORTED_CLASS_TYPES:
         character_class = CharacterClassLevel(name=class_type, level=CHARACTER_BUILDER_STARTING_LEVEL)
-        skill_options = {
-            ClassType.FIGHTER: fighter_skill_option_types,
-            ClassType.ROGUE: rogue_skill_option_types,
-            ClassType.WIZARD: wizard_skill_option_types,
-        }[class_type]()
+        progression_definition = {
+            ClassType.FIGHTER: FIGHTER_PROGRESSION_DEFINITION,
+            ClassType.ROGUE: ROGUE_PROGRESSION_DEFINITION,
+            ClassType.WIZARD: WIZARD_PROGRESSION_DEFINITION,
+        }[class_type]
+        skill_options = list(progression_definition.skillChoices[0].candidates)
+        expertise_count = next(
+            (
+                choice.count_at_level(character_class.level)
+                for choice in progression_definition.skillChoices
+                if choice.proficiency == ProficiencyLevel.EXPERTISE
+            ),
+            0,
+        )
         details[enum_key(class_type)] = {
             "skillProficiencies": {
                 "minimum": class_skill_proficiency_count(class_type),
@@ -297,12 +330,12 @@ def class_details() -> dict[str, dict[str, Any]]:
                 "options": serialize_options(enum_options(tuple(skill_options))),
             },
             "expertise": {
-                "minimum": rogue_expertise_count(character_class) if class_type == ClassType.ROGUE else 0,
-                "maximum": rogue_expertise_count(character_class) if class_type == ClassType.ROGUE else 0,
+                "minimum": expertise_count,
+                "maximum": expertise_count,
             },
             "fightingStyles": {
-                "minimum": fighter_fighting_style_count(character_class) if class_type == ClassType.FIGHTER else 0,
-                "maximum": fighter_fighting_style_count(character_class) if class_type == ClassType.FIGHTER else 0,
+                "minimum": len(fighting_style_acquisition_levels(character_class)) if class_type == ClassType.FIGHTER else 0,
+                "maximum": len(fighting_style_acquisition_levels(character_class)) if class_type == ClassType.FIGHTER else 0,
                 "options": serialize_options(enum_options(FightingStyleType)),
             },
             "wizardSpells": {
@@ -480,13 +513,15 @@ def class_skill_proficiency_count(class_type: ClassType) -> int:
 
 
 def class_skill_options(class_type: ClassType) -> tuple[SkillType, ...]:
-    from dnd_board.rules.progression import fighter_skill_option_types, rogue_skill_option_types, wizard_skill_option_types
+    from dnd_board.rules.classes.fighter.base import FIGHTER_PROGRESSION_DEFINITION
+    from dnd_board.rules.classes.rogue.base import ROGUE_PROGRESSION_DEFINITION
+    from dnd_board.rules.classes.wizard.base import WIZARD_PROGRESSION_DEFINITION
 
-    return tuple({
-        ClassType.FIGHTER: fighter_skill_option_types,
-        ClassType.ROGUE: rogue_skill_option_types,
-        ClassType.WIZARD: wizard_skill_option_types,
-    }[class_type]())
+    return {
+        ClassType.FIGHTER: FIGHTER_PROGRESSION_DEFINITION,
+        ClassType.ROGUE: ROGUE_PROGRESSION_DEFINITION,
+        ClassType.WIZARD: WIZARD_PROGRESSION_DEFINITION,
+    }[class_type].skillChoices[0].candidates
 
 
 def class_expertise_from_payload(class_type: ClassType, value: Any, background: BackgroundType, class_skills: tuple[SkillType, ...]) -> tuple[SkillType, ...]:
@@ -524,46 +559,73 @@ def fighting_style_from_payload(class_type: ClassType, value: Any) -> FightingSt
 def wizard_cantrips_from_payload(class_type: ClassType, value: Any) -> tuple[SpellId, ...]:
     if class_type != ClassType.WIZARD:
         return ()
-    from dnd_board.rules.classes.wizard.base import is_wizard_cantrip_selection_valid
     from dnd_board.rules.classes.wizard.base import wizard_cantrip_options
 
     if value in (None, ()) or value == []:
         return tuple(spell.id for spell in wizard_cantrip_options(CHARACTER_BUILDER_STARTING_LEVEL)[:3])
     spells = wizard_spell_entries_from_payload(value)
-    if not is_wizard_cantrip_selection_valid(CHARACTER_BUILDER_STARTING_LEVEL, spells):
-        raise ValueError("Choose legal Wizard cantrips")
+    validate_builder_wizard_spell_selection(ProgressionChoiceId.WIZARD_CANTRIPS, spells)
     return tuple(spell.id for spell in spells)
 
 
 def wizard_spellbook_spells_from_payload(class_type: ClassType, value: Any) -> tuple[SpellId, ...]:
     if class_type != ClassType.WIZARD:
         return ()
-    from dnd_board.rules.classes.wizard.base import is_wizard_spellbook_selection_valid
     from dnd_board.rules.classes.wizard.base import wizard_spellbook_spell_count, wizard_spellbook_spell_options
 
     if value in (None, ()) or value == []:
         count = wizard_spellbook_spell_count(CharacterClassLevel(name=ClassType.WIZARD, level=CHARACTER_BUILDER_STARTING_LEVEL))
         return tuple(spell.id for spell in wizard_spellbook_spell_options(CHARACTER_BUILDER_STARTING_LEVEL)[:count])
     spells = wizard_spell_entries_from_payload(value)
-    if not is_wizard_spellbook_selection_valid(CHARACTER_BUILDER_STARTING_LEVEL, spells):
-        raise ValueError("Choose legal Wizard spellbook spells")
+    validate_builder_wizard_spell_selection(ProgressionChoiceId.WIZARD_SPELLBOOK_SPELLS, spells)
     return tuple(spell.id for spell in spells)
 
 
 def wizard_prepared_spells_from_payload(class_type: ClassType, value: Any, spellbook_spells: tuple[SpellId, ...]) -> tuple[SpellId, ...]:
     if class_type != ClassType.WIZARD:
         return ()
-    from dnd_board.rules.classes.wizard.base import is_wizard_prepared_spell_selection_valid
-
     if value in (None, ()) or value == []:
         return tuple(spellbook_spells[:4])
     spells = wizard_spell_entries_from_payload(value)
-    if not is_wizard_prepared_spell_selection_valid(CHARACTER_BUILDER_STARTING_LEVEL, spells):
-        raise ValueError("Choose legal prepared Wizard spells")
-    spellbook_ids = set(spellbook_spells)
-    if any(spell.id not in spellbook_ids for spell in spells):
-        raise ValueError("Prepared Wizard spells must be in your spellbook")
+    validate_builder_wizard_spell_selection(
+        ProgressionChoiceId.WIZARD_PREPARED_SPELLS,
+        spells,
+        spellbook=wizard_spell_entries(spellbook_spells),
+    )
     return tuple(spell.id for spell in spells)
+
+
+def validate_builder_wizard_spell_selection(
+    choice_id: ProgressionChoiceId,
+    spells: list[SpellEntry],
+    *,
+    spellbook: list[SpellEntry] | None = None,
+) -> None:
+    classes = [CharacterClassLevel(name=ClassType.WIZARD, level=CHARACTER_BUILDER_STARTING_LEVEL)]
+    rule = progression_rule(choice_id, classes, {})
+    if rule is None:
+        raise ValueError("Wizard spell progression is unavailable")
+    try:
+        evaluate_progression_rule(
+            rule,
+            classes,
+            {},
+            [enum_key(spell.id) for spell in spells],
+            spellbook=spellbook,
+        )
+    except ProgressionRuleViolation as error:
+        if (
+            choice_id == ProgressionChoiceId.WIZARD_PREPARED_SPELLS
+            and all(spell.level > 0 and spell.source == SpellSource.WIZARD for spell in spells)
+            and any(spell.id not in {entry.id for entry in spellbook or []} for spell in spells)
+        ):
+            raise ValueError("Prepared Wizard spells must be in your spellbook") from error
+        labels = {
+            ProgressionChoiceId.WIZARD_CANTRIPS: "Wizard cantrips",
+            ProgressionChoiceId.WIZARD_SPELLBOOK_SPELLS: "Wizard spellbook spells",
+            ProgressionChoiceId.WIZARD_PREPARED_SPELLS: "prepared Wizard spells",
+        }
+        raise ValueError(f"Choose legal {labels[choice_id]}") from error
 
 
 def wizard_spell_entries_from_payload(value: Any) -> list[SpellEntry]:
@@ -639,13 +701,79 @@ def wizard_spell_entries(spell_ids: tuple[SpellId, ...]) -> list[SpellEntry]:
     return [spell for spell_id in spell_ids if (spell := wizard_catalog_spell(spell_id)) is not None]
 
 
-def builder_skill_proficiencies(background: BackgroundType, class_skills: tuple[SkillType, ...], expertise: tuple[SkillType, ...]) -> dict[str, ProficiencyLevel]:
-    skills = dict(background_skill_proficiencies(background))
-    for skill in class_skills:
-        skills[enum_key(skill)] = ProficiencyLevel.PROFICIENT
-    for skill in expertise:
-        skills[enum_key(skill)] = ProficiencyLevel.EXPERTISE
-    return skills
+def builder_skill_progression(
+    request: CharacterBuilderRequest,
+    character_class: CharacterClassLevel,
+) -> tuple[
+    dict[str, ProficiencyLevel],
+    list[ProgressionGrantRecord],
+    dict[str, ProficiencyLevel],
+]:
+    base_skills = dict(background_skill_proficiencies(request.background))
+    classes = [character_class]
+    records: list[ProgressionGrantRecord] = []
+    skill_choice_ids = {
+        ClassType.FIGHTER: ProgressionChoiceId.FIGHTER_SKILL_PROFICIENCIES,
+        ClassType.ROGUE: ProgressionChoiceId.ROGUE_SKILL_PROFICIENCIES,
+        ClassType.WIZARD: ProgressionChoiceId.WIZARD_SKILL_PROFICIENCIES,
+    }
+    class_rule = progression_rule(
+        skill_choice_ids[request.class_type],
+        classes,
+        base_skills,
+    )
+    if class_rule is None:
+        raise ValueError("Character class has no skill progression rule")
+    class_evaluation = evaluate_progression_rule(
+        class_rule,
+        classes,
+        base_skills,
+        [enum_key(skill) for skill in request.class_skill_proficiencies],
+    )
+    records.append(ProgressionGrantRecord(class_evaluation.source, class_evaluation.grants))
+    skills = apply_progression_grants(base_skills, records)
+    if request.class_type == ClassType.ROGUE:
+        expertise_rule = progression_rule(
+            ProgressionChoiceId.ROGUE_EXPERTISE,
+            classes,
+            skills,
+        )
+        if expertise_rule is None:
+            raise ValueError("Rogue has no Expertise progression rule")
+        expertise_evaluation = evaluate_progression_rule(
+            expertise_rule,
+            classes,
+            skills,
+            [enum_key(skill) for skill in request.class_expertise],
+        )
+        records.append(ProgressionGrantRecord(
+            expertise_evaluation.source,
+            expertise_evaluation.grants,
+        ))
+        skills = apply_progression_grants(base_skills, records)
+    if request.class_type == ClassType.WIZARD:
+        wizard_selections = {
+            ProgressionChoiceId.WIZARD_CANTRIPS: request.wizard_cantrips,
+            ProgressionChoiceId.WIZARD_SPELLBOOK_SPELLS: request.wizard_spellbook_spells,
+            ProgressionChoiceId.WIZARD_PREPARED_SPELLS: request.wizard_prepared_spells,
+        }
+        wizard_spellbook = wizard_spell_entries(request.wizard_spellbook_spells)
+        for choice_id, selected_spells in wizard_selections.items():
+            rule = progression_rule(choice_id, classes, skills)
+            if rule is None:
+                raise ValueError("Wizard has no spell progression rule")
+            evaluation = evaluate_progression_rule(
+                rule,
+                classes,
+                skills,
+                [enum_key(spell_id) for spell_id in selected_spells],
+                spellbook=wizard_spellbook,
+            )
+            records.append(ProgressionGrantRecord(
+                evaluation.source,
+                evaluation.grants,
+            ))
+    return base_skills, records, skills
 
 
 def background_spell_resources(background: BackgroundType, selected_spells: tuple[SpellId, ...]) -> list[ResourceTracker]:

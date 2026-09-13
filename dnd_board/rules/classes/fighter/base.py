@@ -13,10 +13,14 @@ from dnd_board.character_sheet import (
     RollResolutionMode,
     SheetFeature,
     TimeEconomy,
+    ProficiencyLevel,
+    ProgressionChoiceType,
+    SkillType,
     enum_key,
     enum_label,
 )
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
+from dnd_board.rules.feats import FeatCategory
 from dnd_board.rules.shared.effects import (
     AmountCalculation,
     CalculatedAmount,
@@ -32,6 +36,7 @@ from dnd_board.rules.shared.effects import (
     RollOutcomePredicate,
 )
 from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId
+from dnd_board.rules.shared.progression_definitions import ClassProgressionDefinition, ProgressionChoiceId, ProgressionChoicePresentation, SkillProgressionDefinition
 
 
 class FighterFeatureType(Enum):
@@ -109,6 +114,12 @@ class FighterProgression:
     action_surge_uses: int = 0
     indomitable_uses: int = 0
     attack_count: int = 1
+
+
+@dataclass(frozen=True)
+class FightingStyleEntitlement:
+    minimumLevel: int
+    requiredSubclass: FighterSubclassType | None = None
 
 
 FIGHTER_LEVELS: dict[int, FighterProgression] = {
@@ -300,6 +311,93 @@ FIGHTER_LEVELS: dict[int, FighterProgression] = {
         attack_count=4,
     ),
 }
+
+
+FIGHTER_PROGRESSION_DEFINITION = ClassProgressionDefinition(
+    characterClass=ClassType.FIGHTER,
+    abilityScoreImprovementLevels=tuple(
+        level
+        for level, progression in FIGHTER_LEVELS.items()
+        if FighterFeatureType.ABILITY_SCORE_IMPROVEMENT in progression.features
+    ),
+    epicBoonLevel=next(
+        level
+        for level, progression in FIGHTER_LEVELS.items()
+        if FighterFeatureType.EPIC_BOON in progression.features
+    ),
+    subclasses=tuple(FighterSubclassType),
+    abilityScoreImprovementChoice=ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+    abilityScoreImprovementPresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.ABILITY_SCORE_IMPROVEMENT,
+        "Ability Score Improvement",
+        "Increase one ability score by 2, increase two ability scores by 1, or choose a feat. Optional Martial Versatility changes are not built yet.",
+    ),
+    abilityScoreImprovementFeatCategories=(FeatCategory.GENERAL,),
+    epicBoonChoice=ProgressionChoiceId.FIGHTER_EPIC_BOON,
+    epicBoonPresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.FEAT,
+        "Epic Boon",
+        "Choose an Epic Boon feat or another General feat for which you qualify.",
+    ),
+    epicBoonFeatCategories=(FeatCategory.EPIC_BOON, FeatCategory.GENERAL),
+    subclassChoice=ProgressionChoiceId.FIGHTER_SUBCLASS,
+    subclassPresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.SUBCLASS,
+        "Martial Archetype",
+        "Choose a Fighter Martial Archetype.",
+    ),
+    skillChoices=(SkillProgressionDefinition(
+        ProgressionChoiceId.FIGHTER_SKILL_PROFICIENCIES,
+        ProgressionChoicePresentation(
+            ProgressionChoiceType.SKILL_PROFICIENCIES,
+            "Fighter Skill Proficiencies",
+            "Choose Fighter skill proficiencies.",
+        ),
+        (
+            SkillType.ACROBATICS,
+            SkillType.ANIMAL_HANDLING,
+            SkillType.ATHLETICS,
+            SkillType.HISTORY,
+            SkillType.INSIGHT,
+            SkillType.INTIMIDATION,
+            SkillType.PERCEPTION,
+            SkillType.PERSUASION,
+            SkillType.SURVIVAL,
+        ),
+        2,
+        ProficiencyLevel.PROFICIENT,
+    ),),
+    fightingStyleChoice=ProgressionChoiceId.FIGHTER_FIGHTING_STYLES,
+    fightingStylePresentation=ProgressionChoicePresentation(
+        ProgressionChoiceType.FIGHTING_STYLE,
+        "Fighting Style",
+        "Choose Fighter Fighting Style feats. These are not repeatable.",
+    ),
+    fightingStyleFeatCategories=(FeatCategory.FIGHTING_STYLE,),
+)
+
+
+def fighter_skill_proficiency_count(fighter: CharacterClassLevel) -> int:
+    return FIGHTER_PROGRESSION_DEFINITION.skillChoices[0].count if fighter.level >= 1 else 0
+
+
+def fighter_skill_option_types() -> list[SkillType]:
+    return list(FIGHTER_PROGRESSION_DEFINITION.skillChoices[0].candidates)
+
+
+def fighter_fighting_style_entitlements(
+    fighter: CharacterClassLevel,
+) -> tuple[FightingStyleEntitlement, ...]:
+    entitlements = [FightingStyleEntitlement(1)]
+    if fighter.subclass == FighterSubclassType.CHAMPION and fighter.level >= 7:
+        entitlements.append(FightingStyleEntitlement(7, FighterSubclassType.CHAMPION))
+    if fighter.subclass == FighterSubclassType.BRUTE and fighter.level >= 10:
+        entitlements.append(FightingStyleEntitlement(10, FighterSubclassType.BRUTE))
+    return tuple(
+        entitlement
+        for entitlement in entitlements
+        if entitlement.minimumLevel <= fighter.level
+    )
 
 
 def fighter_level(classes: list[CharacterClassLevel]) -> int:

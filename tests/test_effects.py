@@ -26,6 +26,7 @@ from dnd_board.rules.shared.character_effects import (
     execute_pending_character_effect,
     start_character_effect_execution,
 )
+from dnd_board.rules.shared.condition_effects import normalize_conditions
 from dnd_board.rules.shared.effects import (
     ActiveOngoingEffect,
     AbilityCheck,
@@ -110,12 +111,24 @@ from dnd_board.rules.shared.effects import (
     recurring_effects_for_event,
     SequenceEffect,
     SourceHasComponentPredicate,
+    SourceSpellPredicate,
     TargetHasConditionPredicate,
     TemporaryHitPointsEffect,
     apply_interaction_operations,
     multiplied_damage_effect,
 )
 from dnd_board.rules.spells import spell_entry
+
+
+def test_condition_normalization_uses_condition_replacement_rules() -> None:
+    assert normalize_conditions([
+        ConditionType.PROTECTION_FROM_POISON,
+        ConditionType.POISONED,
+    ]) == [ConditionType.PROTECTION_FROM_POISON]
+    assert normalize_conditions([
+        ConditionType.UNCONSCIOUS,
+        ConditionType.DEAD,
+    ]) == [ConditionType.DEAD]
 
 
 class RecordingExecutionPort:
@@ -1021,3 +1034,43 @@ def test_suppress_condition_keeps_marker_but_disables_its_mechanics() -> None:
         EffectNodeId(()),
         [TargetHasConditionPredicate(ConditionType.FRIGHTENED)],
     )
+
+
+def test_source_spell_predicate_keeps_counterspell_recursion_policy_in_its_definition() -> None:
+    caster = build_character_sheet(
+        token_id="counterspell-caster",
+        kind=TokenKind.ASSET,
+        name="Caster",
+        owner="dm",
+        avatar_url=None,
+        party_member=None,
+        current_hp=None,
+        resource_overrides={},
+    )
+    counterspell = spell_entry(SpellId.COUNTERSPELL)
+    assert counterspell is not None
+    predicate = SourceSpellPredicate(SpellId.COUNTERSPELL, expected=False)
+    counterspell = replace(
+        counterspell,
+        mechanics=replace(
+            counterspell.mechanics,
+            activatedEffects=[ApplyEffect(DamageEffect(FixedAmount(1), DamageType.FORCE))],
+        ),
+    )
+    caster.spells = [counterspell]
+    roll = build_spell_damage_roll_payload(caster, "dm", counterspell)
+    context = CharacterEffectExecutionContext(roll, caster, caster)
+
+    assert not context.evaluate_predicates(EffectNodeId(()), [predicate])
+
+    fire_bolt = spell_entry(SpellId.FIRE_BOLT)
+    assert fire_bolt is not None
+    fire_bolt = replace(
+        fire_bolt,
+        status=SpellStatus(SpellSource.WIZARD, AbilityType.INTELLIGENCE),
+    )
+    caster.spells = [fire_bolt]
+    roll = build_spell_damage_roll_payload(caster, "dm", fire_bolt)
+    context = CharacterEffectExecutionContext(roll, caster, caster)
+
+    assert context.evaluate_predicates(EffectNodeId(()), [predicate])

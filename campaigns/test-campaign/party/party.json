@@ -23,6 +23,10 @@
               "$type": "int",
               "value": 44
             },
+            "manualMaxHpAdjustment": {
+              "$type": "int",
+              "value": 0
+            },
             "abilityScores": {
               "$type": "AbilityScores",
               "fields": {
@@ -127,6 +131,124 @@
                     }
                   }
                 },
+                "progressionGrants": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "ProgressionGrantRecord",
+                      "fields": {
+                        "source": {
+                          "$type": "ProgressionGrantSource",
+                          "fields": {
+                            "rule": {
+                              "$type": "ProgressionChoiceId",
+                              "value": "HIT_POINT_INCREASE"
+                            },
+                            "characterClass": {
+                              "$type": "ClassType",
+                              "value": "FIGHTER"
+                            }
+                          }
+                        },
+                        "grants": {
+                          "$type": "tuple",
+                          "items": [
+                            {
+                              "$type": "HitPointGrant",
+                              "fields": {
+                                "characterClass": {
+                                  "$type": "ClassType",
+                                  "value": "FIGHTER"
+                                },
+                                "minimumClassLevel": {
+                                  "$type": "int",
+                                  "value": 2
+                                },
+                                "choice": {
+                                  "$type": "HitPointChoiceOption",
+                                  "value": "FIXED"
+                                },
+                                "amount": {
+                                  "$type": "int",
+                                  "value": 8
+                                },
+                                "hitDieResult": {
+                                  "$type": "int",
+                                  "value": 6
+                                }
+                              }
+                            },
+                            {
+                              "$type": "HitPointGrant",
+                              "fields": {
+                                "characterClass": {
+                                  "$type": "ClassType",
+                                  "value": "FIGHTER"
+                                },
+                                "minimumClassLevel": {
+                                  "$type": "int",
+                                  "value": 3
+                                },
+                                "choice": {
+                                  "$type": "HitPointChoiceOption",
+                                  "value": "FIXED"
+                                },
+                                "amount": {
+                                  "$type": "int",
+                                  "value": 8
+                                },
+                                "hitDieResult": {
+                                  "$type": "int",
+                                  "value": 6
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "$type": "ProgressionGrantRecord",
+                      "fields": {
+                        "source": {
+                          "$type": "ProgressionGrantSource",
+                          "fields": {
+                            "rule": {
+                              "$type": "ProgressionChoiceId",
+                              "value": "FIGHTER_FIGHTING_STYLES"
+                            },
+                            "characterClass": {
+                              "$type": "ClassType",
+                              "value": "FIGHTER"
+                            }
+                          }
+                        },
+                        "grants": {
+                          "$type": "tuple",
+                          "items": [
+                            {
+                              "$type": "FightingStyleGrant",
+                              "fields": {
+                                "characterClass": {
+                                  "$type": "ClassType",
+                                  "value": "FIGHTER"
+                                },
+                                "minimumClassLevel": {
+                                  "$type": "int",
+                                  "value": 1
+                                },
+                                "style": {
+                                  "$type": "FightingStyleType",
+                                  "value": "UNARMED_FIGHTING"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
                 "savingThrowProficiencies": {
                   "$type": "list",
                   "items": [
@@ -166,19 +288,6 @@
                     {
                       "$type": "str",
                       "value": "Vehicles"
-                    }
-                  ]
-                },
-                "hitPointIncreases": {
-                  "$type": "list",
-                  "items": [
-                    {
-                      "$type": "int",
-                      "value": 8
-                    },
-                    {
-                      "$type": "int",
-                      "value": 8
                     }
                   ]
                 },
@@ -559,6 +668,10 @@
               "$type": "str",
               "value": "ex2.png"
             },
+            "manualMaxHpAdjustment": {
+              "$type": "int",
+              "value": 0
+            },
             "sheet": {
               "$type": "PartyMemberSheet",
               "fields": {
@@ -594,6 +707,10 @@
               "$type": "str",
               "value": "ex3.png"
             },
+            "manualMaxHpAdjustment": {
+              "$type": "int",
+              "value": 0
+            },
             "sheet": {
               "$type": "PartyMemberSheet",
               "fields": {}
@@ -615,6 +732,10 @@
               "$type": "str",
               "value": "ex4.png"
             },
+            "manualMaxHpAdjustment": {
+              "$type": "int",
+              "value": 0
+            },
             "sheet": {
               "$type": "PartyMemberSheet",
               "fields": {}
@@ -635,6 +756,10 @@
             "maxHp": {
               "$type": "int",
               "value": 18
+            },
+            "manualMaxHpAdjustment": {
+              "$type": "int",
+              "value": 0
             },
             "abilityScores": {
               "$type": "AbilityScores",
@@ -726,6 +851,59 @@
                       "value": "PROFICIENT"
                     }
                   }
+                },
+                "progressionGrants": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "ProgressionGrantRecord",
+                      "fields": {
+                        "source": {
+                          "$type": "ProgressionGrantSource",
+                          "fields": {
+                            "rule": {
+                              "$type": "ProgressionChoiceId",
+                              "value": "HIT_POINT_INCREASE"
+                            },
+                            "characterClass": {
+                              "$type": "ClassType",
+                              "value": "ROGUE"
+                            }
+                          }
+                        },
+                        "grants": {
+                          "$type": "tuple",
+                          "items": [
+                            {
+                              "$type": "HitPointGrant",
+                              "fields": {
+                                "characterClass": {
+                                  "$type": "ClassType",
+                                  "value": "ROGUE"
+                                },
+                                "minimumClassLevel": {
+                                  "$type": "int",
+                                  "value": 2
+                                },
+                                "choice": {
+                                  "$type": "HitPointChoiceOption",
+                                  "value": "FIXED"
+                                },
+                                "amount": {
+                                  "$type": "int",
+                                  "value": 7
+                                },
+                                "hitDieResult": {
+                                  "$type": "int",
+                                  "value": 5
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 },
                 "proficiencies": {
                   "$type": "list",
@@ -901,15 +1079,6 @@
                     }
                   ]
                 },
-                "hitPointIncreases": {
-                  "$type": "list",
-                  "items": [
-                    {
-                      "$type": "int",
-                      "value": 7
-                    }
-                  ]
-                },
                 "conditions": {
                   "$type": "list",
                   "items": [
@@ -992,6 +1161,10 @@
               "$type": "int",
               "value": 26
             },
+            "manualMaxHpAdjustment": {
+              "$type": "int",
+              "value": 0
+            },
             "abilityScores": {
               "$type": "AbilityScores",
               "fields": {
@@ -1014,6 +1187,35 @@
                 "wisdom": {
                   "$type": "int",
                   "value": 11
+                },
+                "charisma": {
+                  "$type": "int",
+                  "value": 12
+                }
+              }
+            },
+            "baseAbilityScores": {
+              "$type": "AbilityScores",
+              "fields": {
+                "strength": {
+                  "$type": "int",
+                  "value": 8
+                },
+                "dexterity": {
+                  "$type": "int",
+                  "value": 17
+                },
+                "constitution": {
+                  "$type": "int",
+                  "value": 14
+                },
+                "intelligence": {
+                  "$type": "int",
+                  "value": 14
+                },
+                "wisdom": {
+                  "$type": "int",
+                  "value": 10
                 },
                 "charisma": {
                   "$type": "int",
@@ -1078,6 +1280,174 @@
                       "value": "PROFICIENT"
                     }
                   }
+                },
+                "progressionGrants": {
+                  "$type": "list",
+                  "items": [
+                    {
+                      "$type": "ProgressionGrantRecord",
+                      "fields": {
+                        "source": {
+                          "$type": "ProgressionGrantSource",
+                          "fields": {
+                            "rule": {
+                              "$type": "ProgressionChoiceId",
+                              "value": "HIT_POINT_INCREASE"
+                            },
+                            "characterClass": {
+                              "$type": "ClassType",
+                              "value": "WIZARD"
+                            }
+                          }
+                        },
+                        "grants": {
+                          "$type": "tuple",
+                          "items": [
+                            {
+                              "$type": "HitPointGrant",
+                              "fields": {
+                                "characterClass": {
+                                  "$type": "ClassType",
+                                  "value": "WIZARD"
+                                },
+                                "minimumClassLevel": {
+                                  "$type": "int",
+                                  "value": 2
+                                },
+                                "choice": {
+                                  "$type": "HitPointChoiceOption",
+                                  "value": "FIXED"
+                                },
+                                "amount": {
+                                  "$type": "int",
+                                  "value": 6
+                                },
+                                "hitDieResult": {
+                                  "$type": "int",
+                                  "value": 4
+                                }
+                              }
+                            },
+                            {
+                              "$type": "HitPointGrant",
+                              "fields": {
+                                "characterClass": {
+                                  "$type": "ClassType",
+                                  "value": "WIZARD"
+                                },
+                                "minimumClassLevel": {
+                                  "$type": "int",
+                                  "value": 3
+                                },
+                                "choice": {
+                                  "$type": "HitPointChoiceOption",
+                                  "value": "FIXED"
+                                },
+                                "amount": {
+                                  "$type": "int",
+                                  "value": 6
+                                },
+                                "hitDieResult": {
+                                  "$type": "int",
+                                  "value": 4
+                                }
+                              }
+                            },
+                            {
+                              "$type": "HitPointGrant",
+                              "fields": {
+                                "characterClass": {
+                                  "$type": "ClassType",
+                                  "value": "WIZARD"
+                                },
+                                "minimumClassLevel": {
+                                  "$type": "int",
+                                  "value": 4
+                                },
+                                "choice": {
+                                  "$type": "HitPointChoiceOption",
+                                  "value": "FIXED"
+                                },
+                                "amount": {
+                                  "$type": "int",
+                                  "value": 6
+                                },
+                                "hitDieResult": {
+                                  "$type": "int",
+                                  "value": 4
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "$type": "ProgressionGrantRecord",
+                      "fields": {
+                        "source": {
+                          "$type": "ProgressionGrantSource",
+                          "fields": {
+                            "rule": {
+                              "$type": "ProgressionChoiceId",
+                              "value": "WIZARD_ABILITY_SCORE_IMPROVEMENT"
+                            },
+                            "characterClass": {
+                              "$type": "ClassType",
+                              "value": "WIZARD"
+                            }
+                          }
+                        },
+                        "grants": {
+                          "$type": "tuple",
+                          "items": [
+                            {
+                              "$type": "AbilityScoreGrant",
+                              "fields": {
+                                "characterClass": {
+                                  "$type": "ClassType",
+                                  "value": "WIZARD"
+                                },
+                                "minimumClassLevel": {
+                                  "$type": "int",
+                                  "value": 4
+                                },
+                                "ability": {
+                                  "$type": "AbilityType",
+                                  "value": "WISDOM"
+                                },
+                                "amount": {
+                                  "$type": "int",
+                                  "value": 1
+                                }
+                              }
+                            },
+                            {
+                              "$type": "AbilityScoreGrant",
+                              "fields": {
+                                "characterClass": {
+                                  "$type": "ClassType",
+                                  "value": "WIZARD"
+                                },
+                                "minimumClassLevel": {
+                                  "$type": "int",
+                                  "value": 4
+                                },
+                                "ability": {
+                                  "$type": "AbilityType",
+                                  "value": "INTELLIGENCE"
+                                },
+                                "amount": {
+                                  "$type": "int",
+                                  "value": 1
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 },
                 "proficiencies": {
                   "$type": "list",
@@ -4250,32 +4620,6 @@
                     }
                   ]
                 },
-                "hitPointIncreases": {
-                  "$type": "list",
-                  "items": [
-                    {
-                      "$type": "int",
-                      "value": 6
-                    },
-                    {
-                      "$type": "int",
-                      "value": 6
-                    },
-                    {
-                      "$type": "int",
-                      "value": 6
-                    }
-                  ]
-                },
-                "abilityScoreImprovements": {
-                  "$type": "list",
-                  "items": [
-                    {
-                      "$type": "str",
-                      "value": "wisdom:1,intelligence:1"
-                    }
-                  ]
-                },
                 "attacks": {
                   "$type": "list",
                   "items": [
@@ -4660,6 +5004,10 @@
             "maxHp": {
               "$type": "int",
               "value": 10
+            },
+            "manualMaxHpAdjustment": {
+              "$type": "int",
+              "value": 0
             },
             "abilityScores": {
               "$type": "AbilityScores",
