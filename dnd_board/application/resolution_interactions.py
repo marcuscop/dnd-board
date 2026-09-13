@@ -38,6 +38,7 @@ from dnd_board.rules.shared.effects import (
     RerollSavingThrow,
     RollOutcome,
     ScheduleEffectOperation,
+    SourceIsOwnerPredicate,
 )
 
 
@@ -105,6 +106,56 @@ def resolution_prompt_for_effect_event(
             sheets,
             action_source,
         )
+    if event.eventType in {ResolutionEventType.TURN_STARTED, ResolutionEventType.TURN_ENDED}:
+        return _turn_boundary_prompt(
+            source_roll,
+            event_roll,
+            target,
+            event.eventType,
+            ignored,
+            response_rolls,
+            sheets,
+            event_source,
+        )
+    return None
+
+
+def _turn_boundary_prompt(
+    source_roll: RollPayload,
+    pending_roll: RollPayload,
+    target: CharacterSheet,
+    event_type: ResolutionEventType,
+    ignored: set[str],
+    response_rolls: list[RollPayload],
+    sheets: list[CharacterSheet],
+    source: CharacterSheet | None,
+) -> ResolutionInterceptorPrompt | None:
+    for owner in sheets:
+        for interaction_source in matching_sheet_interactions(
+            owner,
+            event_type,
+            pending_roll,
+            source_sheet=source,
+            target=target,
+        ):
+            interceptor_type = interceptor_type_for_interaction(interaction_source.interaction)
+            if interceptor_type is None:
+                continue
+            key = resolution_interceptor_key_for(interceptor_type, owner.id, interaction_source.label)
+            if key in ignored:
+                continue
+            return _prompt(
+                interceptor_type=interceptor_type,
+                trigger=ResolutionInterceptorTrigger.BEFORE_TURN_BOUNDARY,
+                source_roll=source_roll,
+                pending_roll=pending_roll,
+                target=target,
+                owner=owner,
+                interaction_source=interaction_source,
+                description=f"{enum_label(event_type)} is resolving for {target.name}.",
+                ignored=ignored,
+                response_rolls=response_rolls,
+            )
     return None
 
 
@@ -251,8 +302,6 @@ def _attack_prompt(
     if pending_roll.resolution != RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
         return None
     for owner in sheets:
-        if source is not None and owner.id == source.id:
-            continue
         for interaction_source in matching_sheet_interactions(
             owner,
             ResolutionEventType.ATTACK_ROLLED,
@@ -260,6 +309,15 @@ def _attack_prompt(
             source_sheet=source,
             target=target,
         ):
+            if (
+                source is not None
+                and owner.id == source.id
+                and not any(
+                    isinstance(predicate, SourceIsOwnerPredicate) and predicate.expected
+                    for predicate in interaction_source.interaction.predicates
+                )
+            ):
+                continue
             interceptor_type = interceptor_type_for_interaction(interaction_source.interaction)
             if interceptor_type != ResolutionInterceptorType.MODIFY_ROLL:
                 continue

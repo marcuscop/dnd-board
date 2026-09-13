@@ -412,6 +412,7 @@ def uncanny_dodge_mechanics() -> FeatureMechanics:
                 decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
                 predicates=[TargetIsOwnerPredicate(), SourceIsAttackPredicate(), AttackerIsVisiblePredicate()],
                 operations=[ModifyPendingDamage(PendingDamageModificationType.MULTIPLY, 1, 2)],
+                activation=TimeEconomy.REACTION,
             )
         ]
     )

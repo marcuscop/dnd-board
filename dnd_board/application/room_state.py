@@ -23,6 +23,7 @@ from dnd_board.character_sheet import (
     TokenKind,
 )
 from dnd_board.rules.shared.character_effects import CharacterEffectExecution
+from dnd_board.rules.encounter import EncounterState
 from dnd_board.rules.shared.effects import (
     ActiveOngoingEffect,
     ActiveScheduledEffect,
@@ -199,3 +200,4 @@ class Room:
     ongoing_effects: dict[str, list[ActiveOngoingEffect]]
     scheduled_effects: dict[str, list[ActiveScheduledEffect]]
     pending_effect_executions: dict[int, PendingCharacterResolution]
+    encounter: EncounterState | None = None

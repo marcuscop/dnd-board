@@ -8,6 +8,7 @@ from dnd_board.rules.shared.resources import (
     ResourceDefinition,
     ResourceId,
     ResourceKey,
+    ResourcePaymentScope,
     ResourceRecoveryTrigger,
     ResourceState,
     ResourceUpdate,
@@ -17,12 +18,29 @@ from dnd_board.rules.shared.resources import (
 )
 
 
+def payable_resource_costs(
+    costs: tuple[ResourceCost, ...],
+    *,
+    continuation: bool,
+) -> tuple[ResourceCost, ...]:
+    if not continuation:
+        return costs
+    return tuple(
+        cost for cost in costs
+        if cost.paymentScope == ResourcePaymentScope.PART
+    )
+
+
 def resolved_resource_costs(
     costs: tuple[ResourceCost, ...],
     spell_slot_level: int | None = None,
 ) -> tuple[ResourceCost, ...]:
     return tuple(
-        ResourceCost(spell_slot_resource_id(spell_slot_level), cost.amount)
+        ResourceCost(
+            spell_slot_resource_id(spell_slot_level),
+            cost.amount,
+            cost.paymentScope,
+        )
         if cost.resource == ResourceId.SPELL_SLOT and spell_slot_level is not None
         else cost
         for cost in costs

@@ -22,6 +22,7 @@ from dnd_board.application.character_state_service import (
 )
 from dnd_board.application.resolution_interactions import resolution_prompt_for_effect_event
 from dnd_board.application.resource_service import spend_sheet_resources
+from dnd_board.application.encounter_service import authorize_action, commit_action_authorization
 from dnd_board.application.room_state import CharacterRuntimeSnapshot, InteractionEventKey, PendingCharacterResolution, Player, Room
 from dnd_board.character_sheet import (
     AbilityType,
@@ -33,9 +34,11 @@ from dnd_board.character_sheet import (
     RollLogEntry,
     RollLogEntryType,
     RollPayload,
+    RollSource,
     RollModifierBreakdown,
     RollResolution,
     RollResolutionMode,
+    SheetSectionType,
     ResolutionInterceptorPrompt,
     ResolutionInterceptorType,
     RollModifierEffectTarget,
@@ -97,6 +100,11 @@ from dnd_board.rules.shared.effects import (
     recurring_effects_for_event,
 )
 from dnd_board.rules.shared.resources import InsufficientResourceError, ResourceUpdate
+from dnd_board.rules.encounter import (
+    ActionCategory,
+    interaction_usage_allowed,
+    record_interaction_usage,
+)
 
 
 ResolutionResult = RollResolution | ResolutionInterceptorPrompt
@@ -122,14 +130,63 @@ class ResolutionServiceError(Exception):
         self.detail = detail
 
 
+async def resolve_turn_boundary_event(
+    room: Room,
+    participant: CharacterSheet,
+    event_type: ResolutionEventType,
+    operations: ResolutionOperations,
+) -> dict[str, Any]:
+    if event_type not in {ResolutionEventType.TURN_STARTED, ResolutionEventType.TURN_ENDED}:
+        raise ValueError("Turn boundary resolution requires a turn event")
+    created_at = time_ns()
+    roll = RollPayload(
+        id=f"turn-event-{created_at}",
+        sheetId=participant.id,
+        tokenId=participant.tokenId,
+        roller="dm",
+        source=RollSource(
+            section=SheetSectionType.FEATURES,
+            sourceId=enum_key(event_type),
+            actionId=enum_key(event_type),
+        ),
+        sourceLabel=enum_label(event_type),
+        resolution=RollResolutionMode.NONE,
+        label=enum_label(event_type),
+        iconUrl=None,
+        dice=[],
+        diceType=DiceType.D20,
+        die="",
+        modifier=0,
+        modifierBreakdown=[],
+        total=0,
+        createdAt=created_at,
+        pendingEffect=SequenceEffect([]),
+    )
+    return await resolve_pending_roll(
+        room,
+        roll,
+        participant,
+        False,
+        operations,
+        declaration_event_type=event_type,
+    )
+
+
 async def resolve_pending_roll(
     room: Room,
     roll: RollPayload,
     target: CharacterSheet,
     preserve_roll: bool,
     operations: ResolutionOperations,
+    declaration_event_type: ResolutionEventType | None = None,
 ) -> dict[str, Any]:
-    resolution_or_prompt = resolve_roll_or_prompt(room, roll, target, operations)
+    resolution_or_prompt = resolve_roll_or_prompt(
+        room,
+        roll,
+        target,
+        operations,
+        declaration_event_type=declaration_event_type,
+    )
     if isinstance(resolution_or_prompt, ResolutionInterceptorPrompt):
         if not preserve_roll:
             room.pending_rolls.pop(roll_queue_key(roll), None)
@@ -315,6 +372,7 @@ def continue_effect_resolution(
             if save_outcome:
                 pending.outcomePrefixes.append(save_outcome)
             if save_roll is not None:
+                pending.active.context.savingThrowRollPayloads[advanced.effectNodeId] = save_roll
                 pending.responseRolls.append(save_roll)
             advanced = replace(advanced, rollOutcome=roll_outcome)
             pending.active.execution.waitingFor = advanced
@@ -322,11 +380,17 @@ def continue_effect_resolution(
         if pending.interactionEvent != event_key:
             pending.interactionEvent = event_key
             pending.ignoredInterceptors.clear()
-        node_roll = (
-            pending.active.context.attackRollPayloads.get(advanced.effectNodeId, pending.roll)
-            if advanced.effectNodeId is not None
-            else pending.roll
-        )
+        node_roll = pending.roll
+        if advanced.effectNodeId is not None:
+            if advanced.eventType == ResolutionEventType.ATTACK_ROLLED:
+                node_roll = pending.active.context.attackRollPayloads.get(advanced.effectNodeId, pending.roll)
+            elif advanced.eventType == ResolutionEventType.SAVE_ROLLED:
+                node_roll = pending.active.context.savingThrowRollPayloads.get(advanced.effectNodeId, pending.roll)
+                node_roll = replace(
+                    node_roll,
+                    source=pending.roll.source,
+                    sourceLabel=pending.roll.sourceLabel,
+                )
         event_roll = replace(
             node_roll,
             sheetId=current_source.id,
@@ -384,6 +448,7 @@ def resolve_roll_or_prompt(
     ignored_interceptors: list[str] | None = None,
     response_rolls: list[RollPayload] | None = None,
     outcome_prefixes: list[str] | None = None,
+    declaration_event_type: ResolutionEventType | None = None,
 ) -> ResolutionResult:
     ignored = set(ignored_interceptors or [])
     prefixes = list(outcome_prefixes or [])
@@ -402,7 +467,12 @@ def resolve_roll_or_prompt(
 
     if working_roll.pendingEffect is not None:
         active = PendingCharacterResolution(
-            active=start_character_effect_execution(working_roll, target, source),
+            active=start_character_effect_execution(
+                working_roll,
+                target,
+                source,
+                declaration_event_type,
+            ),
             roll=working_roll,
             targetSheetId=target.id,
             responseRolls=pre_response_rolls,
@@ -583,6 +653,8 @@ def bound_effect_dispatches_for_event(
         ResolutionEventType.DAMAGE_APPLIED,
         ResolutionEventType.CONDITION_APPLIED,
         ResolutionEventType.EFFECT_COMMITTED,
+        ResolutionEventType.TURN_STARTED,
+        ResolutionEventType.TURN_ENDED,
         ResolutionEventType.REST_COMPLETED,
     } or event.bindings is None:
         return []
@@ -701,6 +773,12 @@ async def _respond_to_effect_prompt(
         modify_damage_roll=live_pending_damage is None,
     )
     pending.outcomePrefixes.extend(used_outcomes)
+    replaced_response_roll_ids = {roll.id for roll in used_response_rolls}
+    if replaced_response_roll_ids:
+        pending.responseRolls = [
+            roll for roll in pending.responseRolls
+            if roll.id not in replaced_response_roll_ids
+        ]
     pending.responseRolls.extend(used_response_rolls)
     if canceled_resolution is not None:
         room.pending_effect_executions.pop(execution_id, None)
@@ -758,6 +836,7 @@ async def _respond_to_effect_prompt(
         pending.active.context.roll = pending.roll
         if effect_event.effectNodeId is not None:
             pending.active.context.savingThrowOutcomes[effect_event.effectNodeId] = roll_outcome
+            pending.active.context.savingThrowRollPayloads[effect_event.effectNodeId] = used_roll
         pending.active.execution.waitingFor = replace(effect_event, rollOutcome=roll_outcome)
     elif effect_event.eventType == ResolutionEventType.ATTACK_ROLLED:
         natural = resolved_d20(used_roll)
@@ -797,7 +876,36 @@ async def _claim_prompt(
         raise ResolutionServiceError(409, "Resolution prompt has already been answered")
 
     owner = next((sheet for sheet in operations.all_sheets(room) if sheet.id == prompt.ownerSheetId), target)
+    if use and not interaction_usage_allowed(
+        room.encounter,
+        owner.id,
+        prompt.interaction.usageResource,
+        prompt.interaction.usageScope,
+    ):
+        raise ResolutionServiceError(409, "This interaction has already been used for its current timing scope")
     updates: list[ResourceUpdate] = []
+    authorization = authorize_action(
+        room,
+        owner.id,
+        prompt.interaction.activation if use else None,
+        ActionCategory.MAGIC if prompt.pendingRoll.source.section == SheetSectionType.SPELLS else ActionCategory.FEATURE,
+        room.encounter.turnId if room.encounter is not None else None,
+        resolution_response=True,
+        sheet=owner,
+        participant_sheets=operations.all_sheets(room),
+    )
+    if use and not authorization.allowed:
+        reason = authorization.reason or "Reaction is unavailable"
+        await log_blocked_roll(
+            room,
+            owner,
+            player,
+            prompt.label,
+            prompt.useLabel,
+            reason,
+            operations.action_operations,
+        )
+        raise ResolutionServiceError(409, reason)
     if use and prompt.interaction.resourceCosts:
         resource_payload = replace(
             prompt.pendingRoll,
@@ -820,6 +928,27 @@ async def _claim_prompt(
             raise ResolutionServiceError(409, str(error)) from error
         except ValueError as error:
             raise ResolutionServiceError(400, str(error)) from error
+
+    if use:
+        commit_action_authorization(room, owner.id, authorization)
+        if (
+            room.encounter is not None
+            and prompt.interaction.usageResource is not None
+            and prompt.interaction.usageScope is not None
+        ):
+            room.encounter = record_interaction_usage(
+                room.encounter,
+                owner.id,
+                prompt.interaction.usageResource,
+                prompt.interaction.usageScope,
+            )
+        if authorization.resource is not None and room.encounter is not None:
+            participant = next(
+                entry for entry in room.encounter.participantStates
+                if entry.participantId == owner.id
+            )
+            state = next(entry for entry in participant.resources if entry.resource == authorization.resource)
+            updates.append(ResourceUpdate(state.resource, state.resource.value, state.current, state.maximum))
 
     # Claim and commit payment before yielding to broadcasts. Failed payment leaves
     # the prompt available for another valid response.
@@ -976,6 +1105,10 @@ def apply_resolution_interceptor(
         prompt.label,
         modify_damage=modify_damage_roll,
     )
+    if operation_result.rollModifications and _failed_save_ability(prompt.pendingRoll) is not None:
+        save_dc = _failed_save_dc(prompt.pendingRoll)
+        if save_dc is not None:
+            modified_roll = _save_outcome_roll(modified_roll, modified_roll.total >= save_dc)
     if operation_result.cancelled:
         resolution = RollResolution(
             id=f"resolution-{time_ns()}",
@@ -995,6 +1128,14 @@ def apply_resolution_interceptor(
         return modified_roll, [], [], resolution
     if operation_result.rollOutcome == RollOutcome.SUCCESS and roll_outcome == RollOutcome.FAILURE:
         return _save_outcome_roll(modified_roll, True), [f"{prompt.ownerName} turns the failed save into a success"], [], None
+    if operation_result.rollModifications and _failed_save_ability(prompt.pendingRoll) is not None:
+        succeeded = modified_roll.damageSaveSucceeded is True
+        return (
+            modified_roll,
+            [f"{prompt.ownerName} uses {prompt.label} and {'passes' if succeeded else 'fails'} with {modified_roll.total}"],
+            [modified_roll],
+            None,
+        )
     if operation_result.savingThrowRerolls:
         saving_throw = _failed_save_ability(prompt.pendingRoll) or AbilityType.STRENGTH
         save_dc = _failed_save_dc(prompt.pendingRoll)

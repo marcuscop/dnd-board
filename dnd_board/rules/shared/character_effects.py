@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 import random
 
@@ -33,6 +34,7 @@ from dnd_board.character_sheet import (
     spell_save_dc,
 )
 from dnd_board.rules.shared.effects import (
+    ActionAllowanceEffect,
     ActivatedEffect,
     ActiveOngoingEffect,
     ActiveScheduledEffect,
@@ -62,6 +64,7 @@ from dnd_board.rules.shared.effects import (
     EffectExecution,
     EffectExecutionResult,
     EffectAmountInput,
+    EffectAmount,
     EffectNode,
     EffectNodeId,
     EffectParticipantBindings,
@@ -82,6 +85,7 @@ from dnd_board.rules.shared.effects import (
     OngoingEffectId,
     OngoingReplacementPolicy,
     Modifier,
+    ModifierOperation,
     ModifierScope,
     OwnerWearsArmorPredicate,
     OwnerWearsHeavyArmorPredicate,
@@ -116,6 +120,7 @@ from dnd_board.rules.shared.effects import (
     SourceAttackRangePredicate,
     SourceDamageAbilityModifierPredicate,
     SourceIsAttackPredicate,
+    SourceIsOwnerPredicate,
     SourceIsSpellPredicate,
     SourceSpellPredicate,
     SourceUsesTimeEconomyPredicate,
@@ -235,6 +240,7 @@ class CharacterEffectExecutionContext:
         self.outcomes: list[str] = []
         authored_rolls = {entry.effectNodeId: entry.outcome for entry in roll.effectInputs.rolls} if roll.effectInputs else {}
         self.savingThrowOutcomes = {**authored_rolls, **(saving_throw_outcomes or {})}
+        self.savingThrowRollPayloads: dict[EffectNodeId, RollPayload] = {}
         self.unaddressedSavingThrowOutcome = (
             RollOutcome.SUCCESS if roll.damageSaveSucceeded else RollOutcome.FAILURE
         ) if not authored_rolls and roll.damageSaveSucceeded is not None else None
@@ -555,6 +561,9 @@ class CharacterEffectExecutionContext:
             movement = "is pushed" if effect.movementType == MovementType.FORCED else "teleports"
             self.outcomes.append(f"{movement} {effect.distanceFeet} feet")
             return AppliedEffectResult(effect=effect, amount=effect.distanceFeet, effectNodeId=node_id)
+        if isinstance(effect, ActionAllowanceEffect):
+            self.outcomes.append(f"gains {effect.amount} additional {enum_label(effect.resource)}")
+            return AppliedEffectResult(effect=effect, amount=effect.amount, effectNodeId=node_id)
         raise TypeError(f"Character effect context cannot apply {effect.__class__.__name__}")
 
     def damage_defenses(self, defense: DamageDefenseType) -> list[character_sheet.DamageType]:
@@ -657,6 +666,9 @@ class CharacterEffectExecutionContext:
         for predicate in predicates:
             if isinstance(predicate, TargetIsOwnerPredicate):
                 if (self.target.id == self.owner.id) != predicate.expected:
+                    return False
+            elif isinstance(predicate, SourceIsOwnerPredicate):
+                if (self.source is not None and self.source.id == self.owner.id) != predicate.expected:
                     return False
             elif isinstance(predicate, SourceIsAttackPredicate):
                 if self.roll.source.section != SheetSectionType.ATTACKS and self.roll.resolution != RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
@@ -872,6 +884,7 @@ class CharacterEffectExecutionContext:
             effect=effect,
             bindings=self._bindings.selections,
             sourceSpellId=source_spell.id if source_spell is not None else None,
+            ownerSheetId=self.owner.id,
         ))
 
 
@@ -891,6 +904,7 @@ def start_character_effect_execution(
     roll: RollPayload,
     target: CharacterSheet,
     source: CharacterSheet | None = None,
+    declaration_event_type: ResolutionEventType | None = None,
 ) -> CharacterEffectExecution:
     if roll.pendingEffect is None:
         raise ValueError("Roll has no pending effect")
@@ -905,9 +919,11 @@ def start_character_effect_execution(
         engine=engine,
         execution=engine.start(
             roll.pendingEffect,
-            ResolutionEventType.SPELL_DECLARED
-            if roll.source.section == SheetSectionType.SPELLS
-            else ResolutionEventType.ACTION_DECLARED,
+            declaration_event_type or (
+                ResolutionEventType.SPELL_DECLARED
+                if roll.source.section == SheetSectionType.SPELLS
+                else ResolutionEventType.ACTION_DECLARED
+            ),
             bindings,
         ),
         context=context,
@@ -985,6 +1001,102 @@ def active_ongoing_modifiers(
                 continue
             matches.append((active, modifier))
     return matches
+
+
+def character_allocation_value(
+    sheet: CharacterSheet,
+    calculation: CalculationType,
+    *,
+    baseline: int = 1,
+    participant_sheets: Iterable[CharacterSheet] = (),
+) -> int:
+    """Evaluate recurring action allocation from all active character mechanics."""
+    from dnd_board.rules.progression import class_allocation_modifiers
+
+    participant_by_id = {participant.id: participant for participant in participant_sheets}
+    participant_by_id[sheet.id] = sheet
+    base_context = CharacterEffectExecutionContext(_allocation_roll(sheet), sheet, sheet, owner=sheet)
+    modifiers_with_context = [
+        (modifier, base_context)
+        for modifier in class_allocation_modifiers(sheet.classes, calculation)
+    ]
+    modifiers_with_context.extend(
+        (modifier, base_context)
+        for entry in (*sheet.features, *sheet.abilities)
+        if entry.mechanics is not None
+        for modifier in entry.mechanics.passiveModifiers
+        if modifier.calculation == calculation
+    )
+    for active, modifier in active_ongoing_modifiers(sheet, calculation):
+        source = participant_by_id.get(active.sourceSheetId)
+        target = participant_by_id.get(active.targetSheetId)
+        owner = participant_by_id.get(active.ownerSheetId or active.targetSheetId)
+        if source is None or target is None or owner is None:
+            continue
+        modifiers_with_context.append(
+            (
+                modifier,
+                CharacterEffectExecutionContext(
+                    _allocation_roll(source), target, source, owner=owner
+                ),
+            )
+        )
+    value = baseline
+    for index, (modifier, context) in enumerate(modifiers_with_context):
+        if modifier.scope != ModifierScope.OWNER:
+            continue
+        if not context.evaluate_predicates(EffectNodeId((index,)), modifier.predicates):
+            continue
+        amount = _deterministic_modifier_amount(context, modifier.amount)
+        if modifier.operation == ModifierOperation.ADD:
+            value += amount
+        elif modifier.operation == ModifierOperation.SUBTRACT:
+            value -= amount
+        elif modifier.operation == ModifierOperation.SET:
+            value = amount
+        elif modifier.operation == ModifierOperation.MINIMUM:
+            value = max(value, amount)
+        elif modifier.operation == ModifierOperation.MULTIPLY:
+            value = value * modifier.numerator // modifier.denominator
+        else:
+            raise ValueError(
+                f"{modifier.operation.name} cannot modify recurring action allocation"
+            )
+    return max(0, value)
+
+
+def _deterministic_modifier_amount(
+    context: CharacterEffectExecutionContext,
+    amount: EffectAmount | None,
+) -> int:
+    if amount is None:
+        return 0
+    parts = amount.amounts if isinstance(amount, CombinedAmount) else [amount]
+    if any(isinstance(part, (DiceAmount, DerivedAmount)) for part in parts):
+        raise ValueError("Recurring action allocation requires a deterministic amount")
+    source = context.source or context.target
+    return sum(context.resolve_runtime_amount_part(part, source) for part in parts)
+
+
+def _allocation_roll(sheet: CharacterSheet) -> RollPayload:
+    return RollPayload(
+        id="allocation",
+        sheetId=sheet.id,
+        tokenId=sheet.tokenId,
+        roller=sheet.owner,
+        source=RollSource(SheetSectionType.FEATURES, "allocation", "allocation"),
+        sourceLabel="Action allocation",
+        resolution=RollResolutionMode.NONE,
+        label="Action allocation",
+        iconUrl=None,
+        dice=[],
+        diceType=character_sheet.DiceType.D20,
+        die="",
+        modifier=0,
+        modifierBreakdown=[],
+        total=0,
+        createdAt=0,
+    )
 
 
 def ongoing_effects_after_ending(

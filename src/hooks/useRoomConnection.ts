@@ -8,6 +8,7 @@ import type {
   Asset,
   Board,
   CharacterSheet,
+  EncounterState,
   FogState,
   PlayerSummary,
   ResolutionInterceptorPrompt,
@@ -54,6 +55,7 @@ export function useRoomConnection({
   const [rollHistory, setRollHistory] = useState<RollLogEntry[]>([]);
   const [sheetStatus, setSheetStatus] = useState<"idle" | "loading" | "error">("idle");
   const [playerKey, setPlayerKey] = useState(requestedPlayerKey);
+  const [encounter, setEncounter] = useState<EncounterState | null>(null);
 
   const applyRoomState = useCallback((message: Extract<ServerMessage, { type: "room_state" }>) => {
     setPlayerKey(resolvePlayerKey(requestedPlayerKey, message.tokens));
@@ -63,6 +65,7 @@ export function useRoomConnection({
     setBoard(message.board);
     setBoards(message.boards);
     setAssets(message.assets);
+    setEncounter(message.encounter ?? null);
   }, [pendingTokenRadiiRef, requestedPlayerKey]);
 
   useEffect(() => {
@@ -193,6 +196,7 @@ export function useRoomConnection({
     boards,
     connection,
     expandedSheetId,
+    encounter,
     fog,
     loadSheets,
     playerKey,
@@ -202,6 +206,7 @@ export function useRoomConnection({
     rolls,
     send,
     setExpandedSheetId,
+    setEncounter,
     setFog,
     setResolutionPrompts,
     setRollHistory,

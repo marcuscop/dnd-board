@@ -29,6 +29,7 @@ from dnd_board.character_sheet import (
     RestType,
     RollModifierType,
     RollResolutionMode,
+    SheetFeature,
     TokenKind,
     RuneType,
     SpellComponent,
@@ -101,10 +102,94 @@ from dnd_board.rules.classes.fighter.battle_master import battle_master_features
 from dnd_board.rules.shared.combat_superiority import selected_battle_master_maneuvers
 from dnd_board.rules.shared.character_effects import (
     added_condition_types,
+    character_allocation_value,
     condition_change_effects,
     first_contested_check_effect,
     first_saving_throw_effect,
 )
+from dnd_board.rules.shared.effects import (
+    ActiveOngoingEffect,
+    AmountCalculation,
+    CalculatedAmount,
+    CalculationType,
+    EffectDuration,
+    EffectDurationType,
+    EffectNodeId,
+    FeatureMechanics,
+    Modifier,
+    ModifierOperation,
+    ModifyRoll,
+    OngoingEffect,
+    OngoingEffectId,
+    RollModificationType,
+    SourceIsOwnerPredicate,
+    TargetIsOwnerPredicate,
+    TargetHasConditionPredicate,
+)
+
+
+def test_character_allocation_evaluates_predicates_and_calculated_amounts() -> None:
+    sheet = fighter_sheet(1)
+    sheet.features.append(
+        SheetFeature(
+            id="invisible-action-capacity",
+            name="Invisible Action Capacity",
+            source="Test",
+            activation=TimeEconomy.PASSIVE,
+            description="",
+            mechanics=FeatureMechanics(
+                passiveModifiers=[
+                    Modifier(
+                        CalculationType.ACTION_CAPACITY,
+                        ModifierOperation.ADD,
+                        predicates=[TargetHasConditionPredicate(ConditionType.INVISIBLE)],
+                        amount=CalculatedAmount(AmountCalculation.SOURCE_PROFICIENCY_BONUS),
+                    )
+                ]
+            ),
+        )
+    )
+
+    assert character_allocation_value(sheet, CalculationType.ACTION_CAPACITY) == 1
+
+    sheet.conditions.append(ConditionType.INVISIBLE)
+
+    assert character_allocation_value(sheet, CalculationType.ACTION_CAPACITY) == 3
+
+
+def test_ongoing_allocation_modifier_uses_originating_participant_context() -> None:
+    source = fighter_sheet(5)
+    source.id = "source"
+    source.tokenId = "source"
+    target = fighter_sheet(1)
+    target.id = "target"
+    target.tokenId = "target"
+    target.ongoingEffects.append(
+        ActiveOngoingEffect(
+            id=OngoingEffectId(1, EffectNodeId(())),
+            sourceSheetId=source.id,
+            targetSheetId=target.id,
+            ownerSheetId=target.id,
+            sourceLabel="External Action Capacity",
+            effect=OngoingEffect(
+                EffectDuration(EffectDurationType.MANUAL),
+                modifiers=[
+                    Modifier(
+                        CalculationType.ACTION_CAPACITY,
+                        ModifierOperation.ADD,
+                        predicates=[SourceIsOwnerPredicate(False)],
+                        amount=CalculatedAmount(AmountCalculation.SOURCE_CHARACTER_LEVEL),
+                    )
+                ],
+            ),
+        )
+    )
+
+    assert character_allocation_value(
+        target,
+        CalculationType.ACTION_CAPACITY,
+        participant_sheets=(source, target),
+    ) == 6
 
 
 def test_fighter_progression_resources_level_1_to_20() -> None:
@@ -353,6 +438,14 @@ def test_supported_general_feat_mechanics_are_reflected_on_sheet() -> None:
     assert sheet.hp.max == 84
     assert resources["luckPoints"].maxUses == sheet.proficiencyBonus
     assert resources["luckPoints"].recoveries == RESOURCE_DEFINITIONS[ResourceId.LUCK_POINTS].recoveries
+    lucky_interactions = resources["luckPoints"].mechanics.interactions
+    assert len(lucky_interactions) == 3
+    assert all(interaction.resourceCosts == (ResourceCost(ResourceId.LUCK_POINTS),) for interaction in lucky_interactions)
+    assert isinstance(lucky_interactions[0].predicates[0], SourceIsOwnerPredicate)
+    assert isinstance(lucky_interactions[0].operations[0], ModifyRoll)
+    assert lucky_interactions[0].operations[0].modification == RollModificationType.ADVANTAGE
+    assert isinstance(lucky_interactions[1].predicates[0], TargetIsOwnerPredicate)
+    assert lucky_interactions[1].operations[0].modification == RollModificationType.DISADVANTAGE
     assert abilities["luckyAdvantage"].resourceId == ResourceId.LUCK_POINTS
     assert abilities["observantQuickSearch"].activation == TimeEconomy.BONUS_ACTION
 

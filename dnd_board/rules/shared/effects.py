@@ -23,7 +23,16 @@ from dnd_board.character_sheet import (
     WeaponProperty,
     WeaponCategory,
 )
-from dnd_board.rules.shared.resources import ResourceCost
+from dnd_board.rules.shared.resources import ResourceCost, ResourceId
+from dnd_board.rules.encounter import (
+    ActionCategory,
+    AllowanceExpiration,
+    TurnBoundary,
+    TurnOccurrence,
+    TurnParticipantReference,
+    TurnTiming,
+    UsageScope,
+)
 from dnd_board.rules.equipment import EquipmentId
 
 
@@ -159,6 +168,7 @@ class AppliedEffectKind(Enum):
     DAMAGE_DEFENSE = auto()
     REST = auto()
     MOVEMENT = auto()
+    ACTION_ALLOWANCE = auto()
 
 
 @dataclass(frozen=True)
@@ -236,6 +246,21 @@ class MovementEffect:
     kind: AppliedEffectKind = field(init=False, default=AppliedEffectKind.MOVEMENT)
 
 
+@dataclass(frozen=True)
+class ActionAllowanceEffect:
+    resource: ResourceId
+    amount: int
+    sourceResource: ResourceId
+    allowedCategories: tuple[ActionCategory, ...] = ()
+    expires: AllowanceExpiration = AllowanceExpiration.TURN_END
+    target: EffectTarget = EffectTarget.SOURCE
+    kind: AppliedEffectKind = field(init=False, default=AppliedEffectKind.ACTION_ALLOWANCE)
+
+    def __post_init__(self) -> None:
+        if self.amount < 1:
+            raise ValueError("An action allowance effect must grant at least one use")
+
+
 AppliedEffect: TypeAlias = (
     DamageEffect
     | HealingEffect
@@ -245,6 +270,7 @@ AppliedEffect: TypeAlias = (
     | DamageDefenseEffect
     | RestEffect
     | MovementEffect
+    | ActionAllowanceEffect
 )
 
 
@@ -315,6 +341,11 @@ class RollOutcome(Enum):
 
 @dataclass(frozen=True)
 class TargetIsOwnerPredicate:
+    expected: bool = True
+
+
+@dataclass(frozen=True)
+class SourceIsOwnerPredicate:
     expected: bool = True
 
 
@@ -461,6 +492,7 @@ class RandomChancePredicate:
 
 Predicate: TypeAlias = (
     TargetIsOwnerPredicate
+    | SourceIsOwnerPredicate
     | SourceIsAttackPredicate
     | SourceIsSpellPredicate
     | SourceSpellPredicate
@@ -501,6 +533,10 @@ class CalculationType(Enum):
     SPELL_SAVE_DC = auto()
     CONCENTRATION_SAVE = auto()
     MAXIMUM_HIT_POINTS = auto()
+    ACTION_CAPACITY = auto()
+    BONUS_ACTION_CAPACITY = auto()
+    REACTION_CAPACITY = auto()
+    ATTACKS_PER_ACTION = auto()
 
 
 class ModifierOperation(Enum):
@@ -555,6 +591,7 @@ class EffectDurationType(Enum):
 class EffectDuration:
     durationType: EffectDurationType
     amount: int = 0
+    timing: TurnTiming | None = None
 
 
 class EndingConditionType(Enum):
@@ -716,6 +753,13 @@ class Interaction:
     predicates: list[Predicate] = field(default_factory=list)
     operations: list[ResolutionOperation] = field(default_factory=list)
     resourceCosts: tuple[ResourceCost, ...] = ()
+    activation: TimeEconomy | None = None
+    usageScope: UsageScope | None = None
+    usageResource: ResourceId | None = None
+
+    def __post_init__(self) -> None:
+        if self.usageScope is not None and self.usageResource is None:
+            raise ValueError("A scoped interaction requires a usage resource identity")
 
 
 class PendingResolutionStatus(Enum):
@@ -935,6 +979,8 @@ class ActiveOngoingEffect:
     effect: OngoingEffect
     bindings: tuple[EffectSelectionBinding, ...] = ()
     sourceSpellId: SpellId | None = None
+    ownerSheetId: str | None = None
+    installedTurnId: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1111,6 +1157,45 @@ def recurring_effects_for_event(
         for scheduled in active.effect.recurringEffects
         if scheduled.trigger == event_type
     ]
+
+
+def ongoing_effects_after_turn_boundary(
+    active_effects: list[ActiveOngoingEffect],
+    participant_id: str,
+    boundary: TurnBoundary,
+    turn_id: str | None = None,
+) -> list[ActiveOngoingEffect]:
+    remaining: list[ActiveOngoingEffect] = []
+    for active in active_effects:
+        duration = active.effect.duration
+        timing = duration.timing
+        if timing is None or timing.boundary != boundary:
+            remaining.append(active)
+            continue
+        anchor_id = {
+            TurnParticipantReference.SOURCE: active.sourceSheetId,
+            TurnParticipantReference.OWNER: active.ownerSheetId or active.sourceSheetId,
+            TurnParticipantReference.TARGET: active.targetSheetId,
+        }[timing.participant]
+        if anchor_id != participant_id:
+            remaining.append(active)
+            continue
+        if (
+            timing.occurrence == TurnOccurrence.NEXT
+            and active.installedTurnId is not None
+            and active.installedTurnId == turn_id
+        ):
+            remaining.append(active)
+            continue
+        if timing.count > 1:
+            remaining.append(replace(
+                active,
+                effect=replace(
+                    active.effect,
+                    duration=replace(duration, timing=replace(timing, count=timing.count - 1)),
+                ),
+            ))
+    return remaining
 
 
 @dataclass(frozen=True)
@@ -1464,15 +1549,19 @@ class EffectEngine:
         if event is None or not execution.stack:
             raise ValueError("Effect execution has no pending event")
         frame = execution.stack[-1]
-        if event.eventType in {ResolutionEventType.ACTION_DECLARED, ResolutionEventType.SPELL_DECLARED}:
+        if event.eventType in {
+            ResolutionEventType.ACTION_DECLARED,
+            ResolutionEventType.SPELL_DECLARED,
+            ResolutionEventType.TURN_STARTED,
+            ResolutionEventType.TURN_ENDED,
+        }:
             if response.pendingEffect is None:
                 execution.status = EffectExecutionStatus.CANCELLED
                 execution.stack.clear()
                 return
             frame.effect = response.pendingEffect
             execution.rootEffect = response.pendingEffect
-            return
-        if event.eventType in {
+        elif event.eventType in {
             ResolutionEventType.ATTACK_ROLLED,
             ResolutionEventType.SAVE_ROLLED,
             ResolutionEventType.CHECK_ROLLED,
@@ -1879,6 +1968,7 @@ def effect_model_types() -> list[type[object]]:
         ActiveOngoingEffect,
         ActiveScheduledEffect,
         AbilityCheck,
+        ActionAllowanceEffect,
         ActivatedEffect,
         AmountCalculation,
         AmountScaling,
@@ -2000,6 +2090,8 @@ def effect_model_types() -> list[type[object]]:
         TargetHasCreatureTypePredicate,
         TargetIsOwnerPredicate,
         TemporaryHitPointsEffect,
+        TurnTiming,
+        UsageScope,
         WeaponHasPropertyPredicate,
         WeaponHasAnyPropertyPredicate,
         WeaponAbilityReference,

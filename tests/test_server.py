@@ -81,7 +81,7 @@ from dnd_board.rules.shared.effects import (
     SequenceEffect,
     WeaponAttackOptionId,
 )
-from dnd_board.rules.shared.resources import ResourceCost, ResourceId, ResourceKind, ResourceRecovery, ResourceRecoveryTrigger
+from dnd_board.rules.shared.resources import ResourceCost, ResourceId, ResourceKind, ResourcePaymentScope, ResourceRecovery, ResourceRecoveryTrigger
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -1964,6 +1964,168 @@ def test_protection_fighting_style_can_impose_disadvantage_on_attack_against_all
     assert final["roll"]["dice"] == [15, 1]
     assert final["roll"]["die"] == "2d20kl1"
     assert "misses" in final["outcome"]
+
+
+def test_lucky_can_impose_disadvantage_on_attack_against_owner(tmp_path, monkeypatch) -> None:
+    longsword = AttackAction(
+        id="longsword",
+        name="Longsword",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+    )
+    lucky = general_feat_feature(enum_key(GeneralFeatType.LUCKY))
+    assert lucky is not None
+    write_party_campaign(
+        tmp_path,
+        "lucky-attack-interceptor-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], attacks=[longsword]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Lucky Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)], feats=[lucky]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([15, 1])
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls, 1))
+    client = TestClient(server.app)
+
+    attack_roll = client.post(
+        "/api/rooms/lucky-attack-interceptor-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=longsword"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/lucky-attack-interceptor-test/rolls/{attack_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    final = client.post(
+        f"/api/rooms/lucky-attack-interceptor-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-2&use=true"
+    ).json()["resolution"]
+    target = client.get(
+        "/api/rooms/lucky-attack-interceptor-test/sheet/player-2?playerKey=player-2"
+    ).json()["sheet"]
+
+    assert prompt["label"] == "Lucky"
+    assert prompt["ownerSheetId"] == "player-2"
+    assert final["roll"]["dice"] == [15, 1]
+    assert final["roll"]["die"] == "2d20kl1"
+    assert "misses" in final["outcome"]
+    assert next(resource for resource in target["resources"] if resource["id"] == "luckPoints")["currentUses"] == 1
+
+
+def test_lucky_attacker_can_gain_advantage(tmp_path, monkeypatch) -> None:
+    longsword = AttackAction(
+        id="longsword",
+        name="Longsword",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+    )
+    lucky = general_feat_feature(enum_key(GeneralFeatType.LUCKY))
+    assert lucky is not None
+    write_party_campaign(
+        tmp_path,
+        "lucky-attacker-interceptor-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Lucky Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                attacks=[longsword],
+                feats=[lucky],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([1, 1, 20, 1])
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls, 1))
+    client = TestClient(server.app)
+
+    attack_roll = client.post(
+        "/api/rooms/lucky-attacker-interceptor-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=longsword"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/lucky-attacker-interceptor-test/rolls/{attack_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    final = client.post(
+        f"/api/rooms/lucky-attacker-interceptor-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-1&use=true"
+    ).json()["resolution"]
+    attacker = client.get(
+        "/api/rooms/lucky-attacker-interceptor-test/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+
+    assert prompt["label"] == "Lucky"
+    assert prompt["ownerSheetId"] == "player-1"
+    assert final["roll"]["dice"] == [1, 20]
+    assert final["roll"]["die"] == "2d20kh1"
+    assert "hits" in final["outcome"]
+    assert next(resource for resource in attacker["resources"] if resource["id"] == "luckPoints")["currentUses"] == 1
+
+
+def test_lucky_advantage_can_turn_failed_spell_save_into_success(tmp_path, monkeypatch) -> None:
+    tasha = wizard_spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
+    lucky = general_feat_feature(enum_key(GeneralFeatType.LUCKY))
+    assert tasha is not None
+    assert lucky is not None
+    write_party_campaign(
+        tmp_path,
+        "lucky-save-interceptor-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[tasha]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Lucky Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=14, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)], feats=[lucky]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([1, 20])
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls, 1))
+    client = TestClient(server.app)
+
+    effect_roll = client.post(
+        "/api/rooms/lucky-save-interceptor-test/sheet/player-1/spells/tashaSHideousLaughter/rolls/effect?playerKey=player-1"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/lucky-save-interceptor-test/rolls/{effect_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    final = client.post(
+        f"/api/rooms/lucky-save-interceptor-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-2&use=true"
+    ).json()["resolution"]
+    target = client.get(
+        "/api/rooms/lucky-save-interceptor-test/sheet/player-2?playerKey=player-2"
+    ).json()["sheet"]
+
+    assert prompt["label"] == "Lucky"
+    assert final["responseRolls"][-1]["dice"] == [1, 20]
+    assert final["responseRolls"][-1]["die"] == "2d20kh1"
+    assert target["conditions"] == []
+    assert next(resource for resource in target["resources"] if resource["id"] == "luckPoints")["currentUses"] == 1
 
 
 def test_protection_removes_critical_damage_when_disadvantage_selects_noncritical_roll(tmp_path, monkeypatch) -> None:
@@ -4134,7 +4296,10 @@ def test_attack_resource_costs_are_validated_and_consumed_atomically(tmp_path, m
         damageType=DamageType.PIERCING,
         attackRange=AttackRangeType.RANGED,
         weaponCategory=WeaponCategory.RANGED,
-        resourceCosts=(ResourceCost(ResourceId.ARROWS), ResourceCost(ResourceId.BOLTS)),
+        resourceCosts=(
+            ResourceCost(ResourceId.ARROWS, paymentScope=ResourcePaymentScope.PART),
+            ResourceCost(ResourceId.BOLTS, paymentScope=ResourcePaymentScope.PART),
+        ),
     )
     write_party_campaign(
         tmp_path,

@@ -65,6 +65,10 @@ from dnd_board.rules.shared.progression_definitions import (
     SpellLevelCategory,
     SpellPool,
 )
+from dnd_board.rules.shared.effects import (
+    CalculationType,
+    Modifier,
+)
 
 
 MIN_CHARACTER_LEVEL = 1
@@ -78,6 +82,23 @@ CLASS_PROGRESSION_DEFINITIONS = {
         WIZARD_PROGRESSION_DEFINITION,
     )
 }
+
+
+def class_allocation_modifiers(
+    classes: list[CharacterClassLevel],
+    calculation: CalculationType,
+) -> list[Modifier]:
+    return [
+        modifier
+        for character_class in classes
+        if character_class.level > 0
+        for definition in [CLASS_PROGRESSION_DEFINITIONS.get(character_class.name)]
+        if definition is not None and definition.allocationModifiersByLevel
+        for modifier in definition.allocationModifiersByLevel[
+            min(character_class.level, len(definition.allocationModifiersByLevel)) - 1
+        ]
+        if modifier.calculation == calculation
+    ]
 
 SPELL_PROGRESSION_DEFINITIONS = tuple(
     (definition.characterClass, spell_progression)

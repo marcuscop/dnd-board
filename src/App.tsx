@@ -24,6 +24,7 @@ export function App() {
   const sheetActions = useSheetActions({
     roomId: INITIAL_ROUTE.roomId,
     playerKey: room.playerKey,
+    turnId: room.encounter?.turnId,
     loadSheets: room.loadSheets,
     setSheets: room.setSheets,
     setRolls: room.setRolls,
@@ -52,11 +53,13 @@ export function App() {
     return (
       <SheetView
         connection={room.connection}
+        encounter={room.encounter}
         expandedSheetId={room.expandedSheetId}
         isDm={isDm}
         onReloadSheets={room.loadSheets}
         onCreateCharacter={sheetActions.createCharacter}
         onExpand={room.setExpandedSheetId}
+        onEncounterChange={room.setEncounter}
         onRollDamage={sheetActions.rollDamage}
         onRollAttack={sheetActions.rollAttack}
         onRollAbilityCheck={sheetActions.rollAbilityCheck}

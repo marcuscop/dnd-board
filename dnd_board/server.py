@@ -63,6 +63,7 @@ from dnd_board.application.resolution_service import (
     ResolutionOperations,
     ResolutionServiceError,
     resolve_pending_roll,
+    resolve_turn_boundary_event,
     respond_to_prompt,
 )
 from dnd_board.application.progression_service import (
@@ -105,6 +106,18 @@ from dnd_board.application.board_service import (
     set_fog_mode as apply_fog_mode,
     set_token_radius as apply_token_radius,
     set_token_scene as apply_token_scene,
+)
+from dnd_board.application.encounter_service import (
+    EncounterOperations,
+    EncounterServiceError,
+    adjust_encounter_resource,
+    advance_turn as advance_encounter_turn,
+    encounter_to_dict,
+    end_encounter as stop_encounter,
+    roll_initiatives,
+    resume_turn_transition,
+    start_encounter as begin_encounter,
+    update_encounter_order,
 )
 
 from dnd_board.character_sheet import (
@@ -158,9 +171,11 @@ from dnd_board.rules.shared.effects import (
     OngoingEffectId,
 )
 from dnd_board.rules.shared.resources import (
+    ResourceId,
     ResourceState,
     adjust_resource,
 )
+from dnd_board.rules.encounter import EncounterParticipant, EncounterStatus
 
 BOARD_WIDTH = 1200
 BOARD_HEIGHT = 720
@@ -262,6 +277,19 @@ def board_operations() -> BoardOperations:
     )
 
 
+def encounter_operations() -> EncounterOperations:
+    return EncounterOperations(
+        save=save_room_to_disk,
+        broadcast_room=broadcast_room_state,
+        resolve_turn_boundary=lambda room, sheet, event_type: resolve_turn_boundary_event(
+            room,
+            sheet,
+            event_type,
+            resolution_operations(),
+        ),
+    )
+
+
 async def action_service_response(operation: Any) -> dict[str, Any]:
     try:
         return await operation
@@ -334,6 +362,138 @@ async def get_room_state(room_id: str) -> dict[str, Any]:
     return room_state_message(room)
 
 
+@app.post("/api/rooms/{room_id}/encounter/initiative")
+async def roll_encounter_initiative(
+    room_id: str,
+    playerKey: str,
+    participantIds: list[str] = Body(),
+) -> dict[str, Any]:
+    room = get_or_create_room(sanitize_room_id(room_id))
+    player = Player("http-encounter-initiative", "DM", normalize_player_key(playerKey, room.id), None, room.id)
+    if not is_dm(player):
+        raise HTTPException(status_code=403, detail="Only the DM can manage encounters")
+    try:
+        results = roll_initiatives(participantIds, visible_sheets(room, player))
+    except EncounterServiceError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+    return {"roomId": room.id, "initiatives": results}
+
+
+@app.post("/api/rooms/{room_id}/encounter")
+async def start_room_encounter(
+    room_id: str,
+    playerKey: str,
+    participants: list[EncounterParticipant] = Body(),
+) -> dict[str, Any]:
+    room = get_or_create_room(sanitize_room_id(room_id))
+    player = Player("http-encounter-start", "DM", normalize_player_key(playerKey, room.id), None, room.id)
+    try:
+        encounter = await begin_encounter(
+            room,
+            player,
+            participants,
+            visible_sheets(room, player),
+            encounter_operations(),
+        )
+    except EncounterServiceError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+    return {"roomId": room.id, "encounter": encounter_to_dict(encounter)}
+
+
+@app.put("/api/rooms/{room_id}/encounter")
+async def edit_room_encounter(
+    room_id: str,
+    playerKey: str,
+    participants: list[EncounterParticipant] = Body(),
+) -> dict[str, Any]:
+    room = get_or_create_room(sanitize_room_id(room_id))
+    player = Player("http-encounter-edit", "DM", normalize_player_key(playerKey, room.id), None, room.id)
+    try:
+        encounter = await update_encounter_order(
+            room,
+            player,
+            participants,
+            visible_sheets(room, player),
+            encounter_operations(),
+        )
+    except EncounterServiceError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+    return {"roomId": room.id, "encounter": encounter_to_dict(encounter)}
+
+
+@app.post("/api/rooms/{room_id}/encounter/advance")
+async def advance_room_encounter(room_id: str, playerKey: str, turnId: str) -> dict[str, Any]:
+    room = get_or_create_room(sanitize_room_id(room_id))
+    player = Player("http-encounter-advance", "Encounter", normalize_player_key(playerKey, room.id), None, room.id)
+    try:
+        encounter = await advance_encounter_turn(
+            room,
+            player,
+            turnId,
+            visible_sheets(room, Player("encounter-dm", "DM", "dm", None, room.id)),
+            encounter_operations(),
+        )
+    except EncounterServiceError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+    return {"roomId": room.id, "encounter": encounter_to_dict(encounter)}
+
+
+@app.delete("/api/rooms/{room_id}/encounter")
+async def end_room_encounter(room_id: str, playerKey: str) -> dict[str, Any]:
+    room = get_or_create_room(sanitize_room_id(room_id))
+    player = Player("http-encounter-end", "DM", normalize_player_key(playerKey, room.id), None, room.id)
+    try:
+        await stop_encounter(room, player, encounter_operations())
+    except EncounterServiceError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+    return {"roomId": room.id, "encounter": None}
+
+
+@app.post("/api/rooms/{room_id}/encounter/participants/{participant_id}/resources/{resource_id}")
+async def adjust_room_encounter_resource(
+    room_id: str,
+    participant_id: str,
+    resource_id: ResourceId,
+    playerKey: str,
+    current: int,
+) -> dict[str, Any]:
+    room = get_or_create_room(sanitize_room_id(room_id))
+    player = Player("http-encounter-resource", "DM", normalize_player_key(playerKey, room.id), None, room.id)
+    sheet = get_visible_sheet(room, player, sanitize_identifier(participant_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    try:
+        encounter = await adjust_encounter_resource(
+            room,
+            player,
+            sheet.id,
+            resource_id,
+            current,
+            encounter_operations(),
+        )
+    except EncounterServiceError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+    participant = next(
+        entry for entry in encounter.participantStates
+        if entry.participantId == sheet.id
+    )
+    adjusted = next(
+        entry.current for entry in participant.resources
+        if entry.resource == resource_id
+    )
+    await log_action_note(
+        room,
+        sheet,
+        player,
+        "Encounter",
+        f"{resource_id.value} adjusted to {adjusted}",
+        DiceType.D20,
+        [],
+        action_operations(),
+    )
+    return {"roomId": room.id, "encounter": encounter_to_dict(encounter)}
+
+
 @app.get("/api/rooms/{room_id}/sheet")
 async def get_room_sheets(room_id: str, playerKey: str) -> dict[str, Any]:
     sanitized_room_id = sanitize_room_id(room_id)
@@ -401,43 +561,43 @@ async def create_room_character(room_id: str, playerKey: str, payload: dict[str,
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/attack")
-async def roll_sheet_attack(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand", weaponOption: str | None = None) -> dict[str, Any]:
-    return await create_attack_roll(room_id, sheet_id, playerKey, attackId, weaponOption)
+async def roll_sheet_attack(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand", weaponOption: str | None = None, turnId: str | None = None) -> dict[str, Any]:
+    return await create_attack_roll(room_id, sheet_id, playerKey, attackId, weaponOption, turnId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/damage")
-async def roll_sheet_damage(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand", weaponOption: str | None = None) -> dict[str, Any]:
-    return await create_damage_roll(room_id, sheet_id, playerKey, attackId, weaponOption)
+async def roll_sheet_damage(room_id: str, sheet_id: str, playerKey: str, attackId: str = "main-hand", weaponOption: str | None = None, turnId: str | None = None) -> dict[str, Any]:
+    return await create_damage_roll(room_id, sheet_id, playerKey, attackId, weaponOption, turnId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/attack")
-async def roll_sheet_spell_attack(room_id: str, sheet_id: str, spell_id: str, playerKey: str, spellSlotLevel: int | None = None) -> dict[str, Any]:
-    return await create_spell_attack_roll(room_id, sheet_id, playerKey, spell_id, spellSlotLevel)
+async def roll_sheet_spell_attack(room_id: str, sheet_id: str, spell_id: str, playerKey: str, spellSlotLevel: int | None = None, turnId: str | None = None) -> dict[str, Any]:
+    return await create_spell_attack_roll(room_id, sheet_id, playerKey, spell_id, spellSlotLevel, turnId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/weapon-attack")
-async def roll_sheet_bound_weapon_attack(room_id: str, sheet_id: str, spell_id: str, playerKey: str, equipmentInstanceId: str, effectIndex: int = 0, choiceIndex: int | None = None) -> dict[str, Any]:
-    return await create_bound_weapon_spell_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, equipmentInstanceId, choiceIndex)
+async def roll_sheet_bound_weapon_attack(room_id: str, sheet_id: str, spell_id: str, playerKey: str, equipmentInstanceId: str, effectIndex: int = 0, choiceIndex: int | None = None, turnId: str | None = None) -> dict[str, Any]:
+    return await create_bound_weapon_spell_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, equipmentInstanceId, choiceIndex, turnId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/damage")
-async def roll_sheet_spell_damage(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, instanceIndex: int | None = None, damageSaveSucceeded: bool | None = None, choiceIndex: int | None = None) -> dict[str, Any]:
-    return await create_spell_damage_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, instanceIndex, damageSaveSucceeded, choiceIndex)
+async def roll_sheet_spell_damage(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, instanceIndex: int | None = None, damageSaveSucceeded: bool | None = None, choiceIndex: int | None = None, turnId: str | None = None) -> dict[str, Any]:
+    return await create_spell_damage_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, instanceIndex, damageSaveSucceeded, choiceIndex, turnId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/healing")
-async def roll_sheet_spell_healing(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None) -> dict[str, Any]:
-    return await create_spell_healing_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel)
+async def roll_sheet_spell_healing(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, turnId: str | None = None) -> dict[str, Any]:
+    return await create_spell_healing_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, turnId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/temporary-hit-points")
-async def roll_sheet_spell_temporary_hit_points(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None) -> dict[str, Any]:
-    return await create_spell_temporary_hit_points_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel)
+async def roll_sheet_spell_temporary_hit_points(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, turnId: str | None = None) -> dict[str, Any]:
+    return await create_spell_temporary_hit_points_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, turnId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/spells/{spell_id}/rolls/effect")
-async def roll_sheet_spell_effect(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, choiceIndex: int | None = None, equipmentInstanceId: str | None = None) -> dict[str, Any]:
-    return await create_spell_condition_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, choiceIndex, equipmentInstanceId)
+async def roll_sheet_spell_effect(room_id: str, sheet_id: str, spell_id: str, playerKey: str, effectIndex: int = 0, spellSlotLevel: int | None = None, choiceIndex: int | None = None, equipmentInstanceId: str | None = None, turnId: str | None = None) -> dict[str, Any]:
+    return await create_spell_condition_roll(room_id, sheet_id, playerKey, spell_id, effectIndex, spellSlotLevel, choiceIndex, equipmentInstanceId, turnId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/ability-check")
@@ -451,13 +611,13 @@ async def roll_sheet_saving_throw(room_id: str, sheet_id: str, playerKey: str, a
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/resources/{resource_id}/rolls/{action_id}")
-async def roll_sheet_resource_action(room_id: str, sheet_id: str, resource_id: str, action_id: str, playerKey: str) -> dict[str, Any]:
-    return await create_resource_roll(room_id, sheet_id, playerKey, resource_id, action_id)
+async def roll_sheet_resource_action(room_id: str, sheet_id: str, resource_id: str, action_id: str, playerKey: str, turnId: str | None = None) -> dict[str, Any]:
+    return await create_resource_roll(room_id, sheet_id, playerKey, resource_id, action_id, turnId)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/abilities/{ability_id}/rolls/{action_id}")
-async def roll_sheet_ability_action(room_id: str, sheet_id: str, ability_id: str, action_id: str, playerKey: str) -> dict[str, Any]:
-    return await create_ability_roll(room_id, sheet_id, playerKey, ability_id, action_id)
+async def roll_sheet_ability_action(room_id: str, sheet_id: str, ability_id: str, action_id: str, playerKey: str, turnId: str | None = None) -> dict[str, Any]:
+    return await create_ability_roll(room_id, sheet_id, playerKey, ability_id, action_id, turnId)
 
 
 @app.post("/api/rooms/{room_id}/dice")
@@ -811,7 +971,14 @@ async def respond_to_resolution_prompt(room_id: str, prompt_id: str, playerKey: 
         raise HTTPException(status_code=404, detail="Target sheet not found")
 
     try:
-        return await respond_to_prompt(room, prompt, player, target, use, resolution_operations())
+        result = await respond_to_prompt(room, prompt, player, target, use, resolution_operations())
+        if room.encounter is not None and room.encounter.status == EncounterStatus.TRANSITIONING:
+            await resume_turn_transition(
+                room,
+                visible_sheets(room, Player("encounter-dm", "DM", "dm", None, room.id)),
+                encounter_operations(),
+            )
+        return result
     except ResolutionServiceError as error:
         raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
@@ -1059,6 +1226,7 @@ def get_or_create_room(room_id: str) -> Room:
         ongoing_effects=saved.ongoing_effects if saved else {},
         scheduled_effects=saved.scheduled_effects if saved else {},
         pending_effect_executions={},
+        encounter=None,
     )
     rooms[room_id] = room
     return room
@@ -1132,6 +1300,7 @@ def room_state_message(room: Room) -> dict[str, Any]:
         "board": board_to_dict(get_room_board(room)),
         "boards": [board_to_dict(board) for board in list_boards(room.id)],
         "assets": [asset_to_dict(asset) for asset in list_assets()],
+        "encounter": encounter_to_dict(room.encounter),
     }
 
 
@@ -1258,14 +1427,14 @@ def token_to_sheet(
     return sheet
 
 
-async def create_attack_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str, weapon_option: str | None = None) -> dict[str, Any]:
+async def create_attack_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str, weapon_option: str | None = None, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
-        create_attack_action(room, player, sheet, attack_id, action_operations(), weapon_option=weapon_option)
+        create_attack_action(room, player, sheet, attack_id, action_operations(), weapon_option=weapon_option, turn_id=turn_id)
     )
 
 
-async def create_damage_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str, weapon_option: str | None = None) -> dict[str, Any]:
+async def create_damage_roll(room_id: str, sheet_id: str, player_key: str, attack_id: str, weapon_option: str | None = None, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_attack_action(
@@ -1276,11 +1445,12 @@ async def create_damage_roll(room_id: str, sheet_id: str, player_key: str, attac
             action_operations(),
             damage_only=True,
             weapon_option=weapon_option,
+            turn_id=turn_id,
         )
     )
 
 
-async def create_spell_attack_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, spell_slot_level: int | None = None) -> dict[str, Any]:
+async def create_spell_attack_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, spell_slot_level: int | None = None, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_spell_attack_action(
@@ -1290,11 +1460,12 @@ async def create_spell_attack_roll(room_id: str, sheet_id: str, player_key: str,
             spell_id,
             spell_slot_level,
             action_operations(),
+            turn_id,
         )
     )
 
 
-async def create_bound_weapon_spell_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int, equipment_instance_id: str, choice_index: int | None) -> dict[str, Any]:
+async def create_bound_weapon_spell_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int, equipment_instance_id: str, choice_index: int | None, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_bound_weapon_spell_action(
@@ -1306,11 +1477,12 @@ async def create_bound_weapon_spell_roll(room_id: str, sheet_id: str, player_key
             equipment_instance_id,
             choice_index,
             action_operations(),
+            turn_id,
         )
     )
 
 
-async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, instance_index: int | None = None, damage_save_succeeded: bool | None = None, choice_index: int | None = None) -> dict[str, Any]:
+async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, instance_index: int | None = None, damage_save_succeeded: bool | None = None, choice_index: int | None = None, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_spell_damage_action(
@@ -1324,11 +1496,12 @@ async def create_spell_damage_roll(room_id: str, sheet_id: str, player_key: str,
             damage_save_succeeded,
             choice_index,
             action_operations(),
+            turn_id,
         )
     )
 
 
-async def create_spell_healing_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None) -> dict[str, Any]:
+async def create_spell_healing_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_spell_simple_action(
@@ -1340,11 +1513,12 @@ async def create_spell_healing_roll(room_id: str, sheet_id: str, player_key: str
             spell_slot_level,
             action_operations(),
             action_type=SpellRollType.HEALING,
+            turn_id=turn_id,
         )
     )
 
 
-async def create_spell_temporary_hit_points_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None) -> dict[str, Any]:
+async def create_spell_temporary_hit_points_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_spell_simple_action(
@@ -1356,11 +1530,12 @@ async def create_spell_temporary_hit_points_roll(room_id: str, sheet_id: str, pl
             spell_slot_level,
             action_operations(),
             action_type=SpellRollType.TEMPORARY_HIT_POINTS,
+            turn_id=turn_id,
         )
     )
 
 
-async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, choice_index: int | None = None, equipment_instance_id: str | None = None) -> dict[str, Any]:
+async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: str, spell_id: str, effect_index: int = 0, spell_slot_level: int | None = None, choice_index: int | None = None, equipment_instance_id: str | None = None, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_spell_simple_action(
@@ -1374,6 +1549,7 @@ async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: s
             action_type=SpellRollType.EFFECT,
             choice_index=choice_index,
             equipment_instance_id=equipment_instance_id,
+            turn_id=turn_id,
         )
     )
 
@@ -1405,7 +1581,7 @@ async def create_saving_throw_roll(room_id: str, sheet_id: str, player_key: str,
     )
 
 
-async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, resource_id: str, action_id: str) -> dict[str, Any]:
+async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, resource_id: str, action_id: str, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_sheet_entry_action(
@@ -1416,11 +1592,12 @@ async def create_resource_roll(room_id: str, sheet_id: str, player_key: str, res
             action_id,
             action_operations(),
             resource_entry=True,
+            turn_id=turn_id,
         )
     )
 
 
-async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, ability_id: str, action_id: str) -> dict[str, Any]:
+async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, ability_id: str, action_id: str, turn_id: str | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_sheet_entry_action(
@@ -1431,6 +1608,7 @@ async def create_ability_roll(room_id: str, sheet_id: str, player_key: str, abil
             action_id,
             action_operations(),
             resource_entry=False,
+            turn_id=turn_id,
         )
     )
 
@@ -1633,6 +1811,7 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.equipment_slots = {}
     room.ongoing_effects = saved.ongoing_effects
     room.scheduled_effects = saved.scheduled_effects
+    room.encounter = None
     await broadcast_room_state(room)
     return True
 

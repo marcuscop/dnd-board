@@ -19,6 +19,7 @@ from dnd_board.character_sheet import (
     SpellSchool,
     SpellSource,
 )
+from dnd_board.rules.shared.effects import Modifier
 
 
 class ProgressionChoiceId(Enum):
@@ -257,3 +258,4 @@ class ClassProgressionDefinition:
     fightingStylePresentation: ProgressionChoicePresentation | None = None
     fightingStyleFeatCategories: tuple[Enum, ...] = ()
     classOptionChoices: tuple[ClassOptionProgressionDefinition, ...] = ()
+    allocationModifiersByLevel: tuple[tuple[Modifier, ...], ...] = ()

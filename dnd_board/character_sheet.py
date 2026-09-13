@@ -27,6 +27,7 @@ class RollResolutionMode(Enum):
     APPLY_DAMAGE = auto()
     HEAL_SELF = auto()
     APPLY_TEMPORARY_HIT_POINTS = auto()
+    APPLY_TO_SELF = auto()
 
 
 class RollLogEntryType(Enum):
@@ -53,6 +54,7 @@ class ResolutionInterceptorTrigger(Enum):
     BEFORE_FAILED_SAVE_FINALIZES = auto()
     BEFORE_DAMAGE_APPLIED = auto()
     BEFORE_CONDITION_APPLIED = auto()
+    BEFORE_TURN_BOUNDARY = auto()
 
 
 class RollModifierType(Enum):
@@ -1018,6 +1020,12 @@ class TimeEconomy(Enum):
     SPECIAL = auto()
 
 
+class ActivationTiming(Enum):
+    UNRESTRICTED = auto()
+    OWN_TURN = auto()
+    REACTION_WINDOW = auto()
+
+
 class ProficiencyLevel(Enum):
     NONE = auto()
     PROFICIENT = auto()
@@ -1204,6 +1212,7 @@ class AttackAction:
     mechanics: FeatureMechanics | None = None
     resourceCosts: tuple[ResourceCost, ...] = ()
     weaponAttackOptions: list[WeaponAttackOption] | None = None
+    activationInstances: int = 1
 
     @api_field
     def damageDie(self) -> str:
@@ -1226,6 +1235,7 @@ class RollAction:
     damageType: DamageType | None = None
     mechanics: FeatureMechanics | None = None
     resourceCosts: tuple[ResourceCost, ...] = ()
+    activationTiming: ActivationTiming = ActivationTiming.UNRESTRICTED
 
     @api_field
     def dice(self) -> str:
@@ -1804,6 +1814,11 @@ def build_character_sheet(
         equipment=equipment,
         purse=purse,
     )
+    from dnd_board.rules.shared.character_effects import character_allocation_value
+    from dnd_board.rules.shared.effects import CalculationType
+
+    attack_count = character_allocation_value(sheet, CalculationType.ATTACKS_PER_ACTION)
+    sheet.attacks = [replace(attack, activationInstances=attack_count) for attack in sheet.attacks]
     return sheet
 
 
@@ -2840,6 +2855,8 @@ def character_effect_sheet_updates(
     resolution: ResolvedCharacterEffect,
     primary_target: CharacterSheet,
 ) -> list[CharacterStateUpdate]:
+    from dnd_board.rules.shared.effects import EffectTarget
+
     updates: list[CharacterStateUpdate] = []
     for participant in resolution.participants:
         sheet = participant.sheet
@@ -2860,7 +2877,14 @@ def character_effect_sheet_updates(
             applied for applied in resolution.appliedEffects
             if (
                 (applied.bindings is None and is_primary_target)
-                or (applied.bindings is not None and applied.bindings.targetSheetId == sheet.id)
+                or (
+                    applied.bindings is not None
+                    and (
+                        applied.bindings.sourceSheetId
+                        if applied.effect.target == EffectTarget.SOURCE
+                        else applied.bindings.targetSheetId
+                    ) == sheet.id
+                )
             )
         ]
         scheduled_effects = [

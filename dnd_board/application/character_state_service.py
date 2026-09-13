@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from dnd_board.application.action_service import (
     resolve_damage_save_for_roll,
@@ -52,6 +52,7 @@ from dnd_board.rules.shared.character_effects import (
     ongoing_effects_after_ending,
 )
 from dnd_board.rules.shared.effects import (
+    ActionAllowanceEffect,
     ConditionOperation,
     EffectDurationType,
     EndingConditionType,
@@ -60,6 +61,7 @@ from dnd_board.rules.shared.effects import (
     OngoingEffectId,
     RestEffect,
 )
+from dnd_board.rules.encounter import ActionAllowance, AllowanceSource, grant_action_allowance
 from dnd_board.rules.shared.resources import ResourceUpdate
 from dnd_board.rules.shared.condition_effects import normalize_conditions
 
@@ -275,7 +277,22 @@ def _apply_effect_sheet_updates(
         if update.damageImmunities is not None:
             room.damage_immunities[update.tokenId] = update.damageImmunities
         if update.ongoingEffects is not None:
-            room.ongoing_effects[update.tokenId] = update.ongoingEffects
+            existing_ids = {
+                active.id for active in room.ongoing_effects.get(update.tokenId, [])
+            }
+            room.ongoing_effects[update.tokenId] = [
+                replace(
+                    active,
+                    installedTurnId=room.encounter.turnId,
+                )
+                if (
+                    active.id not in existing_ids
+                    and active.installedTurnId is None
+                    and room.encounter is not None
+                )
+                else active
+                for active in update.ongoingEffects
+            ]
             persistent_effect_changed = True
         if update.scheduledEffects:
             scheduled = room.scheduled_effects.setdefault(update.tokenId, [])
@@ -286,6 +303,21 @@ def _apply_effect_sheet_updates(
             persistent_effect_changed = True
         for applied in update.appliedEffects or []:
             effect = applied.effect
+            if isinstance(effect, ActionAllowanceEffect):
+                if room.encounter is not None:
+                    room.encounter = grant_action_allowance(
+                        room.encounter,
+                        update.sheetId,
+                        ActionAllowance(
+                            resource=effect.resource,
+                            amount=effect.amount,
+                            source=AllowanceSource(effect.sourceResource),
+                            allowedCategories=effect.allowedCategories,
+                            expires=effect.expires,
+                        ),
+                    )
+                    persistent_effect_changed = True
+                continue
             if isinstance(effect, RestEffect):
                 effect_sheet = sheets_by_id.get(update.sheetId)
                 if effect_sheet is None:

@@ -7,9 +7,11 @@ from enum import StrEnum
 from time import time_ns
 from typing import Any, TYPE_CHECKING
 
-from dnd_board.application.resource_service import spend_sheet_resources
+from dnd_board.application.resource_service import payable_resource_costs, spend_sheet_resources
+from dnd_board.application.encounter_service import authorize_action, commit_action_authorization
 from dnd_board.application.room_state import Player, Room
 from dnd_board.character_sheet import (
+    ActivationTiming,
     AbilityType,
     CharacterSheet,
     ConditionType,
@@ -56,17 +58,27 @@ from dnd_board.rules.shared.weapon_effects import (
     build_bound_weapon_spell_effect_payload,
 )
 from dnd_board.rules.shared.character_effects import (
+    activated_effect_node,
     added_condition_types,
+    character_allocation_value,
+    direct_damage_action_at,
     first_attack_roll_effect,
     ongoing_effects_after_ending,
+    scaled_instance_count,
 )
 from dnd_board.rules.shared.condition_effects import (
     action_failure_chance,
     activation_blocking_condition,
     conditions_ending_on_event,
 )
-from dnd_board.rules.shared.effects import EndingConditionType, ResolutionEventType
-from dnd_board.rules.shared.resources import InsufficientResourceError, ResourceCost, ResourceUpdate
+from dnd_board.rules.shared.effects import CalculationType, ChoiceEffect, EndingConditionType, RepeatedEffect, ResolutionEventType
+from dnd_board.rules.shared.resources import (
+    InsufficientResourceError,
+    ResourceCost,
+    ResourceId,
+    ResourceUpdate,
+)
+from dnd_board.rules.encounter import ActionCategory, ActivationKey, ActivationKind
 
 if TYPE_CHECKING:
     from dnd_board.application.character_state_service import CharacterStatePersistence
@@ -376,6 +388,7 @@ async def create_attack_action(
     *,
     damage_only: bool = False,
     weapon_option: str | None = None,
+    turn_id: str | None = None,
 ) -> dict[str, Any]:
     attack = find_attack(sheet, attack_id)
     if weapon_option is not None and not any(
@@ -384,13 +397,42 @@ async def create_attack_action(
     ):
         raise ActionServiceError(400, "Invalid weapon attack option")
     label = "Damage Roll" if damage_only else "Attack Roll"
-    await assert_activation_allowed(room, sheet, player, attack.activation, attack.name, label, operations)
+    activation = None if damage_only else attack.activation
+    attack_activation_key = ActivationKey(ActivationKind.ATTACK_ACTION, "attack")
+    await assert_activation_allowed(
+        room,
+        sheet,
+        player,
+        activation,
+        attack.name,
+        label,
+        operations,
+        ActionCategory.ATTACK,
+        turn_id,
+        activation_key=attack_activation_key,
+    )
     payload = (
         build_damage_roll_payload(sheet, player.player_key, attack, weapon_option)
         if damage_only
         else build_combined_attack_roll_payload(sheet, player.player_key, attack, weapon_option)
     )
-    await consume_action_resources(room, sheet, player, attack.resourceCosts, payload, operations)
+    await consume_action_resources(
+        room,
+        sheet,
+        player,
+        attack.resourceCosts,
+        payload,
+        operations,
+        activation=activation,
+        category=ActionCategory.ATTACK,
+        turn_id=turn_id,
+        activation_instances=character_allocation_value(
+            sheet,
+            CalculationType.ATTACKS_PER_ACTION,
+            participant_sheets=operations.all_sheets(room),
+        ),
+        activation_key=attack_activation_key,
+    )
     return await store_outgoing_roll(room, sheet, payload, operations)
 
 
@@ -401,6 +443,7 @@ async def create_spell_attack_action(
     spell_id: str,
     spell_slot_level: int | None,
     operations: ActionOperations,
+    turn_id: str | None = None,
 ) -> dict[str, Any]:
     spell = find_spell(sheet, spell_id)
     validate_spell_slot_level(sheet, spell, spell_slot_level)
@@ -417,6 +460,8 @@ async def create_spell_attack_action(
         enum_label(spell.name),
         "Spell Attack",
         operations,
+        ActionCategory.MAGIC,
+        turn_id,
     )
     await assert_somatic_spell_cast_allowed(room, sheet, player, spell, operations)
     payload = build_spell_attack_roll_payload(sheet, player.player_key, spell)
@@ -428,6 +473,9 @@ async def create_spell_attack_action(
         payload,
         operations,
         spell_slot_level or spell.level,
+        activation=spell.castingTime,
+        category=ActionCategory.MAGIC,
+        turn_id=turn_id,
     )
     return await store_outgoing_roll(room, sheet, payload, operations)
 
@@ -441,6 +489,7 @@ async def create_bound_weapon_spell_action(
     equipment_instance_id: str,
     choice_index: int | None,
     operations: ActionOperations,
+    turn_id: str | None = None,
 ) -> dict[str, Any]:
     spell = find_spell(sheet, spell_id)
     await assert_activation_allowed(
@@ -451,6 +500,8 @@ async def create_bound_weapon_spell_action(
         enum_label(spell.name),
         "Bound Weapon Attack",
         operations,
+        ActionCategory.MAGIC,
+        turn_id,
     )
     await assert_somatic_spell_cast_allowed(room, sheet, player, spell, operations)
     try:
@@ -473,7 +524,7 @@ async def create_bound_weapon_spell_action(
             operations,
         )
         raise ActionServiceError(400, str(error)) from error
-    await _spend_spell_resources(room, sheet, player, spell, payload, None, operations)
+    await _spend_spell_resources(room, sheet, player, spell, payload, None, operations, turn_id)
     return await store_outgoing_roll(room, sheet, payload, operations)
 
 
@@ -488,10 +539,15 @@ async def create_spell_damage_action(
     damage_save_succeeded: bool | None,
     choice_index: int | None,
     operations: ActionOperations,
+    turn_id: str | None = None,
 ) -> dict[str, Any]:
     spell = find_spell(sheet, spell_id)
     validate_spell_slot_level(sheet, spell, spell_slot_level)
-    await assert_activation_allowed(
+    activation_key = _spell_activation_key(spell_id, effect_index, spell_slot_level, choice_index)
+    activation_instances = _spell_effect_instance_count(
+        sheet, spell, effect_index, spell_slot_level, choice_index
+    )
+    activation_authorization = await assert_activation_allowed(
         room,
         sheet,
         player,
@@ -499,8 +555,12 @@ async def create_spell_damage_action(
         enum_label(spell.name),
         "Spell Damage",
         operations,
+        ActionCategory.MAGIC,
+        turn_id,
+        activation_key=activation_key,
+        part_id=instance_index,
     )
-    if spell.mechanics is not None:
+    if spell.mechanics is not None and activation_authorization.activeAction is None:
         await assert_somatic_spell_cast_allowed(room, sheet, player, spell, operations)
     try:
         payload = build_spell_damage_roll_payload(
@@ -523,6 +583,10 @@ async def create_spell_damage_action(
         payload,
         spell_slot_level,
         operations,
+        turn_id,
+        activation_instances=activation_instances,
+        activation_key=activation_key,
+        part_id=instance_index,
     )
     return await store_outgoing_roll(room, sheet, payload, operations)
 
@@ -539,6 +603,7 @@ async def create_spell_simple_action(
     action_type: SpellRollType,
     choice_index: int | None = None,
     equipment_instance_id: str | None = None,
+    turn_id: str | None = None,
 ) -> dict[str, Any]:
     spell = find_spell(sheet, spell_id)
     validate_spell_slot_level(sheet, spell, spell_slot_level)
@@ -555,6 +620,8 @@ async def create_spell_simple_action(
         enum_label(spell.name),
         labels[action_type],
         operations,
+        ActionCategory.MAGIC,
+        turn_id,
     )
     await assert_somatic_spell_cast_allowed(room, sheet, player, spell, operations)
     try:
@@ -612,6 +679,7 @@ async def create_spell_simple_action(
         payload,
         spell_slot_level,
         operations,
+        turn_id,
     )
     return await store_outgoing_roll(room, sheet, payload, operations)
 
@@ -645,6 +713,7 @@ async def create_sheet_entry_action(
     operations: ActionOperations,
     *,
     resource_entry: bool,
+    turn_id: str | None = None,
 ) -> dict[str, Any]:
     entries = sheet.resources if resource_entry else sheet.abilities
     entry = next(
@@ -672,6 +741,9 @@ async def create_sheet_entry_action(
         source_label,
         enum_label(action.name),
         operations,
+        ActionCategory.FEATURE,
+        turn_id,
+        timing=action.activationTiming,
     )
     source = RollSource(
         section=SheetSectionType.RESOURCES if resource_entry else SheetSectionType.ABILITIES,
@@ -692,6 +764,11 @@ async def create_sheet_entry_action(
         action.resourceCosts,
         payload,
         operations,
+        activation=action.activation or entry.activation,
+        category=ActionCategory.FEATURE,
+        turn_id=turn_id,
+        timing=action.activationTiming,
+        activation_key=ActivationKey(ActivationKind.FEATURE, entry.id, enum_key(action.id)),
     )
     return await store_outgoing_roll(room, sheet, payload, operations)
 
@@ -833,9 +910,45 @@ async def consume_action_resources(
     payload: RollPayload,
     operations: ActionOperations,
     spell_slot_level: int | None = None,
+    *,
+    activation: TimeEconomy | None = None,
+    category: ActionCategory = ActionCategory.OTHER,
+    turn_id: str | None = None,
+    activation_instances: int = 1,
+    timing: ActivationTiming = ActivationTiming.UNRESTRICTED,
+    activation_key: ActivationKey | None = None,
+    part_id: int | None = None,
 ) -> list[ResourceUpdate]:
+    authorization = authorize_action(
+        room,
+        sheet.id,
+        activation,
+        category,
+        turn_id,
+        timing=timing,
+        activation_key=activation_key,
+        part_id=part_id,
+        sheet=sheet,
+        participant_sheets=operations.all_sheets(room),
+    )
+    if not authorization.allowed:
+        reason = authorization.reason or "Action is unavailable"
+        await log_blocked_roll(
+            room,
+            sheet,
+            player,
+            payload.sourceLabel,
+            payload.label,
+            reason,
+            operations,
+        )
+        raise ActionServiceError(409, reason)
     try:
-        spent = spend_sheet_resources(room, sheet, costs, spell_slot_level)
+        payable_costs = payable_resource_costs(
+            costs,
+            continuation=authorization.activeAction is not None,
+        )
+        spent = spend_sheet_resources(room, sheet, payable_costs, spell_slot_level)
     except InsufficientResourceError as error:
         await log_blocked_roll(
             room,
@@ -849,6 +962,23 @@ async def consume_action_resources(
         raise ActionServiceError(409, str(error)) from error
     except ValueError as error:
         raise ActionServiceError(400, str(error)) from error
+    encounter_before = room.encounter
+    commit_action_authorization(
+        room,
+        sheet.id,
+        authorization,
+        activation_instances,
+        activation_key,
+        part_id,
+    )
+    activation_resource = authorization.resource
+    if encounter_before != room.encounter and activation_resource is not None and room.encounter is not None:
+        participant = next(
+            entry for entry in room.encounter.participantStates
+            if entry.participantId == sheet.id
+        )
+        state = next(entry for entry in participant.resources if entry.resource == activation_resource)
+        spent.append(ResourceUpdate(state.resource, state.resource.value, state.current, state.maximum))
     payload.resourcesSpent = spent or None
     return spent
 
@@ -861,10 +991,32 @@ async def assert_activation_allowed(
     source_label: str,
     roll_label: str,
     operations: ActionOperations,
-) -> None:
+    category: ActionCategory = ActionCategory.OTHER,
+    turn_id: str | None = None,
+    *,
+    timing: ActivationTiming = ActivationTiming.UNRESTRICTED,
+    activation_key: ActivationKey | None = None,
+    part_id: int | None = None,
+) -> ActivationAuthorization:
+    authorization = authorize_action(
+        room,
+        sheet.id,
+        activation,
+        category,
+        turn_id,
+        timing=timing,
+        activation_key=activation_key,
+        part_id=part_id,
+        sheet=sheet,
+        participant_sheets=operations.all_sheets(room),
+    )
+    if not authorization.allowed:
+        reason = authorization.reason or "Action is unavailable"
+        await log_blocked_roll(room, sheet, player, source_label, roll_label, reason, operations)
+        raise ActionServiceError(409, reason)
     blocking_condition = activation_blocking_condition(sheet.conditions, activation)
     if blocking_condition is None:
-        return
+        return authorization
     reaction_only = activation == TimeEconomy.REACTION and blocking_condition == ConditionType.SLOWED
     scope = "Reactions" if reaction_only else "Actions, Bonus Actions, and Reactions"
     await log_blocked_roll(
@@ -1127,6 +1279,42 @@ def validate_spell_slot_level(
         raise ActionServiceError(400, "Spell slot level is not available")
 
 
+def _spell_activation_key(
+    spell_id: str,
+    effect_index: int,
+    spell_slot_level: int | None,
+    choice_index: int | None,
+) -> ActivationKey:
+    option_id = ":".join(
+        str(value) for value in (
+            effect_index,
+            spell_slot_level if spell_slot_level is not None else 0,
+            choice_index if choice_index is not None else 0,
+        )
+    )
+    return ActivationKey(ActivationKind.SPELL, spell_id, option_id)
+
+
+def _spell_effect_instance_count(
+    sheet: CharacterSheet,
+    spell: SpellEntry,
+    effect_index: int,
+    spell_slot_level: int | None,
+    choice_index: int | None,
+) -> int:
+    if spell.mechanics is None:
+        return 1
+    node = activated_effect_node(direct_damage_action_at(spell.mechanics, effect_index))
+    if isinstance(node, ChoiceEffect):
+        selected = choice_index if choice_index is not None else 0
+        if selected < 0 or selected >= len(node.choices):
+            return 1
+        node = activated_effect_node(node.choices[selected].effect)
+    if not isinstance(node, RepeatedEffect):
+        return 1
+    return scaled_instance_count(node.instances, sheet, spell.level, spell_slot_level)
+
+
 async def _spend_spell_resources(
     room: Room,
     sheet: CharacterSheet,
@@ -1135,6 +1323,11 @@ async def _spend_spell_resources(
     payload: RollPayload,
     spell_slot_level: int | None,
     operations: ActionOperations,
+    turn_id: str | None = None,
+    *,
+    activation_instances: int = 1,
+    activation_key: ActivationKey | None = None,
+    part_id: int | None = None,
 ) -> None:
     await consume_action_resources(
         room,
@@ -1144,13 +1337,22 @@ async def _spend_spell_resources(
         payload,
         operations,
         spell_slot_level or spell.level,
+        activation=spell.castingTime,
+        category=ActionCategory.MAGIC,
+        turn_id=turn_id,
+        activation_instances=activation_instances,
+        activation_key=activation_key,
+        part_id=part_id,
     )
 
 
 def _roll_resolves_immediately(roll: RollPayload) -> bool:
     return (
-        roll.resolution == RollResolutionMode.HEAL_SELF
-        and roll.source.section != SheetSectionType.SPELLS
+        (
+            roll.resolution == RollResolutionMode.HEAL_SELF
+            and roll.source.section != SheetSectionType.SPELLS
+        )
+        or roll.resolution == RollResolutionMode.APPLY_TO_SELF
     )
 
 

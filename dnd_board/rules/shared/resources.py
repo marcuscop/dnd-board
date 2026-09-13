@@ -90,6 +90,13 @@ class ResourceId(Enum):
 class ResourceRecoveryTrigger(Enum):
     SHORT_REST = "Short Rest"
     LONG_REST = "Long Rest"
+    TURN_STARTED = "Turn Started"
+    TURN_ENDED = "Turn Ended"
+
+
+class ResourcePaymentScope(Enum):
+    ACTIVATION = "Activation"
+    PART = "Part"
 
 
 @dataclass(frozen=True)
@@ -122,6 +129,7 @@ class ResourceState:
 class ResourceCost:
     resource: ResourceId
     amount: int = 1
+    paymentScope: ResourcePaymentScope = ResourcePaymentScope.ACTIVATION
 
 
 @dataclass(frozen=True)
@@ -194,9 +202,21 @@ RESOURCE_DEFINITIONS: Mapping[ResourceId, ResourceDefinition] = {
     ),
     ResourceId.ARROWS: ResourceDefinition(ResourceKey(ResourceId.ARROWS, ResourceKind.AMMUNITION), ResourceId.ARROWS.value),
     ResourceId.BOLTS: ResourceDefinition(ResourceKey(ResourceId.BOLTS, ResourceKind.AMMUNITION), ResourceId.BOLTS.value),
-    ResourceId.ACTION: ResourceDefinition(ResourceKey(ResourceId.ACTION, ResourceKind.ACTION), ResourceId.ACTION.value),
-    ResourceId.BONUS_ACTION: ResourceDefinition(ResourceKey(ResourceId.BONUS_ACTION, ResourceKind.BONUS_ACTION), ResourceId.BONUS_ACTION.value),
-    ResourceId.REACTION: ResourceDefinition(ResourceKey(ResourceId.REACTION, ResourceKind.REACTION), ResourceId.REACTION.value),
+    ResourceId.ACTION: ResourceDefinition(
+        ResourceKey(ResourceId.ACTION, ResourceKind.ACTION),
+        ResourceId.ACTION.value,
+        (full_recovery(ResourceRecoveryTrigger.TURN_STARTED),),
+    ),
+    ResourceId.BONUS_ACTION: ResourceDefinition(
+        ResourceKey(ResourceId.BONUS_ACTION, ResourceKind.BONUS_ACTION),
+        ResourceId.BONUS_ACTION.value,
+        (full_recovery(ResourceRecoveryTrigger.TURN_STARTED),),
+    ),
+    ResourceId.REACTION: ResourceDefinition(
+        ResourceKey(ResourceId.REACTION, ResourceKind.REACTION),
+        ResourceId.REACTION.value,
+        (full_recovery(ResourceRecoveryTrigger.TURN_STARTED),),
+    ),
 }
 
 
@@ -327,6 +347,7 @@ def resource_model_types() -> tuple[type, ...]:
         ResourceKind,
         ResourceId,
         ResourceRecoveryTrigger,
+        ResourcePaymentScope,
         ResourceKey,
         ResourceRecovery,
         ResourceDefinition,

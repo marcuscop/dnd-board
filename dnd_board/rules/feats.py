@@ -68,6 +68,7 @@ from dnd_board.rules.shared.effects import (
     SourceAttackRangePredicate,
     SourceDamageAbilityModifierPredicate,
     SourceIsAttackPredicate,
+    SourceIsOwnerPredicate,
     SourceWeaponCategoryPredicate,
     TargetIsOwnerPredicate,
     WeaponHasAnyPropertyPredicate,
@@ -499,7 +500,11 @@ def weapon_or_background_prerequisite(weapon_proficiency: WeaponProficiencyType,
 
 GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.ACTOR: general_feat(GeneralFeatType.ACTOR, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Charisma; improve deception, performance, and mimicry."),
-    GeneralFeatType.ALERT: general_feat(GeneralFeatType.ALERT, RuleSource.PLAYERS_HANDBOOK_2024, "+5 initiative, cannot be surprised, and unseen attackers do not gain advantage."),
+    GeneralFeatType.ALERT: general_feat(
+        GeneralFeatType.ALERT,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "Add your Proficiency Bonus to Initiative. Immediately after rolling Initiative, you can swap it with one willing, non-Incapacitated ally in the same combat.",
+    ),
     GeneralFeatType.ARTIFICER_INITIATE: general_feat(GeneralFeatType.ARTIFICER_INITIATE, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn artificer magic and one artisan tool proficiency."),
     GeneralFeatType.ATHLETE: general_feat(GeneralFeatType.ATHLETE, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; improve climbing, standing, and jumping."),
     GeneralFeatType.BOUNTIFUL_LUCK: general_feat(GeneralFeatType.BOUNTIFUL_LUCK, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Let a nearby ally reroll a 1 on a d20.", (species_prerequisite(SpeciesType.HALFLING),)),
@@ -542,7 +547,11 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT: general_feat(GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; darkvision and stone strike.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.STONE_STRIKE))),
     GeneralFeatType.LIGHTLY_ARMORED: general_feat(GeneralFeatType.LIGHTLY_ARMORED, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain light armor proficiency."),
     GeneralFeatType.LINGUIST: general_feat(GeneralFeatType.LINGUIST, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence; learn languages and make ciphers."),
-    GeneralFeatType.LUCKY: general_feat(GeneralFeatType.LUCKY, RuleSource.PLAYERS_HANDBOOK_2024, "Spend luck points to affect d20 rolls."),
+    GeneralFeatType.LUCKY: general_feat(
+        GeneralFeatType.LUCKY,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "Gain Luck Points equal to your Proficiency Bonus. Spend 1 to gain Advantage on your D20 Test or impose Disadvantage on an attack roll against you; regain all Luck Points on a Long Rest.",
+    ),
     GeneralFeatType.MAGE_SLAYER: general_feat(GeneralFeatType.MAGE_SLAYER, RuleSource.PLAYERS_HANDBOOK_2024, "Punish nearby spellcasters and resist close-range spells."),
     GeneralFeatType.MAGIC_INITIATE: general_feat(GeneralFeatType.MAGIC_INITIATE, RuleSource.PLAYERS_HANDBOOK_2024, "Learn two cantrips and one 1st-level spell from a class list."),
     GeneralFeatType.MARTIAL_ADEPT: general_feat(GeneralFeatType.MARTIAL_ADEPT, RuleSource.PLAYERS_HANDBOOK_2024, "Learn Battle Master maneuvers and gain a superiority die."),
@@ -901,6 +910,7 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
                 WithinDistancePredicate(5),
             ],
             operations=[ModifyRoll(RollModificationType.DISADVANTAGE)],
+            activation=TimeEconomy.REACTION,
         )]),
     ),
     FightingStyleType.SUPERIOR_TECHNIQUE: FeatDefinition(
@@ -955,6 +965,7 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
                     CalculatedAmount(AmountCalculation.SOURCE_PROFICIENCY_BONUS),
                 ]),
             )],
+            activation=TimeEconomy.REACTION,
         )]),
     ),
     FightingStyleType.TWO_WEAPON_FIGHTING: FeatDefinition(
@@ -1213,6 +1224,7 @@ def feat_resources(classes: list[CharacterClassLevel], feats=None, proficiency_b
             activation=TimeEconomy.SPECIAL,
             description="Spend Luck Points to gain Advantage on a D20 Test or impose Disadvantage on an attack roll against you.",
             resource=ResourceId.LUCK_POINTS,
+            mechanics=lucky_mechanics(),
         ))
     if GeneralFeatType.MAGE_SLAYER in selected_feats:
         resources.append(
@@ -1267,6 +1279,39 @@ def mage_slayer_mechanics() -> FeatureMechanics:
                 operations=[ReplaceRollOutcome(RollOutcome.SUCCESS)],
                 resourceCosts=(ResourceCost(ResourceId.MAGE_SLAYER),),
             )
+        ]
+    )
+
+
+def lucky_mechanics() -> FeatureMechanics:
+    prompted = InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM)
+    cost = (ResourceCost(ResourceId.LUCK_POINTS),)
+    return FeatureMechanics(
+        interactions=[
+            Interaction(
+                trigger=ResolutionEventType.ATTACK_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=prompted,
+                predicates=[SourceIsOwnerPredicate()],
+                operations=[ModifyRoll(RollModificationType.ADVANTAGE)],
+                resourceCosts=cost,
+            ),
+            Interaction(
+                trigger=ResolutionEventType.ATTACK_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=prompted,
+                predicates=[TargetIsOwnerPredicate()],
+                operations=[ModifyRoll(RollModificationType.DISADVANTAGE)],
+                resourceCosts=cost,
+            ),
+            Interaction(
+                trigger=ResolutionEventType.SAVE_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=prompted,
+                predicates=[TargetIsOwnerPredicate(), RollOutcomePredicate(RollOutcome.FAILURE)],
+                operations=[ModifyRoll(RollModificationType.ADVANTAGE)],
+                resourceCosts=cost,
+            ),
         ]
     )
 

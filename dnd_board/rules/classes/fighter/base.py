@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from dnd_board.character_sheet import (
+    ActivationTiming,
     CharacterClassLevel,
     ClassType,
     DiceType,
@@ -22,6 +23,8 @@ from dnd_board.character_sheet import (
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
 from dnd_board.rules.feats import FeatCategory
 from dnd_board.rules.shared.effects import (
+    ActionAllowanceEffect,
+    ApplyEffect,
     AmountCalculation,
     CalculatedAmount,
     FeatureMechanics,
@@ -29,12 +32,17 @@ from dnd_board.rules.shared.effects import (
     InteractionDecision,
     InteractionDecisionType,
     InteractionTiming,
+    CalculationType,
+    FixedAmount,
+    Modifier,
+    ModifierOperation,
     PromptResponder,
     RerollSavingThrow,
     ResolutionEventType,
     RollOutcome,
     RollOutcomePredicate,
 )
+from dnd_board.rules.encounter import ActionCategory
 from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId
 from dnd_board.rules.shared.progression_definitions import ClassProgressionDefinition, ProgressionChoiceId, ProgressionChoicePresentation, SkillProgressionDefinition
 
@@ -67,6 +75,7 @@ class FighterResourceType(Enum):
 class FighterRollActionType(Enum):
     SECOND_WIND_HEAL = auto()
     TACTICAL_MIND = auto()
+    ACTION_SURGE = auto()
 
 
 class FighterSubclassType(Enum):
@@ -315,6 +324,17 @@ FIGHTER_LEVELS: dict[int, FighterProgression] = {
 
 FIGHTER_PROGRESSION_DEFINITION = ClassProgressionDefinition(
     characterClass=ClassType.FIGHTER,
+    allocationModifiersByLevel=tuple(
+        (
+            Modifier(
+                CalculationType.ATTACKS_PER_ACTION,
+                ModifierOperation.MINIMUM,
+                amount=FixedAmount(FIGHTER_LEVELS[level].attack_count),
+                description="Fighter Extra Attack progression.",
+            ),
+        )
+        for level in range(1, 21)
+    ),
     abilityScoreImprovementLevels=tuple(
         level
         for level, progression in FIGHTER_LEVELS.items()
@@ -467,6 +487,31 @@ def fighter_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
                 maxUses=progression.action_surge_uses,
                 activation=TimeEconomy.SPECIAL,
                 description="Take one additional non-Magic action on your turn.",
+                rollActions=[
+                    RollAction(
+                        id=FighterRollActionType.ACTION_SURGE,
+                        name=FighterFeatureType.ACTION_SURGE,
+                        diceCount=0,
+                        diceType=DiceType.D4,
+                        resolution=RollResolutionMode.APPLY_TO_SELF,
+                        activation=TimeEconomy.SPECIAL,
+                        activationTiming=ActivationTiming.OWN_TURN,
+                        mechanics=FeatureMechanics(activatedEffects=[
+                            ApplyEffect(ActionAllowanceEffect(
+                                resource=ResourceId.ACTION,
+                                amount=1,
+                                sourceResource=ResourceId.ACTION_SURGE,
+                                allowedCategories=(
+                                    ActionCategory.ATTACK,
+                                    ActionCategory.FEATURE,
+                                    ActionCategory.ITEM,
+                                    ActionCategory.OTHER,
+                                ),
+                            )),
+                        ]),
+                        resourceCosts=(ResourceCost(ResourceId.ACTION_SURGE),),
+                    ),
+                ],
                 source=enum_label(ClassType.FIGHTER),
                 resource=ResourceId.ACTION_SURGE,
             )

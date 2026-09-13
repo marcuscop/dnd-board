@@ -32,6 +32,7 @@ type SheetStateResponse = {
 type SheetActionOptions = {
   roomId: string;
   playerKey: string;
+  turnId?: string;
   loadSheets: (showLoading?: boolean) => Promise<void>;
   setSheets: Dispatch<SetStateAction<CharacterSheet[]>>;
   setRolls: Dispatch<SetStateAction<RollPayload[]>>;
@@ -41,7 +42,7 @@ type SheetActionOptions = {
 };
 
 export function useSheetActions(options: SheetActionOptions) {
-  const { roomId, playerKey, loadSheets, setSheets, setRolls, setResolutionPrompts, setRollHistory, setSheetStatus } = options;
+  const { roomId, playerKey, turnId, loadSheets, setSheets, setRolls, setResolutionPrompts, setRollHistory, setSheetStatus } = options;
   const sheetPath = useCallback((sheet: CharacterSheet) => `/api/rooms/${encodeURIComponent(roomId)}/sheet/${encodeURIComponent(sheet.id)}`, [roomId]);
   const fail = useCallback((error: unknown) => {
     console.error(error);
@@ -66,12 +67,12 @@ export function useSheetActions(options: SheetActionOptions) {
   }, [setResolutionPrompts, setRollHistory, setRolls, setSheets]);
 
   const rollAttack = useCallback((sheet: CharacterSheet, attackId: string, weaponOption?: string) => reloadAfter(
-    postJson(`${sheetPath(sheet)}/rolls/attack`, { playerKey, attackId, weaponOption })
-  ), [playerKey, reloadAfter, sheetPath]);
+    postJson(`${sheetPath(sheet)}/rolls/attack`, { playerKey, attackId, weaponOption, turnId })
+  ), [playerKey, reloadAfter, sheetPath, turnId]);
 
   const rollDamage = useCallback((sheet: CharacterSheet, attackId: string, weaponOption?: string) => reloadAfter(
-    postJson(`${sheetPath(sheet)}/rolls/damage`, { playerKey, attackId, weaponOption })
-  ), [playerKey, reloadAfter, sheetPath]);
+    postJson(`${sheetPath(sheet)}/rolls/damage`, { playerKey, attackId, weaponOption, turnId })
+  ), [playerKey, reloadAfter, sheetPath, turnId]);
 
   const rollAbilityCheck = useCallback(async (sheet: CharacterSheet, ability: string) => {
     try { await postJson(`${sheetPath(sheet)}/rolls/ability-check`, { playerKey, ability }); } catch (error) { fail(error); }
@@ -85,7 +86,7 @@ export function useSheetActions(options: SheetActionOptions) {
     try {
       const body = await postJson<{ roll: RollPayload; resolution?: RollLogEntry["resolution"]; logEntry?: RollLogEntry }>(
         `${sheetPath(sheet)}/abilities/${encodeURIComponent(abilityId)}/rolls/${encodeURIComponent(actionId)}`,
-        { playerKey }
+        { playerKey, turnId }
       );
       if (body.resolution && body.logEntry) {
         setSheets((current) => applyResolvedRollToSheetState(current, body.resolution!));
@@ -95,31 +96,31 @@ export function useSheetActions(options: SheetActionOptions) {
         await loadSheets();
       }
     } catch (error) { fail(error); }
-  }, [fail, loadSheets, playerKey, setRollHistory, setRolls, setSheets, sheetPath]);
+  }, [fail, loadSheets, playerKey, setRollHistory, setRolls, setSheets, sheetPath, turnId]);
 
   const rollSpellAttack = useCallback((sheet: CharacterSheet, spellId: string, spellSlotLevel?: number) => reloadAfter(
-    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/attack`, { playerKey, spellSlotLevel })
-  ), [playerKey, reloadAfter, sheetPath]);
+    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/attack`, { playerKey, spellSlotLevel, turnId })
+  ), [playerKey, reloadAfter, sheetPath, turnId]);
 
   const rollSpellDamage = useCallback((sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number, choiceIndex?: number) => reloadAfter(
-    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/damage`, { playerKey, effectIndex, spellSlotLevel, instanceIndex, choiceIndex })
-  ), [playerKey, reloadAfter, sheetPath]);
+    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/damage`, { playerKey, effectIndex, spellSlotLevel, instanceIndex, choiceIndex, turnId })
+  ), [playerKey, reloadAfter, sheetPath, turnId]);
 
   const rollBoundWeaponSpell = useCallback((sheet: CharacterSheet, spellId: string, effectIndex: number, equipmentInstanceId: string, choiceIndex?: number) => reloadAfter(
-    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/weapon-attack`, { playerKey, effectIndex, equipmentInstanceId, choiceIndex })
-  ), [playerKey, reloadAfter, sheetPath]);
+    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/weapon-attack`, { playerKey, effectIndex, equipmentInstanceId, choiceIndex, turnId })
+  ), [playerKey, reloadAfter, sheetPath, turnId]);
 
   const rollSpellHealing = useCallback((sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => reloadAfter(
-    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/healing`, { playerKey, effectIndex, spellSlotLevel })
-  ), [playerKey, reloadAfter, sheetPath]);
+    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/healing`, { playerKey, effectIndex, spellSlotLevel, turnId })
+  ), [playerKey, reloadAfter, sheetPath, turnId]);
 
   const rollSpellTemporaryHitPoints = useCallback((sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => reloadAfter(
-    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/temporary-hit-points`, { playerKey, effectIndex, spellSlotLevel })
-  ), [playerKey, reloadAfter, sheetPath]);
+    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/temporary-hit-points`, { playerKey, effectIndex, spellSlotLevel, turnId })
+  ), [playerKey, reloadAfter, sheetPath, turnId]);
 
   const rollSpellEffect = useCallback((sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, choiceIndex?: number, equipmentInstanceId?: string) => reloadAfter(
-    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/effect`, { playerKey, effectIndex, spellSlotLevel, choiceIndex, equipmentInstanceId })
-  ), [playerKey, reloadAfter, sheetPath]);
+    postJson(`${sheetPath(sheet)}/spells/${encodeURIComponent(spellId)}/rolls/effect`, { playerKey, effectIndex, spellSlotLevel, choiceIndex, equipmentInstanceId, turnId })
+  ), [playerKey, reloadAfter, sheetPath, turnId]);
 
   const updateResource = useCallback(async (sheet: CharacterSheet, resourceId: string, currentUses: number) => {
     try { replaceSheet((await postJson<{ sheet: CharacterSheet }>(`${sheetPath(sheet)}/resources/${encodeURIComponent(resourceId)}`, { playerKey, currentUses })).sheet); }

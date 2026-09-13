@@ -8,6 +8,7 @@ import type {
   ConditionType,
   DamageType,
   DiceType,
+  EncounterState,
   EquipmentSlot,
   ProgressionChoice,
   ResolutionInterceptorPrompt,
@@ -19,6 +20,7 @@ import type {
 import { ABILITY_SCORE_OPTIONS, SAME_ABILITY_VALUE } from "../character/abilityOptions";
 import { CharacterBuilderPanel, shouldShowCharacterBuilder } from "../builder/CharacterBuilderPanel";
 import { AdHocDiceRoller } from "./AdHocDiceRoller";
+import { EncounterControls } from "./EncounterControls";
 import { ResolutionPromptPanel } from "./ResolutionPromptPanel";
 import { InlineRolls, isTargetableRoll, RollCard, RollLogRow } from "./Rolls";
 import {
@@ -149,11 +151,13 @@ const DAMAGE_TYPE_OPTIONS: DamageType[] = [
 
 export type SheetViewProps = {
   connection: ConnectionState;
+  encounter: EncounterState | null;
   expandedSheetId: string | null;
   isDm: boolean;
   onReloadSheets: () => Promise<void>;
   onCreateCharacter: (draft: CharacterBuilderDraft) => Promise<void>;
   onExpand: (sheetId: string | null) => void;
+  onEncounterChange: (encounter: EncounterState | null) => void;
   onClearSheetRolls: (sheet: CharacterSheet) => void;
   onRollAbilityCheck: (sheet: CharacterSheet, ability: string) => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string, weaponOption?: string) => void;
@@ -187,7 +191,7 @@ export type SheetViewProps = {
   tokens: Token[];
 };
 
-export function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollBoundWeaponSpell, onRollSpellHealing, onRollSpellTemporaryHitPoints, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onRemoveOngoingEffect, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, onRespondToResolutionPrompt, playerKey, roomId, resolutionPrompts, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+export function SheetView({ connection, encounter, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onEncounterChange, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollBoundWeaponSpell, onRollSpellHealing, onRollSpellTemporaryHitPoints, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onRemoveOngoingEffect, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, onRespondToResolutionPrompt, playerKey, roomId, resolutionPrompts, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -261,6 +265,17 @@ export function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, o
             <button onClick={() => onRestSheets("long")}>Long Rest</button>
           </div>
         )}
+        {!expandedSheet && (
+          <EncounterControls
+            encounter={encounter}
+            isDm={isDm}
+            onEncounterChange={onEncounterChange}
+            playerKey={playerKey}
+            roomId={roomId}
+            sheets={sheets}
+            tokens={tokens}
+          />
+        )}
       </header>
 
       <ResolutionPromptPanel
@@ -272,6 +287,8 @@ export function SheetView({ connection, expandedSheetId, isDm, onReloadSheets, o
       {expandedSheet ? (
         <FullSheet
           sheet={expandedSheet}
+          encounter={encounter}
+          currentParticipantName={sheets.find((sheet) => sheet.id === encounter?.currentParticipantId)?.name}
           canRoll={canRollSheet(expandedSheet, playerKey, isDm)}
           pendingRolls={rolls.filter((roll) => roll.tokenId === expandedSheet.tokenId)}
           resolvedRolls={cardResolvedRolls(expandedSheet, rollHistory, clearedCardRollIds)}
@@ -1081,6 +1098,8 @@ function ResourceStepper({
 
 function FullSheet({
   sheet,
+  encounter,
+  currentParticipantName,
   canRoll,
   isDm,
   onClearSheetRolls,
@@ -1111,6 +1130,8 @@ function FullSheet({
   onUpdateResource
 }: {
   sheet: CharacterSheet;
+  encounter: EncounterState | null;
+  currentParticipantName?: string;
   canRoll: boolean;
   isDm: boolean;
   onClearSheetRolls: (sheet: CharacterSheet) => void;
@@ -1143,6 +1164,10 @@ function FullSheet({
   const scores = Object.entries(sheet.abilityScores);
   const metadata = [sheet.race, sheet.background, sheet.alignment].filter(Boolean).join(" · ");
   const [selectedWeaponOptions, setSelectedWeaponOptions] = useState<Record<string, string>>({});
+  const encounterParticipant = encounter?.participantStates.find((participant) => participant.participantId === sheet.id);
+  const actionRemaining = encounterParticipant?.resources.find((resource) => resource.resource === "action")?.current ?? 0;
+  const bonusActionRemaining = encounterParticipant?.resources.find((resource) => resource.resource === "bonusAction")?.current ?? 0;
+  const reactionRemaining = encounterParticipant?.resources.find((resource) => resource.resource === "reaction")?.current ?? 0;
 
   return (
     <section className="full-sheet">
@@ -1169,6 +1194,13 @@ function FullSheet({
       </div>
       {canRoll && sheet.pendingChoices.length > 0 && (
         <ProgressionChoicePanel sheet={sheet} onUpdateProgressionChoice={onUpdateProgressionChoice} />
+      )}
+      {encounter && (
+        <div className="encounter-turn-notice">
+          {encounter.currentParticipantId === sheet.id
+            ? `Current turn · Action ${actionRemaining}/1 · Bonus Action ${bonusActionRemaining}/1 · Reaction ${reactionRemaining}/1`
+            : `Waiting for ${currentParticipantName ?? "current participant"} · Reactions ${reactionRemaining}/1`}
+        </div>
       )}
 
       <div className="ability-grid">

@@ -8,7 +8,8 @@ export enum RollResolutionMode {
   ATTACK_VS_ARMOR_CLASS = "attackVsArmorClass",
   APPLY_DAMAGE = "applyDamage",
   HEAL_SELF = "healSelf",
-  APPLY_TEMPORARY_HIT_POINTS = "applyTemporaryHitPoints"
+  APPLY_TEMPORARY_HIT_POINTS = "applyTemporaryHitPoints",
+  APPLY_TO_SELF = "applyToSelf"
 }
 
 export enum RollLogEntryType {
@@ -78,6 +79,50 @@ export type Asset = {
   kind: TokenKind.ASSET;
   name: string;
   avatarUrl: string;
+};
+
+export type EncounterParticipant = {
+  participantId: string;
+  initiative: number;
+};
+
+export type EncounterState = {
+  encounterId: string;
+  participants: EncounterParticipant[];
+  currentParticipantId: string;
+  currentIndex: number;
+  round: number;
+  turnId: string;
+  status: "active" | "transitioning";
+  transitionBoundary?: "start" | "end" | null;
+  transitionPhase?: "endEffects" | "advance" | "startEffects" | "complete" | null;
+  participantStates: {
+    participantId: string;
+    resources: { resource: ResourceId; current: number; maximum: number }[];
+    allowances: {
+      resource: ResourceId;
+      amount: number;
+      sourceResource: ResourceId;
+      sourceGrantIndex: number;
+      allowedCategories: ("attack" | "magic" | "feature" | "item" | "other")[];
+      expires: "turnStart" | "turnEnd" | "roundEnd" | "encounterEnd";
+    }[];
+    activeActions: {
+      key: {
+        kind: "attackAction" | "spell" | "feature" | "item";
+        sourceId: string;
+        optionId: string;
+      };
+      category: "attack" | "magic" | "feature" | "item" | "other";
+      remainingParts: number;
+    }[];
+    interactionUsages: {
+      resource: ResourceId;
+      scope: "onceOnOwnTurn" | "onceOnAnyTurn" | "oncePerRound" | "untilNextTurn";
+      turnId: string;
+      round: number;
+    }[];
+  }[];
 };
 
 export type AbilityType = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
@@ -426,7 +471,7 @@ export type ResourceId =
   | "action"
   | "bonusAction"
   | "reaction";
-export type ResourceRecoveryTrigger = "shortRest" | "longRest";
+export type ResourceRecoveryTrigger = "shortRest" | "longRest" | "turnStarted" | "turnEnded";
 export type ResourceCost = {
   resource: ResourceId;
   amount: number;
@@ -456,6 +501,7 @@ export type AttackAction = {
   attackKind: AttackKind;
   attackKindLabel: string;
   attackType: AttackActionType;
+  activationInstances: number;
   attackTypeLabel: string;
   properties: WeaponProperty[];
   propertiesLabel?: string[];
@@ -992,6 +1038,7 @@ export type ServerMessage =
       board: Board;
       boards: Board[];
       assets: Asset[];
+      encounter?: EncounterState | null;
     }
   | { type: "token_updated"; token: Token }
   | { type: "token_deleted"; tokenId: string }
