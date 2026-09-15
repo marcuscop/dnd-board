@@ -15,12 +15,16 @@ from dnd_board.application.action_service import (
     response_ability_roll,
     save_modifier,
     skill_modifier,
+    store_roll,
 )
 from dnd_board.application.character_state_service import (
     CharacterStatePersistence,
     apply_roll_result,
 )
-from dnd_board.application.resolution_interactions import resolution_prompt_for_effect_event
+from dnd_board.application.resolution_interactions import (
+    resolution_prompt_for_d20_test,
+    resolution_prompt_for_effect_event,
+)
 from dnd_board.application.resource_service import spend_sheet_resources
 from dnd_board.application.encounter_service import authorize_action, commit_action_authorization
 from dnd_board.application.room_state import CharacterRuntimeSnapshot, InteractionEventKey, PendingCharacterResolution, Player, Room
@@ -41,6 +45,7 @@ from dnd_board.character_sheet import (
     SheetSectionType,
     ResolutionInterceptorPrompt,
     ResolutionInterceptorType,
+    ResolutionPromptContinuation,
     RollModifierEffectTarget,
     SpellSaveOutcome,
     attack_roll_with_critical_damage,
@@ -229,6 +234,9 @@ async def respond_to_prompt(
         )
         return await _publish_prompt_result(room, prompt, resolution_or_prompt, operations)
 
+    if prompt.continuation == ResolutionPromptContinuation.STORE_ROLL:
+        return await _respond_to_d20_test_prompt(room, prompt, player, target, use, operations)
+
     response_rolls = list(prompt.responseRolls or [])
     outcome_prefixes = [_decision_summary(prompt, use)]
     next_roll = prompt.pendingRoll
@@ -258,6 +266,39 @@ async def respond_to_prompt(
         outcome_prefixes,
     )
     return await _publish_prompt_result(room, prompt, resolution_or_prompt, operations)
+
+
+async def _respond_to_d20_test_prompt(
+    room: Room,
+    prompt: ResolutionInterceptorPrompt,
+    player: Player,
+    owner: CharacterSheet,
+    use: bool,
+    operations: ResolutionOperations,
+) -> dict[str, Any]:
+    await _claim_prompt(room, prompt, player, owner, use, operations)
+    roll = prompt.pendingRoll
+    if use:
+        roll, _outcomes, _response_rolls, canceled = apply_resolution_interceptor(
+            prompt,
+            owner,
+            owner,
+        )
+        if canceled is not None:
+            raise ResolutionServiceError(409, "A D20 Test interaction cannot cancel the roll")
+
+    ignored = {*prompt.ignoredInterceptors, resolution_interceptor_key(prompt)}
+    next_prompt = resolution_prompt_for_d20_test(roll, owner, ignored)
+    await operations.broadcast(
+        room,
+        {"type": "resolution_prompt_resolved", "promptId": prompt.id},
+    )
+    if next_prompt is not None:
+        room.pending_resolution_prompts[next_prompt.id] = next_prompt
+        prompt_data = resolution_interceptor_prompt_to_dict(next_prompt)
+        await operations.broadcast(room, {"type": "resolution_prompt_created", "prompt": prompt_data})
+        return {"roomId": room.id, "prompt": prompt_data}
+    return await store_roll(room, roll, operations.action_operations)
 
 
 def continue_effect_resolution(

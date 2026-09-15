@@ -8,6 +8,7 @@ from time import time_ns
 from typing import Any, TYPE_CHECKING
 
 from dnd_board.application.resource_service import payable_resource_costs, spend_sheet_resources
+from dnd_board.application.resolution_interactions import resolution_prompt_for_d20_test
 from dnd_board.application.encounter_service import authorize_action, commit_action_authorization
 from dnd_board.application.room_state import Player, Room
 from dnd_board.character_sheet import (
@@ -51,6 +52,7 @@ from dnd_board.character_sheet import (
     roll_log_entry_to_dict,
     roll_payload_to_dict,
     roll_resolution_to_dict,
+    resolution_interceptor_prompt_to_dict,
     sanitize_identifier,
 )
 from dnd_board.rules.shared.weapon_effects import (
@@ -701,6 +703,12 @@ async def create_ability_score_action(
         if saving_throw
         else build_ability_check_roll_payload(sheet, player.player_key, ability)
     )
+    prompt = resolution_prompt_for_d20_test(payload, sheet)
+    if prompt is not None:
+        room.pending_resolution_prompts[prompt.id] = prompt
+        prompt_data = resolution_interceptor_prompt_to_dict(prompt)
+        await operations.broadcast(room, {"type": "resolution_prompt_created", "prompt": prompt_data})
+        return {"roomId": room.id, "prompt": prompt_data}
     return await store_roll(room, payload, operations)
 
 

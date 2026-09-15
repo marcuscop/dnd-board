@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from time import time_ns
 
 from dnd_board.character_sheet import (
     AbilityType,
     CharacterSheet,
+    D20TestType,
     ResolutionInterceptorPrompt,
     ResolutionInterceptorTrigger,
     ResolutionInterceptorType,
+    ResolutionPromptContinuation,
     RollPayload,
     RollResolutionMode,
     SheetSectionType,
@@ -40,12 +43,54 @@ from dnd_board.rules.shared.effects import (
     ScheduleEffectOperation,
     SourceIsOwnerPredicate,
 )
+from dnd_board.rules.shared.resources import ResourceId
 
 
 @dataclass(frozen=True)
 class SheetInteractionSource:
     label: str
     interaction: Interaction
+
+
+def resolution_prompt_for_d20_test(
+    roll: RollPayload,
+    owner: CharacterSheet,
+    ignored: set[str] | None = None,
+) -> ResolutionInterceptorPrompt | None:
+    event_type = {
+        D20TestType.ABILITY_CHECK: ResolutionEventType.CHECK_ROLLED,
+        D20TestType.SAVING_THROW: ResolutionEventType.SAVE_ROLLED,
+    }.get(roll.d20TestType)
+    if event_type is None:
+        return None
+    ignored_keys = ignored or set()
+    for interaction_source in matching_sheet_interactions(
+        owner,
+        event_type,
+        roll,
+        source_sheet=owner,
+        target=owner,
+    ):
+        interceptor_type = interceptor_type_for_interaction(interaction_source.interaction)
+        if interceptor_type != ResolutionInterceptorType.MODIFY_ROLL:
+            continue
+        key = resolution_interceptor_key_for(interceptor_type, owner.id, interaction_source.label)
+        if key in ignored_keys:
+            continue
+        return _prompt(
+            interceptor_type=interceptor_type,
+            trigger=ResolutionInterceptorTrigger.BEFORE_D20_TEST_FINALIZES,
+            source_roll=roll,
+            pending_roll=roll,
+            target=owner,
+            owner=owner,
+            interaction_source=interaction_source,
+            description=f"{owner.name} rolled {roll.label}.",
+            ignored=ignored_keys,
+            response_rolls=[],
+            continuation=ResolutionPromptContinuation.STORE_ROLL,
+        )
+    return None
 
 
 def resolution_prompt_for_effect_event(
@@ -417,6 +462,7 @@ def _prompt(
     ignored: set[str],
     response_rolls: list[RollPayload],
     use_label: str | None = None,
+    continuation: ResolutionPromptContinuation = ResolutionPromptContinuation.RESOLVE_AGAINST_TARGET,
 ) -> ResolutionInterceptorPrompt:
     return ResolutionInterceptorPrompt(
         id=f"prompt-{time_ns()}",
@@ -439,6 +485,7 @@ def _prompt(
         interaction=interaction_source.interaction,
         ignoredInterceptors=list(ignored),
         responseRolls=response_rolls or None,
+        continuation=continuation,
     )
 
 
@@ -447,9 +494,14 @@ def sheet_interaction_sources(sheet: CharacterSheet) -> list[SheetInteractionSou
 
     def add_mechanics(label: str, mechanics) -> None:
         if mechanics is not None:
+            available = {
+                resource.resource: resource.currentUses
+                for resource in sheet.resources
+            }
             sources.extend(
                 SheetInteractionSource(label, interaction)
                 for interaction in mechanics.interactions
+                if _interaction_resources_available(interaction, available)
             )
 
     seen_spells: set[SpellId] = set()
@@ -488,6 +540,16 @@ def sheet_interaction_sources(sheet: CharacterSheet) -> list[SheetInteractionSou
             for interaction in active.effect.interactions
         )
     return sources
+
+
+def _interaction_resources_available(
+    interaction: Interaction,
+    available: dict[ResourceId, int],
+) -> bool:
+    required = Counter[ResourceId]()
+    for cost in interaction.resourceCosts:
+        required[cost.resource] += cost.amount
+    return all(available.get(resource, 0) >= amount for resource, amount in required.items())
 
 
 def matching_sheet_interactions(

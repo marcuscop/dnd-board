@@ -100,6 +100,7 @@ from dnd_board.rules.classes.fighter.archetypes import (
 from dnd_board.rules.classes.fighter.battle_master import BATTLE_MASTER_2024_MANEUVERS, BATTLE_MASTER_MANEUVERS
 from dnd_board.rules.classes.fighter.battle_master import battle_master_features
 from dnd_board.rules.shared.combat_superiority import selected_battle_master_maneuvers
+from dnd_board.application.resolution_interactions import sheet_interaction_sources
 from dnd_board.rules.shared.character_effects import (
     added_condition_types,
     character_allocation_value,
@@ -438,16 +439,30 @@ def test_supported_general_feat_mechanics_are_reflected_on_sheet() -> None:
     assert sheet.hp.max == 84
     assert resources["luckPoints"].maxUses == sheet.proficiencyBonus
     assert resources["luckPoints"].recoveries == RESOURCE_DEFINITIONS[ResourceId.LUCK_POINTS].recoveries
-    lucky_interactions = resources["luckPoints"].mechanics.interactions
-    assert len(lucky_interactions) == 3
+    lucky_feature = next(feature for feature in sheet.features if feature.id == "lucky")
+    lucky_interactions = lucky_feature.mechanics.interactions
+    assert len(lucky_interactions) == 4
     assert all(interaction.resourceCosts == (ResourceCost(ResourceId.LUCK_POINTS),) for interaction in lucky_interactions)
+    assert all(interaction.activation == TimeEconomy.SPECIAL for interaction in lucky_interactions)
     assert isinstance(lucky_interactions[0].predicates[0], SourceIsOwnerPredicate)
     assert isinstance(lucky_interactions[0].operations[0], ModifyRoll)
     assert lucky_interactions[0].operations[0].modification == RollModificationType.ADVANTAGE
     assert isinstance(lucky_interactions[1].predicates[0], TargetIsOwnerPredicate)
     assert lucky_interactions[1].operations[0].modification == RollModificationType.DISADVANTAGE
+    assert resources["luckPoints"].mechanics is None
     assert abilities["luckyAdvantage"].resourceId == ResourceId.LUCK_POINTS
     assert abilities["observantQuickSearch"].activation == TimeEconomy.BONUS_ACTION
+
+    mage_slayer = general_feat_feature("mageSlayer")
+    mage_slayer_interaction = mage_slayer.mechanics.interactions[0]
+    assert mage_slayer_interaction.activation == TimeEconomy.SPECIAL
+    assert mage_slayer.mechanics.passiveModifiers[0].calculation == CalculationType.CONCENTRATION_SAVE
+
+    alert = GENERAL_FEATS[GeneralFeatType.ALERT]
+    assert alert.mechanics.passiveModifiers[0].calculation == CalculationType.INITIATIVE
+
+    resources["luckPoints"].currentUses = 0
+    assert not any(source.label == "Lucky" for source in sheet_interaction_sources(sheet))
 
 
 def test_epic_boon_feat_resources_and_legacy_speed_bonus_are_reflected() -> None:

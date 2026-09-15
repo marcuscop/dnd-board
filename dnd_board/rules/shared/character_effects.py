@@ -1003,6 +1003,30 @@ def active_ongoing_modifiers(
     return matches
 
 
+def applicable_character_modifiers(
+    owner: CharacterSheet,
+    calculation: CalculationType,
+    scope: ModifierScope,
+    roll: RollPayload,
+    target: CharacterSheet,
+    source: CharacterSheet | None,
+) -> list[tuple[str, Modifier]]:
+    """Return definition-owned modifiers whose participant predicates match this roll."""
+    context = CharacterEffectExecutionContext(roll, target, source, owner=owner)
+    entries = [
+        (entry.name, modifier)
+        for entry in (*owner.features, *owner.abilities, *owner.resources)
+        if entry.mechanics is not None
+        for modifier in entry.mechanics.passiveModifiers
+        if modifier.calculation == calculation and modifier.scope == scope
+    ]
+    return [
+        (label, modifier)
+        for index, (label, modifier) in enumerate(entries)
+        if context.evaluate_predicates(EffectNodeId((index,)), modifier.predicates)
+    ]
+
+
 def character_allocation_value(
     sheet: CharacterSheet,
     calculation: CalculationType,

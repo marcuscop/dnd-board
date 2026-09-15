@@ -3041,6 +3041,7 @@ def test_damage_triggers_concentration_save_and_clears_sourced_conditions(tmp_pa
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
                 attacks=[AttackAction("main-hand", "Maul", AbilityType.STRENGTH, 4, DiceType.D6, damageType=DamageType.BLUDGEONING)],
+                feats=[general_feat_feature(enum_key(GeneralFeatType.MAGE_SLAYER))],
             ),
         ),
     )
@@ -3085,9 +3086,15 @@ def test_damage_triggers_concentration_save_and_clears_sourced_conditions(tmp_pa
     assert damage.status_code == 200
     assert damage_resolution.status_code == 200
     assert concentration_roll["sourceLabel"] == "Bless"
+    assert concentration_roll["die"] == "2d20kl1"
+    assert concentration_roll["dice"] == [4, 4]
     assert concentration_roll["total"] == 2
-    assert concentration_roll["modifierBreakdown"][-1]["source"] == "Synaptic Static"
-    assert "fails DC 10 Concentration save; Bless ends and removes Blessed" in damage_resolution.json()["resolution"]["outcome"]
+    assert {entry["source"] for entry in concentration_roll["modifierBreakdown"]} == {
+        "Concentration Save",
+        "Synaptic Static",
+        "Mage Slayer",
+    }
+    assert "fails DC 10 Concentration save with Disadvantage; Bless ends and removes Blessed" in damage_resolution.json()["resolution"]["outcome"]
     assert damage_resolution.json()["resolution"]["concentrationUpdates"] == [{"sheetId": "player-1"}]
     assert "activeConcentration" not in cleric_after_damage
     assert "blessed" not in ally_after_damage["conditions"]
@@ -4224,6 +4231,59 @@ def test_player_can_roll_ability_check_and_saving_throw(tmp_path, monkeypatch) -
     assert save_roll["source"]["actionId"] == "save"
     assert save_roll["modifierBreakdown"] == [{"source": "Strength", "value": 3, "description": ""}, {"source": "Proficiency", "value": 3, "description": ""}]
     assert save_roll["total"] == 17
+
+
+def test_lucky_modifies_standalone_ability_checks_and_saving_throws(tmp_path, monkeypatch) -> None:
+    lucky = general_feat_feature(enum_key(GeneralFeatType.LUCKY))
+    assert lucky is not None
+    write_party_campaign(
+        tmp_path,
+        "lucky-d20-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Lucky Rogue",
+            maxHp=20,
+            abilityScores=AbilityScores(
+                strength=10,
+                dexterity=14,
+                constitution=12,
+                intelligence=10,
+                wisdom=10,
+                charisma=10,
+            ),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)],
+                feats=[lucky],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolls = iter([4, 18, 3, 17])
+    monkeypatch.setattr(random, "randint", lambda minimum, maximum: next(rolls))
+    client = TestClient(server.app)
+
+    check_prompt = client.post(
+        "/api/rooms/lucky-d20-test/sheet/player-1/rolls/ability-check?playerKey=player-1&ability=dexterity"
+    ).json()["prompt"]
+    check = client.post(
+        f"/api/rooms/lucky-d20-test/resolution-prompts/{check_prompt['id']}/respond?playerKey=player-1&use=true"
+    ).json()["roll"]
+    save_prompt = client.post(
+        "/api/rooms/lucky-d20-test/sheet/player-1/rolls/saving-throw?playerKey=player-1&ability=wisdom"
+    ).json()["prompt"]
+    save = client.post(
+        f"/api/rooms/lucky-d20-test/resolution-prompts/{save_prompt['id']}/respond?playerKey=player-1&use=true"
+    ).json()["roll"]
+
+    assert check_prompt["continuation"] == "storeRoll"
+    assert check["d20TestType"] == "abilityCheck"
+    assert check["dice"] == [4, 18]
+    assert check["die"] == "2d20kh1"
+    assert save["d20TestType"] == "savingThrow"
+    assert save["dice"] == [3, 17]
+    assert save["die"] == "2d20kh1"
+    sheet = client.get("/api/rooms/lucky-d20-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    assert next(resource for resource in sheet["resources"] if resource["id"] == "luckPoints")["currentUses"] == 0
 
 
 def test_ability_roll_rejects_unknown_ability() -> None:

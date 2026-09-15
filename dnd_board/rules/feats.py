@@ -48,6 +48,7 @@ from dnd_board.rules.shared.effects import (
     InteractionTiming,
     Modifier,
     ModifierOperation,
+    ModifierScope,
     ModifyPendingDamage,
     ModifyRoll,
     OwnerWearsArmorPredicate,
@@ -63,7 +64,6 @@ from dnd_board.rules.shared.effects import (
     RollOutcomePredicate,
     RollModificationType,
     SavingThrowAbilityPredicate,
-    SourceIsSpellPredicate,
     SourceAttackKindPredicate,
     SourceAttackRangePredicate,
     SourceDamageAbilityModifierPredicate,
@@ -420,6 +420,14 @@ def fighting_style_source(style: FightingStyleType) -> RuleSource:
 
 
 @dataclass(frozen=True)
+class FeatResourceDefinition:
+    resource: ResourceId
+    maximumUses: FixedAmount | CalculatedAmount
+    activation: TimeEconomy
+    description: str
+
+
+@dataclass(frozen=True)
 class GeneralFeatDefinition:
     featType: GeneralFeatType
     source: RuleSource
@@ -428,6 +436,7 @@ class GeneralFeatDefinition:
     description: str
     repeatable: bool = False
     mechanics: FeatureMechanics = field(default_factory=FeatureMechanics)
+    resources: tuple[FeatResourceDefinition, ...] = ()
 
 
 def general_feat(
@@ -438,6 +447,7 @@ def general_feat(
     repeatable: bool = False,
     category: FeatCategory = FeatCategory.GENERAL,
     mechanics: FeatureMechanics | None = None,
+    resources: tuple[FeatResourceDefinition, ...] = (),
 ) -> GeneralFeatDefinition:
     return GeneralFeatDefinition(
         featType=feat_type,
@@ -447,6 +457,7 @@ def general_feat(
         description=description,
         repeatable=repeatable,
         mechanics=mechanics or FeatureMechanics(),
+        resources=resources,
     )
 
 
@@ -498,12 +509,88 @@ def weapon_or_background_prerequisite(weapon_proficiency: WeaponProficiencyType,
     return FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=(weapon_proficiency,), backgrounds=(background,))
 
 
+def mage_slayer_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(
+        passiveModifiers=[Modifier(
+            CalculationType.CONCENTRATION_SAVE,
+            ModifierOperation.DISADVANTAGE,
+            scope=ModifierScope.CAUSED_BY_OWNER,
+            description="Creatures damaged by this character have Disadvantage on Concentration saves.",
+        )],
+        interactions=[
+            Interaction(
+                trigger=ResolutionEventType.SAVE_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+                predicates=[
+                    SavingThrowAbilityPredicate([AbilityType.INTELLIGENCE, AbilityType.WISDOM, AbilityType.CHARISMA]),
+                    RollOutcomePredicate(RollOutcome.FAILURE),
+                ],
+                operations=[ReplaceRollOutcome(RollOutcome.SUCCESS)],
+                resourceCosts=(ResourceCost(ResourceId.MAGE_SLAYER),),
+                activation=TimeEconomy.SPECIAL,
+            )
+        ]
+    )
+
+
+def lucky_mechanics() -> FeatureMechanics:
+    prompted = InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM)
+    cost = (ResourceCost(ResourceId.LUCK_POINTS),)
+    return FeatureMechanics(
+        interactions=[
+            Interaction(
+                trigger=ResolutionEventType.ATTACK_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=prompted,
+                predicates=[SourceIsOwnerPredicate()],
+                operations=[ModifyRoll(RollModificationType.ADVANTAGE)],
+                resourceCosts=cost,
+                activation=TimeEconomy.SPECIAL,
+            ),
+            Interaction(
+                trigger=ResolutionEventType.ATTACK_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=prompted,
+                predicates=[TargetIsOwnerPredicate()],
+                operations=[ModifyRoll(RollModificationType.DISADVANTAGE)],
+                resourceCosts=cost,
+                activation=TimeEconomy.SPECIAL,
+            ),
+            Interaction(
+                trigger=ResolutionEventType.SAVE_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=prompted,
+                predicates=[TargetIsOwnerPredicate()],
+                operations=[ModifyRoll(RollModificationType.ADVANTAGE)],
+                resourceCosts=cost,
+                activation=TimeEconomy.SPECIAL,
+            ),
+            Interaction(
+                trigger=ResolutionEventType.CHECK_ROLLED,
+                timing=InteractionTiming.AFTER_EVENT,
+                decision=prompted,
+                predicates=[SourceIsOwnerPredicate()],
+                operations=[ModifyRoll(RollModificationType.ADVANTAGE)],
+                resourceCosts=cost,
+                activation=TimeEconomy.SPECIAL,
+            ),
+        ]
+    )
+
+
 GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.ACTOR: general_feat(GeneralFeatType.ACTOR, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Charisma; improve deception, performance, and mimicry."),
     GeneralFeatType.ALERT: general_feat(
         GeneralFeatType.ALERT,
         RuleSource.PLAYERS_HANDBOOK_2024,
         "Add your Proficiency Bonus to Initiative. Immediately after rolling Initiative, you can swap it with one willing, non-Incapacitated ally in the same combat.",
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.INITIATIVE,
+            ModifierOperation.ADD,
+            amount=CalculatedAmount(AmountCalculation.SOURCE_PROFICIENCY_BONUS),
+            description="Add Proficiency Bonus to Initiative.",
+        )]),
     ),
     GeneralFeatType.ARTIFICER_INITIATE: general_feat(GeneralFeatType.ARTIFICER_INITIATE, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn artificer magic and one artisan tool proficiency."),
     GeneralFeatType.ATHLETE: general_feat(GeneralFeatType.ATHLETE, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; improve climbing, standing, and jumping."),
@@ -551,8 +638,26 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         GeneralFeatType.LUCKY,
         RuleSource.PLAYERS_HANDBOOK_2024,
         "Gain Luck Points equal to your Proficiency Bonus. Spend 1 to gain Advantage on your D20 Test or impose Disadvantage on an attack roll against you; regain all Luck Points on a Long Rest.",
+        mechanics=lucky_mechanics(),
+        resources=(FeatResourceDefinition(
+            ResourceId.LUCK_POINTS,
+            CalculatedAmount(AmountCalculation.SOURCE_PROFICIENCY_BONUS),
+            TimeEconomy.SPECIAL,
+            "Spend Luck Points to gain Advantage on a D20 Test or impose Disadvantage on an attack roll against you.",
+        ),),
     ),
-    GeneralFeatType.MAGE_SLAYER: general_feat(GeneralFeatType.MAGE_SLAYER, RuleSource.PLAYERS_HANDBOOK_2024, "Punish nearby spellcasters and resist close-range spells."),
+    GeneralFeatType.MAGE_SLAYER: general_feat(
+        GeneralFeatType.MAGE_SLAYER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity; disrupt Concentration and turn one failed Intelligence, Wisdom, or Charisma save into a success per Short or Long Rest.",
+        mechanics=mage_slayer_mechanics(),
+        resources=(FeatResourceDefinition(
+            ResourceId.MAGE_SLAYER,
+            FixedAmount(1),
+            TimeEconomy.SPECIAL,
+            "Turn a failed Intelligence, Wisdom, or Charisma saving throw into a success.",
+        ),),
+    ),
     GeneralFeatType.MAGIC_INITIATE: general_feat(GeneralFeatType.MAGIC_INITIATE, RuleSource.PLAYERS_HANDBOOK_2024, "Learn two cantrips and one 1st-level spell from a class list."),
     GeneralFeatType.MARTIAL_ADEPT: general_feat(GeneralFeatType.MARTIAL_ADEPT, RuleSource.PLAYERS_HANDBOOK_2024, "Learn Battle Master maneuvers and gain a superiority die."),
     GeneralFeatType.MEDIUM_ARMOR_MASTER: general_feat(GeneralFeatType.MEDIUM_ARMOR_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve medium armor stealth and Dexterity AC cap.", (armor_prerequisite(ArmorCategory.MEDIUM),)),
@@ -663,10 +768,10 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.REBUKE: general_feat(GeneralFeatType.REBUKE, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Rebuke 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.TREACHEROUS_ALLURE: general_feat(GeneralFeatType.TREACHEROUS_ALLURE, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Treacherous Allure 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.VAMPIRE_TOUCHED: general_feat(GeneralFeatType.VAMPIRE_TOUCHED, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Vampire Touched 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
-    GeneralFeatType.BOON_OF_COMBAT_PROWESS: general_feat(GeneralFeatType.BOON_OF_COMBAT_PROWESS, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Combat Prowess 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
-    GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL: general_feat(GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Dimensional Travel 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_COMBAT_PROWESS: general_feat(GeneralFeatType.BOON_OF_COMBAT_PROWESS, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Combat Prowess 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON, resources=(FeatResourceDefinition(ResourceId.BOON_OF_COMBAT_PROWESS, FixedAmount(1), TimeEconomy.SPECIAL, "Turn a missed melee weapon attack into a hit."),)),
+    GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL: general_feat(GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Dimensional Travel 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON, resources=(FeatResourceDefinition(ResourceId.BOON_OF_DIMENSIONAL_TRAVEL, FixedAmount(1), TimeEconomy.ACTION, "Cast Misty Step without a spell slot or components."),)),
     GeneralFeatType.BOON_OF_ENERGY_RESISTANCE: general_feat(GeneralFeatType.BOON_OF_ENERGY_RESISTANCE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Energy Resistance 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
-    GeneralFeatType.BOON_OF_FATE: general_feat(GeneralFeatType.BOON_OF_FATE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Fate 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_FATE: general_feat(GeneralFeatType.BOON_OF_FATE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Fate 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON, resources=(FeatResourceDefinition(ResourceId.BOON_OF_FATE, FixedAmount(1), TimeEconomy.REACTION, "Roll 1d10 and add or subtract it from another creature's d20 Test."),)),
     GeneralFeatType.BOON_OF_FORTITUDE: general_feat(
         GeneralFeatType.BOON_OF_FORTITUDE,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -681,7 +786,7 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         )]),
     ),
     GeneralFeatType.BOON_OF_IRRESISTIBLE_OFFENSE: general_feat(GeneralFeatType.BOON_OF_IRRESISTIBLE_OFFENSE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Irresistible Offense 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
-    GeneralFeatType.BOON_OF_RECOVERY: general_feat(GeneralFeatType.BOON_OF_RECOVERY, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Recovery 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_RECOVERY: general_feat(GeneralFeatType.BOON_OF_RECOVERY, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Recovery 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON, resources=(FeatResourceDefinition(ResourceId.BOON_OF_RECOVERY, FixedAmount(1), TimeEconomy.BONUS_ACTION, "Regain hit points when reduced to 0 or by using a Bonus Action."),)),
     GeneralFeatType.BOON_OF_SKILL: general_feat(GeneralFeatType.BOON_OF_SKILL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Skill 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
     GeneralFeatType.BOON_OF_SPEED: general_feat(GeneralFeatType.BOON_OF_SPEED, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Speed 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
     GeneralFeatType.BOON_OF_SPELL_RECALL: general_feat(GeneralFeatType.BOON_OF_SPELL_RECALL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Spell Recall 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
@@ -1213,107 +1318,35 @@ def normalize_feat_key(value: str) -> str:
 
 
 def feat_resources(classes: list[CharacterClassLevel], feats=None, proficiency_bonus: int = 2) -> list[ResourceTracker]:
-    selected_feats = selected_general_feat_types(feats)
-    resources: list[ResourceTracker] = []
-    if GeneralFeatType.LUCKY in selected_feats:
-        resources.append(ResourceTracker(
-            id=enum_key(ResourceId.LUCK_POINTS),
-            name=enum_label(GeneralFeatType.LUCKY),
-            currentUses=proficiency_bonus,
-            maxUses=proficiency_bonus,
-            activation=TimeEconomy.SPECIAL,
-            description="Spend Luck Points to gain Advantage on a D20 Test or impose Disadvantage on an attack roll against you.",
-            resource=ResourceId.LUCK_POINTS,
-            mechanics=lucky_mechanics(),
-        ))
-    if GeneralFeatType.MAGE_SLAYER in selected_feats:
-        resources.append(
-            feat_single_use_resource(
-                ResourceId.MAGE_SLAYER,
-                GeneralFeatType.MAGE_SLAYER,
-                "If you fail an Intelligence, Wisdom, or Charisma saving throw, you can cause yourself to succeed instead.",
-                mechanics=mage_slayer_mechanics(),
-            )
+    total_level = sum(character_class.level for character_class in classes)
+    return [
+        ResourceTracker(
+            id=enum_key(resource.resource),
+            name=enum_label(feat_type),
+            currentUses=maximum,
+            maxUses=maximum,
+            activation=resource.activation,
+            description=resource.description,
+            resource=resource.resource,
         )
-    if GeneralFeatType.BOON_OF_COMBAT_PROWESS in selected_feats:
-        resources.append(feat_single_use_resource(ResourceId.BOON_OF_COMBAT_PROWESS, GeneralFeatType.BOON_OF_COMBAT_PROWESS, "Turn a missed melee weapon attack into a hit."))
-    if GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL in selected_feats:
-        resources.append(feat_single_use_resource(ResourceId.BOON_OF_DIMENSIONAL_TRAVEL, GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, "Cast Misty Step without a spell slot or components."))
-    if GeneralFeatType.BOON_OF_FATE in selected_feats:
-        resources.append(feat_single_use_resource(ResourceId.BOON_OF_FATE, GeneralFeatType.BOON_OF_FATE, "Roll 1d10 and add or subtract it from another creature's d20 Test."))
-    if GeneralFeatType.BOON_OF_RECOVERY in selected_feats:
-        resources.append(feat_single_use_resource(ResourceId.BOON_OF_RECOVERY, GeneralFeatType.BOON_OF_RECOVERY, "Regain hit points when reduced to 0 or by using a Bonus Action."))
-    return resources
+        for feat_type in selected_general_feat_types(feats)
+        for resource in GENERAL_FEATS[feat_type].resources
+        for maximum in [feat_resource_maximum(resource, total_level, proficiency_bonus)]
+    ]
 
 
-def feat_single_use_resource(
-    resource_id: ResourceId,
-    feat_type: GeneralFeatType,
-    description: str,
-    mechanics: FeatureMechanics | None = None,
-) -> ResourceTracker:
-    return ResourceTracker(
-        id=enum_key(resource_id),
-        name=enum_label(feat_type),
-        currentUses=1,
-        maxUses=1,
-        activation=TimeEconomy.SPECIAL,
-        description=description,
-        mechanics=mechanics,
-        resource=resource_id,
-    )
-
-
-def mage_slayer_mechanics() -> FeatureMechanics:
-    return FeatureMechanics(
-        interactions=[
-            Interaction(
-                trigger=ResolutionEventType.SAVE_ROLLED,
-                timing=InteractionTiming.AFTER_EVENT,
-                decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
-                predicates=[
-                    SourceIsSpellPredicate(),
-                    SavingThrowAbilityPredicate([AbilityType.INTELLIGENCE, AbilityType.WISDOM, AbilityType.CHARISMA]),
-                    RollOutcomePredicate(RollOutcome.FAILURE),
-                ],
-                operations=[ReplaceRollOutcome(RollOutcome.SUCCESS)],
-                resourceCosts=(ResourceCost(ResourceId.MAGE_SLAYER),),
-            )
-        ]
-    )
-
-
-def lucky_mechanics() -> FeatureMechanics:
-    prompted = InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM)
-    cost = (ResourceCost(ResourceId.LUCK_POINTS),)
-    return FeatureMechanics(
-        interactions=[
-            Interaction(
-                trigger=ResolutionEventType.ATTACK_ROLLED,
-                timing=InteractionTiming.AFTER_EVENT,
-                decision=prompted,
-                predicates=[SourceIsOwnerPredicate()],
-                operations=[ModifyRoll(RollModificationType.ADVANTAGE)],
-                resourceCosts=cost,
-            ),
-            Interaction(
-                trigger=ResolutionEventType.ATTACK_ROLLED,
-                timing=InteractionTiming.AFTER_EVENT,
-                decision=prompted,
-                predicates=[TargetIsOwnerPredicate()],
-                operations=[ModifyRoll(RollModificationType.DISADVANTAGE)],
-                resourceCosts=cost,
-            ),
-            Interaction(
-                trigger=ResolutionEventType.SAVE_ROLLED,
-                timing=InteractionTiming.AFTER_EVENT,
-                decision=prompted,
-                predicates=[TargetIsOwnerPredicate(), RollOutcomePredicate(RollOutcome.FAILURE)],
-                operations=[ModifyRoll(RollModificationType.ADVANTAGE)],
-                resourceCosts=cost,
-            ),
-        ]
-    )
+def feat_resource_maximum(
+    resource: FeatResourceDefinition,
+    total_level: int,
+    proficiency_bonus: int,
+) -> int:
+    if isinstance(resource.maximumUses, FixedAmount):
+        return resource.maximumUses.value
+    if resource.maximumUses.calculation == AmountCalculation.SOURCE_PROFICIENCY_BONUS:
+        return proficiency_bonus * resource.maximumUses.multiplier
+    if resource.maximumUses.calculation == AmountCalculation.SOURCE_CHARACTER_LEVEL:
+        return total_level * resource.maximumUses.multiplier
+    raise ValueError(f"Unsupported feat resource capacity: {resource.maximumUses.calculation.name}")
 
 
 def feat_abilities(classes: list[CharacterClassLevel], feats=None) -> list[SheetAbility]:
@@ -1448,7 +1481,16 @@ def resolved_character_modifier_amount(modifier: Modifier, total_level: int) -> 
 
 
 def feat_initiative_bonus(feats, proficiency_bonus: int) -> int:
-    return proficiency_bonus if GeneralFeatType.ALERT in selected_general_feat_types(feats) else 0
+    return sum(
+        proficiency_bonus * modifier.amount.multiplier
+        for _definition, modifier in selected_general_feat_modifiers(
+            feats,
+            CalculationType.INITIATIVE,
+        )
+        if modifier.operation == ModifierOperation.ADD
+        and isinstance(modifier.amount, CalculatedAmount)
+        and modifier.amount.calculation == AmountCalculation.SOURCE_PROFICIENCY_BONUS
+    )
 
 
 def armor_class_bonus(classes: list[CharacterClassLevel], equipment: list[EquipmentItem]) -> int:

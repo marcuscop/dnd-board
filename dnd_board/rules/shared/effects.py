@@ -533,6 +533,7 @@ class CalculationType(Enum):
     SPELL_SAVE_DC = auto()
     CONCENTRATION_SAVE = auto()
     MAXIMUM_HIT_POINTS = auto()
+    INITIATIVE = auto()
     ACTION_CAPACITY = auto()
     BONUS_ACTION_CAPACITY = auto()
     REACTION_CAPACITY = auto()
@@ -554,6 +555,7 @@ class ModifierOperation(Enum):
 class ModifierScope(Enum):
     OWNER = auto()
     AGAINST_OWNER = auto()
+    CAUSED_BY_OWNER = auto()
 
 
 @dataclass(frozen=True)
@@ -2083,6 +2085,7 @@ def effect_model_types() -> list[type[object]]:
         SourceUsesTimeEconomyPredicate,
         SourceWeaponCategoryPredicate,
         SourceIsAttackPredicate,
+        SourceIsOwnerPredicate,
         SourceIsSpellPredicate,
         SourceSpellPredicate,
         TargetHasConditionPredicate,

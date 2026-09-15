@@ -18,6 +18,12 @@ export enum RollLogEntryType {
   ROLL_BLOCKED = "rollBlocked"
 }
 
+export enum D20TestType {
+  ATTACK_ROLL = "attackRoll",
+  ABILITY_CHECK = "abilityCheck",
+  SAVING_THROW = "savingThrow"
+}
+
 export enum RollModifierType {
   NONE = "none",
   CLASS_LEVEL = "classLevel",
@@ -936,6 +942,7 @@ export type RollPayload = {
     amounts: { effectNodeId: { path: number[] }; amount: number }[];
   };
   criticalHit?: boolean;
+  d20TestType?: D20TestType;
 };
 
 export type RollDamageComponent = {
@@ -1016,6 +1023,7 @@ export type ResolutionInterceptorPrompt = {
   interaction: unknown;
   ignoredInterceptors: string[];
   responseRolls?: RollPayload[];
+  continuation?: "resolveAgainstTarget" | "storeRoll";
 };
 
 export type RollLogEntry = {

@@ -31,6 +31,7 @@ from dnd_board.character_sheet import (
     EquipmentType,
     HitPoints,
     RollModifierEffectTarget,
+    RollModifierBreakdown,
     RollPayload,
     RollResolution,
     RollResolutionMode,
@@ -46,6 +47,7 @@ from dnd_board.character_sheet import (
 )
 from dnd_board.rules.shared.character_effects import (
     ResolvedCharacterEffect,
+    applicable_character_modifiers,
     added_condition_types,
     condition_change_effects,
     first_damage_effect,
@@ -60,6 +62,9 @@ from dnd_board.rules.shared.effects import (
     MaximumHitPointsOperation,
     OngoingEffectId,
     RestEffect,
+    CalculationType,
+    ModifierOperation,
+    ModifierScope,
 )
 from dnd_board.rules.encounter import ActionAllowance, AllowanceSource, grant_action_allowance
 from dnd_board.rules.shared.resources import ResourceUpdate
@@ -139,6 +144,8 @@ def apply_roll_result(
     concentration_outcome, concentration_roll = _resolve_concentration_save_after_damage(
         room,
         target,
+        source,
+        roll,
         resolution,
         persistence,
     )
@@ -709,6 +716,8 @@ def _resolve_damage_triggered_condition_saves(
 def _resolve_concentration_save_after_damage(
     room: Room,
     target: CharacterSheet,
+    source: CharacterSheet | None,
+    triggering_roll: RollPayload,
     resolution: RollResolution,
     persistence: CharacterStatePersistence,
 ) -> tuple[str | None, RollPayload | None]:
@@ -727,6 +736,22 @@ def _resolve_concentration_save_after_damage(
             None,
         )
     save_dc = max(10, damage_taken // 2)
+    source_modifiers = (
+        applicable_character_modifiers(
+            source,
+            CalculationType.CONCENTRATION_SAVE,
+            ModifierScope.CAUSED_BY_OWNER,
+            triggering_roll,
+            target,
+            source,
+        )
+        if source is not None
+        else []
+    )
+    source_disadvantage = any(
+        modifier.operation == ModifierOperation.DISADVANTAGE
+        for _label, modifier in source_modifiers
+    )
     response_roll = response_ability_roll(
         sheet=target,
         ability=AbilityType.CONSTITUTION,
@@ -735,7 +760,20 @@ def _resolve_concentration_save_after_damage(
         source_label=active.spellName,
         modifier=save_modifier(target, AbilityType.CONSTITUTION),
         modifier_target=RollModifierEffectTarget.CONCENTRATION_SAVE,
+        disadvantage=source_disadvantage,
     )
+    if source_disadvantage:
+        response_roll = replace(
+            response_roll,
+            modifierBreakdown=[
+                *response_roll.modifierBreakdown,
+                *(
+                    RollModifierBreakdown(label, 0, modifier.description)
+                    for label, modifier in source_modifiers
+                    if modifier.operation == ModifierOperation.DISADVANTAGE
+                ),
+            ],
+        )
     advantage_label = roll_advantage_log_label(response_roll)
     if response_roll.total >= save_dc:
         return (

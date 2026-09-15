@@ -55,6 +55,12 @@ class ResolutionInterceptorTrigger(Enum):
     BEFORE_DAMAGE_APPLIED = auto()
     BEFORE_CONDITION_APPLIED = auto()
     BEFORE_TURN_BOUNDARY = auto()
+    BEFORE_D20_TEST_FINALIZES = auto()
+
+
+class ResolutionPromptContinuation(Enum):
+    RESOLVE_AGAINST_TARGET = auto()
+    STORE_ROLL = auto()
 
 
 class RollModifierType(Enum):
@@ -91,6 +97,12 @@ class ProgressionChoiceType(Enum):
 class AbilityRollType(Enum):
     CHECK = auto()
     SAVE = auto()
+
+
+class D20TestType(Enum):
+    ATTACK_ROLL = auto()
+    ABILITY_CHECK = auto()
+    SAVING_THROW = auto()
 
 
 class UIStringFormatter:
@@ -1598,6 +1610,7 @@ class RollPayload:
     pendingEffect: EffectNode | None = None
     effectInputs: EffectResolutionInputs | None = None
     criticalHit: bool | None = None
+    d20TestType: D20TestType | None = None
 
 
 @dataclass
@@ -1655,6 +1668,7 @@ class ResolutionInterceptorPrompt:
     ignoredInterceptors: list[str] = field(default_factory=list)
     responseRolls: list[RollPayload] | None = None
     effectExecutionId: int | None = None
+    continuation: ResolutionPromptContinuation = ResolutionPromptContinuation.RESOLVE_AGAINST_TARGET
 
 
 @dataclass
@@ -1866,6 +1880,7 @@ def build_attack_roll_payload(
         disadvantageConditions=disadvantage_conditions or None,
         sourceConditions=sheet.conditions or None,
         damageType=action.damageType,
+        d20TestType=D20TestType.ATTACK_ROLL,
     )
 
 
@@ -2267,6 +2282,7 @@ def build_ability_check_roll_payload(sheet: CharacterSheet, roller: str, ability
         modifier_breakdown=modifier_breakdown,
         advantage_conditions=advantage_conditions,
         disadvantage_conditions=disadvantage_conditions,
+        d20_test_type=D20TestType.ABILITY_CHECK,
     )
 
 
@@ -2297,6 +2313,7 @@ def build_saving_throw_roll_payload(sheet: CharacterSheet, roller: str, ability:
         modifier_breakdown=modifier_breakdown,
         advantage_conditions=advantage_conditions,
         disadvantage_conditions=disadvantage_conditions,
+        d20_test_type=D20TestType.SAVING_THROW,
     )
 
 
@@ -2629,6 +2646,7 @@ def build_d20_roll_payload(
     modifier_breakdown: list[RollModifierBreakdown],
     advantage_conditions: list[ConditionType] | None = None,
     disadvantage_conditions: list[ConditionType] | None = None,
+    d20_test_type: D20TestType,
 ) -> RollPayload:
     modifier = sum(part.value for part in modifier_breakdown)
     dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions)
@@ -2652,6 +2670,7 @@ def build_d20_roll_payload(
         disadvantageConditions=disadvantage_conditions or None,
         total=die_roll + modifier,
         createdAt=created_at,
+        d20TestType=d20_test_type,
     )
 
 
@@ -3674,6 +3693,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
         for type_ in [
             AbilityScores,
             AbilityRollType,
+            D20TestType,
             AbilityType,
             ArcaneShotType,
             ArmorCategory,
