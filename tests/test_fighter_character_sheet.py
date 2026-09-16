@@ -327,7 +327,7 @@ def test_general_feat_prerequisites_are_structured_and_evaluable() -> None:
         race="Dragonborn",
         background="Criminal",
         abilityScores=AbilityScores(10, 14, 12, 10, 10, 10),
-        classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)],
+        classes=[CharacterClassLevel(name=ClassType.ROGUE, level=4)],
         proficiencies=[],
         feats=[],
         features=[],
@@ -337,7 +337,7 @@ def test_general_feat_prerequisites_are_structured_and_evaluable() -> None:
 
     assert "Prerequisite: Dragonborn." in general_feat_feature("dragonFear").description
     assert "Prerequisite: Proficiency with Light armor." in general_feat_feature("moderatelyArmored").description
-    assert "Prerequisite: Dexterity 13+." in general_feat_feature("defensiveDuelist").description
+    assert "Prerequisite: Level 4+, Dexterity 13+." in general_feat_feature("defensiveDuelist").description
     assert "Prerequisite: Dwarf or Small." in general_feat_feature("squatNimbleness").description
     assert "Prerequisite: Level 4+, Strike Of The Giants Hill Strike." in general_feat_feature("vigorOfTheHillGiant").description
     assert general_feat_prerequisites_met(GeneralFeatType.SQUAT_NIMBLENESS, dwarf_sheet)

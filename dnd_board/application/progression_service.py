@@ -612,7 +612,11 @@ def progression_rule_error(rule, issue: SkillSelectionIssue) -> str:
         if issue == SkillSelectionIssue.REQUIREMENT_NOT_MET:
             return "Ability Score Improvement is not available"
         if issue == SkillSelectionIssue.WRONG_COUNT:
-            return "Choose one ability twice or two abilities once"
+            return (
+                "Choose one eligible ability score"
+                if choice.points == 1
+                else "Choose one ability twice or two abilities once"
+            )
         if issue == SkillSelectionIssue.INVALID_FEAT:
             return "Invalid feat"
         if issue == SkillSelectionIssue.INVALID_FEAT_CATEGORY:

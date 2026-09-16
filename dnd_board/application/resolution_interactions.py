@@ -38,12 +38,14 @@ from dnd_board.rules.shared.effects import (
     ReplaceRollOutcome,
     ResolutionEvent,
     ResolutionEventType,
+    RerollPendingDamage,
     RerollSavingThrow,
     RollOutcome,
     ScheduleEffectOperation,
     SourceIsOwnerPredicate,
 )
 from dnd_board.rules.shared.resources import ResourceId
+from dnd_board.rules.encounter import EncounterState, interaction_usage_allowed
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,7 @@ def resolution_prompt_for_effect_event(
     sheets: list[CharacterSheet],
     action_source: CharacterSheet | None,
     event_source: CharacterSheet | None,
+    encounter: EncounterState | None = None,
 ) -> ResolutionInterceptorPrompt | None:
     if event.eventType == ResolutionEventType.CONDITION_PENDING:
         return _condition_prompt(
@@ -122,6 +125,7 @@ def resolution_prompt_for_effect_event(
             response_rolls,
             sheets,
             event_source,
+            encounter,
         )
     if event.eventType == ResolutionEventType.SAVE_ROLLED and event.rollOutcome == RollOutcome.FAILURE:
         return _failed_save_prompt(
@@ -141,6 +145,7 @@ def resolution_prompt_for_effect_event(
             response_rolls,
             sheets,
             event_source,
+            event.rollOutcome,
         )
     if event.eventType == ResolutionEventType.SPELL_DECLARED:
         return _spell_cancellation_prompt(
@@ -343,6 +348,7 @@ def _attack_prompt(
     response_rolls: list[RollPayload],
     sheets: list[CharacterSheet],
     source: CharacterSheet | None,
+    roll_outcome: RollOutcome | None,
 ) -> ResolutionInterceptorPrompt | None:
     if pending_roll.resolution != RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
         return None
@@ -353,6 +359,7 @@ def _attack_prompt(
             pending_roll,
             source_sheet=source,
             target=target,
+            roll_outcome=roll_outcome,
         ):
             if (
                 source is not None
@@ -392,6 +399,7 @@ def _damage_prompt(
     response_rolls: list[RollPayload],
     sheets: list[CharacterSheet],
     source: CharacterSheet | None,
+    encounter: EncounterState | None,
 ) -> ResolutionInterceptorPrompt | None:
     if not roll_can_apply_damage(pending_roll):
         return None
@@ -399,7 +407,6 @@ def _damage_prompt(
         (
             (owner, interaction_source)
             for owner in sheets
-            if source is None or owner.id != source.id
             for interaction_source in matching_sheet_interactions(
                 owner,
                 ResolutionEventType.DAMAGE_PENDING,
@@ -408,13 +415,22 @@ def _damage_prompt(
                 target=target,
             )
             if interceptor_type_for_interaction(interaction_source.interaction)
-            == ResolutionInterceptorType.MODIFY_PENDING_DAMAGE
-            and resolution_interceptor_key_for(
+            in {
                 ResolutionInterceptorType.MODIFY_PENDING_DAMAGE,
+                ResolutionInterceptorType.REROLL_PENDING_DAMAGE,
+            }
+            and resolution_interceptor_key_for(
+                interceptor_type_for_interaction(interaction_source.interaction),
                 owner.id,
                 interaction_source.label,
             )
             not in ignored
+            and interaction_usage_allowed(
+                encounter,
+                owner.id,
+                interaction_source.interaction.usageResource,
+                interaction_source.interaction.usageScope,
+            )
         ),
         None,
     )
@@ -436,7 +452,8 @@ def _damage_prompt(
     if stable_amount is not None and stable_amount <= 0:
         return None
     return _prompt(
-        interceptor_type=ResolutionInterceptorType.MODIFY_PENDING_DAMAGE,
+        interceptor_type=interceptor_type_for_interaction(interaction_source.interaction)
+        or ResolutionInterceptorType.MODIFY_PENDING_DAMAGE,
         trigger=ResolutionInterceptorTrigger.BEFORE_DAMAGE_APPLIED,
         source_roll=source_roll,
         pending_roll=pending_roll,
@@ -559,6 +576,7 @@ def matching_sheet_interactions(
     *,
     source_sheet: CharacterSheet | None = None,
     target: CharacterSheet | None = None,
+    roll_outcome: RollOutcome | None = None,
 ) -> list[SheetInteractionSource]:
     return [
         interaction_source
@@ -570,6 +588,7 @@ def matching_sheet_interactions(
             roll,
             source=source_sheet,
             target=target,
+            roll_outcome=roll_outcome,
         )
     ]
 
@@ -582,6 +601,7 @@ def interceptor_type_for_interaction(
         (RerollSavingThrow, ResolutionInterceptorType.REROLL_SAVING_THROW),
         (ReplaceRollOutcome, ResolutionInterceptorType.REPLACE_ROLL_OUTCOME),
         (ModifyPendingDamage, ResolutionInterceptorType.MODIFY_PENDING_DAMAGE),
+        (RerollPendingDamage, ResolutionInterceptorType.REROLL_PENDING_DAMAGE),
         (ModifyRoll, ResolutionInterceptorType.MODIFY_ROLL),
         (PreventCondition, ResolutionInterceptorType.PREVENT_CONDITION),
         (ModifyAction, ResolutionInterceptorType.MODIFY_ACTION),
@@ -619,8 +639,10 @@ def _interaction_predicates_match(
     *,
     source: CharacterSheet | None,
     target: CharacterSheet | None,
+    roll_outcome: RollOutcome | None,
 ) -> bool:
     context = CharacterEffectExecutionContext(roll, target or owner, source, owner=owner)
+    context.lastRollOutcome = roll_outcome
     return context.evaluate_predicates(EffectNodeId(()), interaction.predicates)
 
 

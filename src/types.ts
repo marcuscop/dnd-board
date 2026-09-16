@@ -960,6 +960,8 @@ export type RollDamageComponent = {
   }[];
   total: number;
   effectNodeIds: { path: number[] }[];
+  kind: "other" | "weaponDice";
+  kindLabel: string;
 };
 
 export type RollResolution = {

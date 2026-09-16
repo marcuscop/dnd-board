@@ -2021,6 +2021,251 @@ def test_lucky_can_impose_disadvantage_on_attack_against_owner(tmp_path, monkeyp
     assert next(resource for resource in target["resources"] if resource["id"] == "luckPoints")["currentUses"] == 1
 
 
+def test_savage_attacker_rerolls_only_weapon_damage_and_keeps_higher_result(tmp_path, monkeypatch) -> None:
+    savage_attacker = general_feat_feature(enum_key(GeneralFeatType.SAVAGE_ATTACKER))
+    assert savage_attacker is not None
+    longsword = AttackAction(
+        id="longsword",
+        name="Longsword",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+    )
+    write_party_campaign(
+        tmp_path,
+        "savage-attacker-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                attacks=[longsword],
+                feats=[savage_attacker],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d8_rolls = iter([1, 8, 4])
+
+    def fixed_roll(_minimum: int, maximum: int) -> int:
+        return 15 if maximum == 20 else next(d8_rolls) if maximum == 8 else 1
+
+    monkeypatch.setattr(random, "randint", fixed_roll)
+    client = TestClient(server.app)
+    encounter = client.post(
+        "/api/rooms/savage-attacker-test/encounter?playerKey=dm",
+        json=[
+            {"participantId": "player-1", "initiative": 20},
+            {"participantId": "player-2", "initiative": 10},
+        ],
+    ).json()["encounter"]
+
+    attack = client.post(
+        f"/api/rooms/savage-attacker-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=longsword&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/savage-attacker-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    resolved = client.post(
+        f"/api/rooms/savage-attacker-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-1&use=true"
+    ).json()["resolution"]
+
+    assert prompt["label"] == "Savage Attacker"
+    assert resolved["targetHp"]["current"] == 19
+    assert resolved["roll"]["damageComponents"][0]["dice"] == [8]
+    assert "rerolls the weapon damage" in resolved["outcome"]
+
+    second_attack = client.post(
+        f"/api/rooms/savage-attacker-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=longsword&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    second_result = client.post(
+        f"/api/rooms/savage-attacker-test/rolls/{second_attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()
+
+    assert "prompt" not in second_result
+    assert "hits" in second_result["resolution"]["outcome"]
+
+
+def test_defensive_duelist_turns_hit_into_miss_and_installs_melee_defense(tmp_path, monkeypatch) -> None:
+    defensive_duelist = general_feat_feature(enum_key(GeneralFeatType.DEFENSIVE_DUELIST))
+    assert defensive_duelist is not None
+    longsword = AttackAction(
+        id="longsword",
+        name="Longsword",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+    )
+    rapier = AttackAction(
+        id="rapier",
+        name="Rapier",
+        ability=AbilityType.DEXTERITY,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        properties=[WeaponProperty.FINESSE],
+    )
+    write_party_campaign(
+        tmp_path,
+        "defensive-duelist-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)], attacks=[longsword]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Duelist",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.ROGUE, level=4)],
+                armorClass=20,
+                attacks=[rapier],
+                equipment=[EquipmentItem(id="rapier", name="Rapier", itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND)],
+                feats=[defensive_duelist],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: 15 if maximum == 20 else 4)
+    client = TestClient(server.app)
+    encounter = client.post(
+        "/api/rooms/defensive-duelist-test/encounter?playerKey=dm",
+        json=[
+            {"participantId": "player-1", "initiative": 20},
+            {"participantId": "player-2", "initiative": 10},
+        ],
+    ).json()["encounter"]
+
+    attack = client.post(
+        f"/api/rooms/defensive-duelist-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=longsword&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/defensive-duelist-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    resolved = client.post(
+        f"/api/rooms/defensive-duelist-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-2&use=true"
+    ).json()["resolution"]
+    duelist = client.get(
+        "/api/rooms/defensive-duelist-test/sheet/player-2?playerKey=player-2"
+    ).json()["sheet"]
+
+    assert prompt["label"] == "Defensive Duelist"
+    assert "misses" in resolved["outcome"]
+    assert resolved["roll"]["modifierBreakdown"][-1]["source"] == "Defensive Duelist"
+    assert len(duelist["ongoingEffects"]) == 1
+    assert duelist["ongoingEffects"][0]["sourceLabel"] == "Defensive Duelist"
+
+    second_attack = client.post(
+        f"/api/rooms/defensive-duelist-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=longsword&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    second_resolution = client.post(
+        f"/api/rooms/defensive-duelist-test/rolls/{second_attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["resolution"]
+
+    assert "misses" in second_resolution["outcome"]
+    assert second_resolution["roll"]["modifierBreakdown"][-1] == {
+        "source": "Defensive Duelist",
+        "value": -2,
+        "description": "Defensive Duelist AC bonus against melee attacks.",
+    }
+    advanced = client.post(
+        f"/api/rooms/defensive-duelist-test/encounter/advance?playerKey=dm&turnId={encounter['turnId']}"
+    )
+    after_turn_start = client.get(
+        "/api/rooms/defensive-duelist-test/sheet/player-2?playerKey=player-2"
+    ).json()["sheet"]
+
+    assert advanced.status_code == 200
+    assert after_turn_start["ongoingEffects"] == []
+
+
+def test_war_caster_grants_advantage_on_concentration_saves(tmp_path, monkeypatch) -> None:
+    bless = spell_entry(SpellId.BLESS)
+    war_caster = general_feat_feature(enum_key(GeneralFeatType.WAR_CASTER))
+    assert bless is not None
+    assert war_caster is not None
+    longsword = AttackAction(
+        id="longsword",
+        name="Longsword",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+    )
+    write_party_campaign(
+        tmp_path,
+        "war-caster-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="War Caster",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=16, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.CLERIC, level=5)],
+                spells=[bless],
+                feats=[war_caster],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Ally",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+        PartyMemberConfig(
+            id="player-3",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)], attacks=[longsword]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d20_rolls = iter([15, 4, 16])
+
+    def fixed_roll(_minimum: int, maximum: int) -> int:
+        return next(d20_rolls) if maximum == 20 else 4
+
+    monkeypatch.setattr(random, "randint", fixed_roll)
+    client = TestClient(server.app)
+
+    bless_roll = client.post(
+        "/api/rooms/war-caster-test/sheet/player-1/spells/bless/rolls/effect?playerKey=player-1"
+    ).json()["roll"]
+    client.post(
+        f"/api/rooms/war-caster-test/rolls/{bless_roll['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+    attack = client.post(
+        "/api/rooms/war-caster-test/sheet/player-3/rolls/attack?playerKey=dm&attackId=longsword"
+    ).json()["roll"]
+    resolution = client.post(
+        f"/api/rooms/war-caster-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-1"
+    ).json()["resolution"]
+    concentration = next(
+        roll for roll in resolution["responseRolls"]
+        if roll["label"] == "Concentration Save"
+    )
+
+    assert concentration["die"] == "2d20kh1"
+    assert concentration["dice"] == [4, 16]
+    assert concentration["modifierBreakdown"][-1]["source"] == "War Caster"
+
+
 def test_lucky_attacker_can_gain_advantage(tmp_path, monkeypatch) -> None:
     longsword = AttackAction(
         id="longsword",
@@ -4789,6 +5034,51 @@ def test_player_can_apply_fighter_ability_score_improvement(tmp_path, monkeypatc
     assert sheet["abilityScores"]["strength"] == 17
     assert sheet["abilityScores"]["dexterity"] == 15
     assert "fighterAbilityScoreImprovement" not in {choice["id"] for choice in sheet["pendingChoices"]}
+
+
+def test_player_can_apply_feat_ability_score_increase(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "feat-ability-choice-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Defensive Duelist",
+            maxHp=36,
+            abilityScores=AbilityScores(strength=12, dexterity=16, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                progressionGrants=feat_grants(
+                    ClassType.FIGHTER,
+                    4,
+                    GeneralFeatType.DEFENSIVE_DUELIST,
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    before = client.get(
+        "/api/rooms/feat-ability-choice-test/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+    choice = next(
+        choice
+        for choice in before["pendingChoices"]
+        if choice["id"] == "featAbilityScoreIncrease"
+    )
+    response = client.post(
+        "/api/rooms/feat-ability-choice-test/sheet/player-1/choices/featAbilityScoreIncrease?playerKey=player-1",
+        json={"values": ["dexterity"]},
+    )
+    sheet = response.json()["sheet"]
+
+    assert choice["choiceType"] == "featAbilityScoreIncrease"
+    assert choice["options"] == [{"value": "dexterity", "label": "Dexterity"}]
+    assert response.status_code == 200
+    assert sheet["abilityScores"]["dexterity"] == 17
+    assert "featAbilityScoreIncrease" not in {
+        pending["id"] for pending in sheet["pendingChoices"]
+    }
 
 
 def test_fighter_ability_score_improvement_can_apply_plus_two_and_caps_at_twenty(tmp_path, monkeypatch) -> None:

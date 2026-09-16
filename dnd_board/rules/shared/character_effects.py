@@ -90,6 +90,7 @@ from dnd_board.rules.shared.effects import (
     OwnerWearsArmorPredicate,
     OwnerWearsHeavyArmorPredicate,
     OwnerWieldsExactlyOneOneHandedWeaponPredicate,
+    OwnerWieldsWeaponWithPropertyPredicate,
     OwnerWieldsShieldPredicate,
     OwnerWieldsWeaponOrShieldPredicate,
     Predicate,
@@ -128,6 +129,7 @@ from dnd_board.rules.shared.effects import (
     SavingThrowAbilityPredicate,
     RollOutcomePredicate,
     RandomChancePredicate,
+    PendingDamageIsWeaponDicePredicate,
     WeaponHasPropertyPredicate,
     WeaponHasAnyPropertyPredicate,
     WithinDistancePredicate,
@@ -785,6 +787,19 @@ class CharacterEffectExecutionContext:
                 ]
                 if len(weapons) != 1 or weapons[0].slot == character_sheet.EquipmentSlot.TWO_HANDS:
                     return False
+            elif isinstance(predicate, OwnerWieldsWeaponWithPropertyPredicate):
+                if not any(
+                    predicate.property in (attack.properties or [])
+                    and character_sheet.attack_equipment_item(self.owner, attack) is not None
+                    for attack in self.owner.attacks
+                ):
+                    return False
+            elif isinstance(predicate, PendingDamageIsWeaponDicePredicate):
+                if not any(
+                    component.kind == character_sheet.DamageComponentKind.WEAPON_DICE
+                    for component in (self.roll.damageComponents or [])
+                ):
+                    return False
             elif isinstance(predicate, OwnerWieldsWeaponOrShieldPredicate):
                 if not any(
                     item.itemType in {character_sheet.EquipmentType.WEAPON, character_sheet.EquipmentType.SHIELD}
@@ -880,7 +895,7 @@ class CharacterEffectExecutionContext:
             id=OngoingEffectId(self.roll.createdAt, node_id),
             sourceSheetId=source_sheet_id,
             targetSheetId=self.target.id,
-            sourceLabel=self.roll.sourceLabel,
+            sourceLabel=effect.label or self.roll.sourceLabel,
             effect=effect,
             bindings=self._bindings.selections,
             sourceSpellId=source_spell.id if source_spell is not None else None,

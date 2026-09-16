@@ -421,6 +421,16 @@ class WeaponHasAnyPropertyPredicate:
 
 
 @dataclass(frozen=True)
+class OwnerWieldsWeaponWithPropertyPredicate:
+    property: WeaponProperty
+
+
+@dataclass(frozen=True)
+class PendingDamageIsWeaponDicePredicate:
+    pass
+
+
+@dataclass(frozen=True)
 class SourceAttackRangePredicate:
     attackRange: AttackRangeType
 
@@ -507,6 +517,8 @@ Predicate: TypeAlias = (
     | RollOutcomePredicate
     | WeaponHasPropertyPredicate
     | WeaponHasAnyPropertyPredicate
+    | OwnerWieldsWeaponWithPropertyPredicate
+    | PendingDamageIsWeaponDicePredicate
     | SourceAttackRangePredicate
     | SourceWeaponCategoryPredicate
     | SourceAttackKindPredicate
@@ -709,6 +721,17 @@ class ModifyPendingDamage:
     amount: EffectAmount | None = None
 
 
+class PendingDamageRerollSelection(Enum):
+    HIGHER = auto()
+    LOWER = auto()
+    NEW = auto()
+
+
+@dataclass(frozen=True)
+class RerollPendingDamage:
+    selection: PendingDamageRerollSelection = PendingDamageRerollSelection.HIGHER
+
+
 @dataclass(frozen=True)
 class PreventCondition:
     conditions: list[ConditionType]
@@ -723,9 +746,15 @@ class ModifyAction:
     removedComponents: list[SpellComponent] = field(default_factory=list)
 
 
+class InteractionEffectRecipient(Enum):
+    EVENT_TARGET = auto()
+    OWNER = auto()
+
+
 @dataclass(frozen=True)
 class ApplyEffectOperation:
     effect: EffectNode
+    recipient: InteractionEffectRecipient = InteractionEffectRecipient.EVENT_TARGET
 
 
 @dataclass(frozen=True)
@@ -740,6 +769,7 @@ ResolutionOperation: TypeAlias = (
     | ModifyRoll
     | RerollSavingThrow
     | ModifyPendingDamage
+    | RerollPendingDamage
     | PreventCondition
     | ModifyAction
     | ApplyEffectOperation
@@ -955,6 +985,7 @@ class OngoingReplacementPolicy(Enum):
 @dataclass(frozen=True)
 class OngoingEffect:
     duration: EffectDuration
+    label: str = ""
     modifiers: list[Modifier] = field(default_factory=list)
     interactions: list[Interaction] = field(default_factory=list)
     damageDefenses: list[DamageDefenseEffect] = field(default_factory=list)
@@ -1802,6 +1833,7 @@ class InteractionOperationResult:
     rollModifications: list[ModifyRoll] = field(default_factory=list)
     savingThrowRerolls: list[RerollSavingThrow] = field(default_factory=list)
     pendingDamageModifications: list[ModifyPendingDamage] = field(default_factory=list)
+    pendingDamageRerolls: list[RerollPendingDamage] = field(default_factory=list)
     actionModifications: list[ModifyAction] = field(default_factory=list)
 
     @property
@@ -1834,6 +1866,11 @@ def apply_interaction_operations(
                 pendingEffect=pending_effect,
                 pendingDamageModifications=[*result.pendingDamageModifications, operation],
             )
+        elif isinstance(operation, RerollPendingDamage):
+            result = replace(
+                result,
+                pendingDamageRerolls=[*result.pendingDamageRerolls, operation],
+            )
         elif isinstance(operation, PreventCondition):
             result = replace(result, pendingEffect=effect_without_conditions(result.pendingEffect, set(operation.conditions)))
         elif isinstance(operation, ModifyAction):
@@ -1842,7 +1879,8 @@ def apply_interaction_operations(
                 pending_effect = replaced_damage_type_effect(pending_effect, operation.damageType)
             result = replace(result, pendingEffect=pending_effect, actionModifications=[*result.actionModifications, operation])
         elif isinstance(operation, ApplyEffectOperation):
-            result = replace(result, additionalEffects=[*result.additionalEffects, operation.effect])
+            if operation.recipient == InteractionEffectRecipient.EVENT_TARGET:
+                result = replace(result, additionalEffects=[*result.additionalEffects, operation.effect])
         elif isinstance(operation, ScheduleEffectOperation):
             result = replace(
                 result,
@@ -2027,6 +2065,7 @@ def effect_model_types() -> list[type[object]]:
         InteractionChoice,
         InteractionDecision,
         InteractionDecisionType,
+        InteractionEffectRecipient,
         InteractionOperationResult,
         InteractionTiming,
         InteractionPrompt,
@@ -2048,10 +2087,13 @@ def effect_model_types() -> list[type[object]]:
         OwnerWearsArmorPredicate,
         OwnerWearsHeavyArmorPredicate,
         OwnerWieldsExactlyOneOneHandedWeaponPredicate,
+        OwnerWieldsWeaponWithPropertyPredicate,
         OwnerWieldsShieldPredicate,
         OwnerWieldsWeaponOrShieldPredicate,
         PendingEffectAddsConditionPredicate,
         PendingDamageModificationType,
+        PendingDamageIsWeaponDicePredicate,
+        PendingDamageRerollSelection,
         PendingResolution,
         PendingResolutionStatus,
         PreventCondition,
@@ -2059,6 +2101,7 @@ def effect_model_types() -> list[type[object]]:
         RandomChancePredicate,
         RepeatedEffect,
         RerollSavingThrow,
+        RerollPendingDamage,
         ReplaceRollOutcome,
         ResolutionEventType,
         ResolutionEvent,
@@ -2093,6 +2136,9 @@ def effect_model_types() -> list[type[object]]:
         TargetHasCreatureTypePredicate,
         TargetIsOwnerPredicate,
         TemporaryHitPointsEffect,
+        TurnBoundary,
+        TurnOccurrence,
+        TurnParticipantReference,
         TurnTiming,
         UsageScope,
         WeaponHasPropertyPredicate,

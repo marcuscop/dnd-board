@@ -117,7 +117,9 @@ CLASS_OPTION_PROGRESSION_DEFINITIONS = (
 
 
 def configured_progression_choice_ids() -> tuple[ProgressionChoiceId, ...]:
-    configured: list[ProgressionChoiceId] = []
+    configured: list[ProgressionChoiceId] = [
+        ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE,
+    ]
     for choices in (
         (
             definition.abilityScoreImprovementChoice
@@ -374,6 +376,7 @@ class ProgressionRule:
     presentation: ProgressionChoicePresentation
     requirements: tuple[ClassLevelRequirement, ...]
     choices: tuple[CharacterChoiceDefinition, ...]
+    sourceFeat: GeneralFeatType | None = None
 
 
 @dataclass(frozen=True)
@@ -381,6 +384,7 @@ class ProgressionGrantSource:
     rule: ProgressionChoiceId
     characterClass: ClassType
     requiredSubclass: SubclassType | None = None
+    requiredFeat: GeneralFeatType | None = None
 
 
 @dataclass(frozen=True)
@@ -479,6 +483,7 @@ def progression_rule(
     classes: list[CharacterClassLevel],
     skills: dict[str, ProficiencyLevel],
     progression_grants: list[ProgressionGrantRecord] | None = None,
+    grant_source: ProgressionGrantSource | None = None,
 ) -> ProgressionRule | None:
     if choice_id == ProgressionChoiceId.HIT_POINT_INCREASE:
         target = next_hit_point_progression_target(classes, progression_grants or [])
@@ -498,6 +503,53 @@ def progression_rule(
                 classLevel=class_level,
                 hitDie=class_hit_die(character_class.name),
             ),),
+        )
+    if choice_id == ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE:
+        records = progression_grants or []
+        required_feat = grant_source.requiredFeat if grant_source is not None else None
+        completed_feats = {
+            record.source.requiredFeat
+            for record in records
+            if record.source.rule == choice_id and record.source.requiredFeat is not None
+        }
+        feat_entry = next(
+            (
+                (record, grant)
+                for record in records
+                for grant in record.grants
+                if isinstance(grant, FeatGrant)
+                and GENERAL_FEATS[grant.feat].abilityScoreIncrease is not None
+                and (required_feat is None or grant.feat == required_feat)
+                and (required_feat is not None or grant.feat not in completed_feats)
+            ),
+            None,
+        )
+        if feat_entry is None:
+            return None
+        feat_record, feat_grant = feat_entry
+        increase = GENERAL_FEATS[feat_grant.feat].abilityScoreIncrease
+        if increase is None:
+            return None
+        return ProgressionRule(
+            choice_id,
+            ProgressionChoicePresentation(
+                ProgressionChoiceType.FEAT_ABILITY_SCORE_INCREASE,
+                f"{enum_label(feat_grant.feat)} Ability Score Increase",
+                f"Increase one eligible ability score by {increase.amount}, to a maximum of {increase.scoreCap}.",
+            ),
+            (ClassLevelRequirement(
+                feat_grant.characterClass,
+                feat_grant.minimumClassLevel,
+                feat_record.source.requiredSubclass,
+            ),),
+            (AbilityScoreChoiceDefinition(
+                feat_grant.characterClass,
+                feat_grant.minimumClassLevel,
+                candidates=increase.candidates,
+                scoreCap=increase.scoreCap,
+                points=increase.amount,
+            ),),
+            sourceFeat=feat_grant.feat,
         )
     ability_score_definition = next(
         (
@@ -795,6 +847,7 @@ def progression_grant_source(rule: ProgressionRule) -> ProgressionGrantSource:
         rule.id,
         requirement.characterClass,
         requirement.subclass,
+        rule.sourceFeat,
     )
 
 
@@ -1013,7 +1066,7 @@ def evaluate_ability_score_progression_choice(
             selected_fighting_styles=selected_fighting_styles,
             feat_eligibility_sheet=feat_eligibility_sheet,
         )
-    if len(clean_values) == 1:
+    if len(clean_values) == 1 and choice.points > 1:
         clean_values.append(clean_values[0])
     if len(clean_values) != choice.points:
         raise ProgressionRuleViolation(SkillSelectionIssue.WRONG_COUNT)
@@ -1620,9 +1673,30 @@ def reconcile_progression_grant_records(
         character_class.name: character_class.level
         for character_class in classes
     }
+    active_feat_grants = {
+        grant.feat
+        for record in records
+        for grant in record.grants
+        if isinstance(grant, FeatGrant)
+        and available_classes.get(grant.characterClass, 0) >= grant.minimumClassLevel
+        and (
+            record.source.requiredSubclass is None
+            or any(
+                character_class.name == grant.characterClass
+                and character_class.subclass == record.source.requiredSubclass
+                for character_class in classes
+            )
+        )
+    }
     active = []
     for record in records:
-        rule = progression_rule(record.source.rule, classes, base_skills)
+        rule = progression_rule(
+            record.source.rule,
+            classes,
+            base_skills,
+            records,
+            record.source,
+        )
         if rule is not None and not progression_requirements_met(rule, classes):
             continue
         class_level = available_classes.get(record.source.characterClass, 0)
@@ -1635,11 +1709,16 @@ def reconcile_progression_grant_records(
             and character_class.subclass == required_subclass
             for character_class in classes
         )
+        feat_requirement_met = (
+            record.source.requiredFeat is None
+            or record.source.requiredFeat in active_feat_grants
+        )
         grants: tuple[CharacterGrant, ...] = tuple(
             grant
             for grant in record.grants
             if class_level >= grant.minimumClassLevel
             and subclass_requirement_met
+            and feat_requirement_met
         )
         if (
             rule is not None
@@ -1908,6 +1987,23 @@ def ability_score_progression_choice(
     feats: list[SheetFeature] | None,
     feat_eligibility_sheet,
 ) -> ProgressionChoice:
+    if choice.featChoice is None:
+        return multi_choice(
+            choice_id=rule.id,
+            choice_type=rule.presentation.choiceType,
+            label=rule.presentation.label,
+            description=rule.presentation.description,
+            minimum=choice.points,
+            maximum=choice.points,
+            selected=[],
+            options=[
+                ProgressionChoiceOption(
+                    value=enum_key(ability),
+                    label=enum_label(ability),
+                )
+                for ability in choice.candidates
+            ],
+        )
     return single_choice(
         choice_id=rule.id,
         choice_type=rule.presentation.choiceType,

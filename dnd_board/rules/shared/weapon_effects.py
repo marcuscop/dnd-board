@@ -5,6 +5,7 @@ from dataclasses import replace
 from dnd_board.character_sheet import (
     AttackAction,
     CharacterSheet,
+    DamageComponentKind,
     DiceType,
     EquipmentItem,
     RollDamageComponent,
@@ -306,6 +307,7 @@ def build_bound_weapon_spell_attack_payload(
         modifierBreakdown=base_roll.modifierBreakdown,
         total=base_roll.total,
         effectNodeIds=[damage_nodes[0][0]],
+        kind=DamageComponentKind.WEAPON_DICE,
     )]
     amount_inputs = [EffectAmountInput(damage_nodes[0][0], base_roll.total)]
     for node_id, damage in damage_nodes[1:]:

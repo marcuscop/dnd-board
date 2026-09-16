@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from dnd_board.application.progression_service import ProgressionServiceError, apply_member_progression_rule, set_member_class_levels
 from dnd_board.character_sheet import AbilityScores, AbilityType, ArcaneShotType, BattleMasterManeuverType, CharacterClassLevel, ClassOptionKind, ClassOptionSelection, ClassType, FightingStyleType, PartyMemberConfig, PartyMemberSheet, ProficiencyLevel, ProgressionChoice, ProgressionChoiceType, RuneType, SkillType, SpellId, SpellSource, SpellStatus, enum_key, typed_json_from_value, typed_json_to_value
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
@@ -101,6 +103,142 @@ def test_ability_score_progression_records_typed_grants_and_advances_entitlement
     )
     assert next_rule is not None
     assert next_rule.choices[0].classLevel == 6
+
+
+def test_defensive_duelist_grants_a_definition_backed_dexterity_choice() -> None:
+    classes = [CharacterClassLevel(name=ClassType.FIGHTER, level=4)]
+    feat_record = ProgressionGrantRecord(
+        ProgressionGrantSource(
+            ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+            ClassType.FIGHTER,
+        ),
+        (FeatGrant(ClassType.FIGHTER, 4, GeneralFeatType.DEFENSIVE_DUELIST),),
+    )
+
+    choices = progression_choices(
+        classes,
+        [],
+        {},
+        progression_grants=[feat_record],
+    )
+    feat_ability_choice = next(
+        choice
+        for choice in choices
+        if choice.id == ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE.value
+    )
+    rule = progression_rule(
+        ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE,
+        classes,
+        {},
+        [feat_record],
+    )
+
+    assert feat_ability_choice.choiceType == ProgressionChoiceType.FEAT_ABILITY_SCORE_INCREASE
+    assert [(option.value, option.label) for option in feat_ability_choice.options] == [
+        ("dexterity", "Dexterity"),
+    ]
+    assert rule is not None
+    result = evaluate_progression_rule(
+        rule,
+        classes,
+        {},
+        ["dexterity"],
+        ability_scores=AbilityScores(10, 19, 10, 10, 10, 10),
+    )
+    assert result.source.requiredFeat == GeneralFeatType.DEFENSIVE_DUELIST
+    assert result.grants == (
+        AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityType.DEXTERITY, 1),
+    )
+
+
+def test_war_caster_ability_choice_enforces_candidates_and_score_cap() -> None:
+    classes = [CharacterClassLevel(name=ClassType.WIZARD, level=4)]
+    feat_record = ProgressionGrantRecord(
+        ProgressionGrantSource(
+            ProgressionChoiceId.WIZARD_ABILITY_SCORE_IMPROVEMENT,
+            ClassType.WIZARD,
+        ),
+        (FeatGrant(ClassType.WIZARD, 4, GeneralFeatType.WAR_CASTER),),
+    )
+    rule = progression_rule(
+        ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE,
+        classes,
+        {},
+        [feat_record],
+    )
+
+    assert rule is not None
+    choice = rule.choices[0]
+    assert choice.candidates == (
+        AbilityType.INTELLIGENCE,
+        AbilityType.WISDOM,
+        AbilityType.CHARISMA,
+    )
+    with pytest.raises(ProgressionRuleViolation) as invalid_ability:
+        evaluate_progression_rule(
+            rule,
+            classes,
+            {},
+            ["dexterity"],
+            ability_scores=AbilityScores(10, 10, 10, 18, 12, 14),
+        )
+    with pytest.raises(ProgressionRuleViolation) as capped_score:
+        evaluate_progression_rule(
+            rule,
+            classes,
+            {},
+            ["intelligence"],
+            ability_scores=AbilityScores(10, 10, 10, 20, 12, 14),
+        )
+
+    assert invalid_ability.value.issue == SkillSelectionIssue.INVALID_OPTION
+    assert capped_score.value.issue == SkillSelectionIssue.INVALID_OPTION
+
+
+def test_feat_ability_score_grant_is_applied_and_removed_with_its_feat() -> None:
+    feat_record = ProgressionGrantRecord(
+        ProgressionGrantSource(
+            ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+            ClassType.FIGHTER,
+        ),
+        (FeatGrant(ClassType.FIGHTER, 4, GeneralFeatType.DEFENSIVE_DUELIST),),
+    )
+    member = PartyMemberConfig(
+        id="fighter",
+        name="Fighter",
+        maxHp=36,
+        abilityScores=AbilityScores(16, 14, 14, 10, 10, 10),
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+            progressionGrants=[feat_record],
+        ),
+    )
+
+    apply_member_progression_rule(
+        member,
+        ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE,
+        ["dexterity"],
+    )
+
+    assert member.abilityScores.dexterity == 15
+    feat_ability_record = next(
+        record
+        for record in member.sheet.progressionGrants
+        if record.source.rule == ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE
+    )
+    assert feat_ability_record.source.requiredFeat == GeneralFeatType.DEFENSIVE_DUELIST
+    assert typed_json_to_value(typed_json_from_value(feat_ability_record)) == feat_ability_record
+
+    set_member_class_levels(
+        member,
+        [CharacterClassLevel(name=ClassType.FIGHTER, level=3)],
+    )
+
+    assert member.abilityScores.dexterity == 14
+    assert all(
+        record.source.requiredFeat != GeneralFeatType.DEFENSIVE_DUELIST
+        for record in member.sheet.progressionGrants or []
+    )
 
 
 def test_ability_score_progression_can_grant_a_typed_feat() -> None:

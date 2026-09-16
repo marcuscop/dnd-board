@@ -35,16 +35,20 @@ from dnd_board.rules.species import SpeciesType
 from dnd_board.rules.shared.effects import (
     AmountCalculation,
     ApplyEffect,
+    ApplyEffectOperation,
     CalculatedAmount,
     CalculationType,
     CombinedAmount,
     DamageEffect,
     DiceAmount,
     FeatureMechanics,
+    EffectDuration,
+    EffectDurationType,
     FixedAmount,
     Interaction,
     InteractionDecision,
     InteractionDecisionType,
+    InteractionEffectRecipient,
     InteractionTiming,
     Modifier,
     ModifierOperation,
@@ -54,10 +58,14 @@ from dnd_board.rules.shared.effects import (
     OwnerWearsArmorPredicate,
     OwnerWearsHeavyArmorPredicate,
     OwnerWieldsExactlyOneOneHandedWeaponPredicate,
+    OwnerWieldsWeaponWithPropertyPredicate,
     OwnerWieldsShieldPredicate,
     OwnerWieldsWeaponOrShieldPredicate,
     PendingDamageModificationType,
+    PendingDamageIsWeaponDicePredicate,
+    PendingDamageRerollSelection,
     PromptResponder,
+    RerollPendingDamage,
     ReplaceRollOutcome,
     ResolutionEventType,
     RollOutcome,
@@ -74,7 +82,10 @@ from dnd_board.rules.shared.effects import (
     WeaponHasAnyPropertyPredicate,
     WeaponHasPropertyPredicate,
     WithinDistancePredicate,
+    InstallOngoingEffect,
+    OngoingEffect,
 )
+from dnd_board.rules.encounter import TurnBoundary, TurnOccurrence, TurnParticipantReference, TurnTiming, UsageScope
 from dnd_board.rules.shared.resources import ResourceCost, ResourceId
 
 
@@ -428,6 +439,13 @@ class FeatResourceDefinition:
 
 
 @dataclass(frozen=True)
+class FeatAbilityScoreIncrease:
+    candidates: tuple[AbilityType, ...]
+    amount: int = 1
+    scoreCap: int = 20
+
+
+@dataclass(frozen=True)
 class GeneralFeatDefinition:
     featType: GeneralFeatType
     source: RuleSource
@@ -437,6 +455,7 @@ class GeneralFeatDefinition:
     repeatable: bool = False
     mechanics: FeatureMechanics = field(default_factory=FeatureMechanics)
     resources: tuple[FeatResourceDefinition, ...] = ()
+    abilityScoreIncrease: FeatAbilityScoreIncrease | None = None
 
 
 def general_feat(
@@ -448,6 +467,7 @@ def general_feat(
     category: FeatCategory = FeatCategory.GENERAL,
     mechanics: FeatureMechanics | None = None,
     resources: tuple[FeatResourceDefinition, ...] = (),
+    ability_score_increase: FeatAbilityScoreIncrease | None = None,
 ) -> GeneralFeatDefinition:
     return GeneralFeatDefinition(
         featType=feat_type,
@@ -458,6 +478,7 @@ def general_feat(
         repeatable=repeatable,
         mechanics=mechanics or FeatureMechanics(),
         resources=resources,
+        abilityScoreIncrease=ability_score_increase,
     )
 
 
@@ -579,6 +600,72 @@ def lucky_mechanics() -> FeatureMechanics:
     )
 
 
+def savage_attacker_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(interactions=[Interaction(
+        trigger=ResolutionEventType.DAMAGE_PENDING,
+        timing=InteractionTiming.BEFORE_EVENT,
+        decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+        predicates=[
+            SourceIsOwnerPredicate(),
+            SourceIsAttackPredicate(),
+            PendingDamageIsWeaponDicePredicate(),
+        ],
+        operations=[RerollPendingDamage(PendingDamageRerollSelection.HIGHER)],
+        activation=TimeEconomy.SPECIAL,
+        usageScope=UsageScope.ONCE_ON_ANY_TURN,
+        usageResource=ResourceId.SAVAGE_ATTACKER,
+    )])
+
+
+def defensive_duelist_mechanics() -> FeatureMechanics:
+    proficiency_bonus = CalculatedAmount(AmountCalculation.SOURCE_PROFICIENCY_BONUS)
+    melee_attack = SourceAttackRangePredicate(AttackRangeType.MELEE)
+    ongoing_defense = InstallOngoingEffect(OngoingEffect(
+        duration=EffectDuration(
+            EffectDurationType.UNTIL_START_OF_TURN,
+            timing=TurnTiming(
+                TurnParticipantReference.OWNER,
+                TurnBoundary.START,
+                TurnOccurrence.NEXT,
+            ),
+        ),
+        label="Defensive Duelist",
+        modifiers=[Modifier(
+            CalculationType.ATTACK_ROLL,
+            ModifierOperation.SUBTRACT,
+            predicates=[melee_attack],
+            amount=proficiency_bonus,
+            scope=ModifierScope.AGAINST_OWNER,
+            description="Defensive Duelist AC bonus against melee attacks.",
+        )],
+    ))
+    return FeatureMechanics(interactions=[Interaction(
+        trigger=ResolutionEventType.ATTACK_ROLLED,
+        timing=InteractionTiming.AFTER_EVENT,
+        decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+        predicates=[
+            TargetIsOwnerPredicate(),
+            SourceIsAttackPredicate(),
+            melee_attack,
+            RollOutcomePredicate(RollOutcome.HIT),
+            OwnerWieldsWeaponWithPropertyPredicate(WeaponProperty.FINESSE),
+        ],
+        operations=[
+            ModifyRoll(RollModificationType.SUBTRACT, proficiency_bonus),
+            ApplyEffectOperation(ongoing_defense, InteractionEffectRecipient.OWNER),
+        ],
+        activation=TimeEconomy.REACTION,
+    )])
+
+
+def war_caster_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(passiveModifiers=[Modifier(
+        CalculationType.CONCENTRATION_SAVE,
+        ModifierOperation.ADVANTAGE,
+        description="Advantage on Constitution saves to maintain Concentration.",
+    )])
+
+
 GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.ACTOR: general_feat(GeneralFeatType.ACTOR, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Charisma; improve deception, performance, and mimicry."),
     GeneralFeatType.ALERT: general_feat(
@@ -600,7 +687,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.CROSSBOW_EXPERT: general_feat(GeneralFeatType.CROSSBOW_EXPERT, RuleSource.PLAYERS_HANDBOOK_2024, "Improve crossbow handling and close-range ranged attacks."),
     GeneralFeatType.CRAFTER: general_feat(GeneralFeatType.CRAFTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Artisan's Tools and craft mundane items faster."),
     GeneralFeatType.CRUSHER: general_feat(GeneralFeatType.CRUSHER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Strength or Constitution; add control and critical riders to bludgeoning hits."),
-    GeneralFeatType.DEFENSIVE_DUELIST: general_feat(GeneralFeatType.DEFENSIVE_DUELIST, RuleSource.PLAYERS_HANDBOOK_2024, "Use a reaction with a finesse weapon to add proficiency bonus to AC.", (ability_prerequisite(13, AbilityType.DEXTERITY),)),
+    GeneralFeatType.DEFENSIVE_DUELIST: general_feat(
+        GeneralFeatType.DEFENSIVE_DUELIST,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Dexterity. While holding a Finesse weapon, use a Reaction when a melee attack hits you to add your Proficiency Bonus to AC against that attack and other melee attacks until your next turn.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.DEXTERITY)),
+        mechanics=defensive_duelist_mechanics(),
+        ability_score_increase=FeatAbilityScoreIncrease((AbilityType.DEXTERITY,)),
+    ),
     GeneralFeatType.DRAGON_FEAR: general_feat(GeneralFeatType.DRAGON_FEAR, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength, Constitution, or Charisma; turn Breath Weapon into fear.", (species_prerequisite(SpeciesType.DRAGONBORN),)),
     GeneralFeatType.DRAGON_HIDE: general_feat(GeneralFeatType.DRAGON_HIDE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength, Constitution, or Charisma; gain natural armor and claws.", (species_prerequisite(SpeciesType.DRAGONBORN),)),
     GeneralFeatType.DROW_HIGH_MAGIC: general_feat(GeneralFeatType.DROW_HIGH_MAGIC, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Gain drow innate spells.", (species_prerequisite(SpeciesType.ELF),)),
@@ -675,7 +769,12 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.RESILIENT: general_feat(GeneralFeatType.RESILIENT, RuleSource.PLAYERS_HANDBOOK_2024, "+1 in one ability and proficiency in that ability's saving throws."),
     GeneralFeatType.RITUAL_CASTER: general_feat(GeneralFeatType.RITUAL_CASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain a ritual book and cast ritual spells.", (ability_prerequisite(13, AbilityType.INTELLIGENCE, AbilityType.WISDOM),)),
     GeneralFeatType.RUNE_SHAPER: general_feat(GeneralFeatType.RUNE_SHAPER, RuleSource.GLORY_OF_THE_GIANTS, "Learn rune magic spells.", (feature_prerequisite(FeatCharacterFeatureType.SPELLCASTING, FeatCharacterFeatureType.RUNE_CARVER),)),
-    GeneralFeatType.SAVAGE_ATTACKER: general_feat(GeneralFeatType.SAVAGE_ATTACKER, RuleSource.PLAYERS_HANDBOOK_2024, "Reroll melee weapon damage once per turn."),
+    GeneralFeatType.SAVAGE_ATTACKER: general_feat(
+        GeneralFeatType.SAVAGE_ATTACKER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "Once per turn when you hit with a weapon, roll the weapon's damage dice twice and use either roll.",
+        mechanics=savage_attacker_mechanics(),
+    ),
     GeneralFeatType.SECOND_CHANCE: general_feat(GeneralFeatType.SECOND_CHANCE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Dexterity, Constitution, or Charisma; force an attacker to reroll.", (species_prerequisite(SpeciesType.HALFLING),)),
     GeneralFeatType.SENTINEL: general_feat(GeneralFeatType.SENTINEL, RuleSource.PLAYERS_HANDBOOK_2024, "Improve opportunity attacks and lock down nearby enemies."),
     GeneralFeatType.SHADOW_TOUCHED: general_feat(GeneralFeatType.SHADOW_TOUCHED, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; learn invisibility and another spell."),
@@ -707,7 +806,18 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         )]),
     ),
     GeneralFeatType.VIGOR_OF_THE_HILL_GIANT: general_feat(GeneralFeatType.VIGOR_OF_THE_HILL_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; improve prone resistance and Hit Dice healing.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.HILL_STRIKE))),
-    GeneralFeatType.WAR_CASTER: general_feat(GeneralFeatType.WAR_CASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve concentration saves, somatic casting, and reaction spellcasting.", (spellcasting_prerequisite(),)),
+    GeneralFeatType.WAR_CASTER: general_feat(
+        GeneralFeatType.WAR_CASTER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Intelligence, Wisdom, or Charisma; gain Advantage on Concentration saves, perform Somatic components with occupied hands, and cast certain spells as opportunity attacks.",
+        (level_prerequisite(4), spellcasting_prerequisite()),
+        mechanics=war_caster_mechanics(),
+        ability_score_increase=FeatAbilityScoreIncrease((
+            AbilityType.INTELLIGENCE,
+            AbilityType.WISDOM,
+            AbilityType.CHARISMA,
+        )),
+    ),
     GeneralFeatType.WEAPON_MASTER: general_feat(GeneralFeatType.WEAPON_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain weapon proficiencies."),
     GeneralFeatType.WOOD_ELF_MAGIC: general_feat(GeneralFeatType.WOOD_ELF_MAGIC, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Learn druid magic and wood elf spells.", (species_prerequisite(SpeciesType.ELF),)),
 }

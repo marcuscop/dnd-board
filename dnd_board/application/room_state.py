@@ -27,6 +27,7 @@ from dnd_board.rules.encounter import EncounterState
 from dnd_board.rules.shared.effects import (
     ActiveOngoingEffect,
     ActiveScheduledEffect,
+    BoundEffect,
     EffectNodeId,
     ResolutionEventType,
 )
@@ -169,6 +170,7 @@ class PendingCharacterResolution:
     dispatchedEvents: set[InteractionEventKey] = field(default_factory=set)
     scheduledEffectStates: dict[str, list[ActiveScheduledEffect]] = field(default_factory=dict)
     touchedScheduledTargets: set[str] = field(default_factory=set)
+    pendingBoundEffects: list[BoundEffect] = field(default_factory=list)
 
 
 @dataclass

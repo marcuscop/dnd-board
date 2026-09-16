@@ -752,6 +752,18 @@ def _resolve_concentration_save_after_damage(
         modifier.operation == ModifierOperation.DISADVANTAGE
         for _label, modifier in source_modifiers
     )
+    owner_modifiers = applicable_character_modifiers(
+        target,
+        CalculationType.CONCENTRATION_SAVE,
+        ModifierScope.OWNER,
+        triggering_roll,
+        target,
+        source,
+    )
+    owner_advantage = any(
+        modifier.operation == ModifierOperation.ADVANTAGE
+        for _label, modifier in owner_modifiers
+    )
     response_roll = response_ability_roll(
         sheet=target,
         ability=AbilityType.CONSTITUTION,
@@ -760,9 +772,10 @@ def _resolve_concentration_save_after_damage(
         source_label=active.spellName,
         modifier=save_modifier(target, AbilityType.CONSTITUTION),
         modifier_target=RollModifierEffectTarget.CONCENTRATION_SAVE,
+        advantage=owner_advantage,
         disadvantage=source_disadvantage,
     )
-    if source_disadvantage:
+    if source_disadvantage or owner_advantage:
         response_roll = replace(
             response_roll,
             modifierBreakdown=[
@@ -771,6 +784,11 @@ def _resolve_concentration_save_after_damage(
                     RollModifierBreakdown(label, 0, modifier.description)
                     for label, modifier in source_modifiers
                     if modifier.operation == ModifierOperation.DISADVANTAGE
+                ),
+                *(
+                    RollModifierBreakdown(label, 0, modifier.description)
+                    for label, modifier in owner_modifiers
+                    if modifier.operation == ModifierOperation.ADVANTAGE
                 ),
             ],
         )

@@ -41,6 +41,7 @@ class ResolutionInterceptorType(Enum):
     REROLL_SAVING_THROW = auto()
     REPLACE_ROLL_OUTCOME = auto()
     MODIFY_PENDING_DAMAGE = auto()
+    REROLL_PENDING_DAMAGE = auto()
     MODIFY_ROLL = auto()
     PREVENT_CONDITION = auto()
     MODIFY_ACTION = auto()
@@ -83,6 +84,7 @@ class SheetSectionType(Enum):
 class ProgressionChoiceType(Enum):
     HIT_POINTS = auto()
     ABILITY_SCORE_IMPROVEMENT = auto()
+    FEAT_ABILITY_SCORE_INCREASE = auto()
     FEAT = auto()
     SKILL_PROFICIENCIES = auto()
     EXPERTISE = auto()
@@ -1050,6 +1052,11 @@ class RestType(Enum):
     LONG_REST = auto()
 
 
+class DamageComponentKind(Enum):
+    OTHER = auto()
+    WEAPON_DICE = auto()
+
+
 @dataclass(frozen=True)
 class RollDamageComponent:
     damageType: DamageType
@@ -1060,6 +1067,7 @@ class RollDamageComponent:
     modifierBreakdown: list[RollModifierBreakdown]
     total: int
     effectNodeIds: list[EffectNodeId] = field(default_factory=list)
+    kind: DamageComponentKind = DamageComponentKind.OTHER
 
 
 @dataclass(frozen=True)
@@ -1982,6 +1990,7 @@ def build_combined_attack_roll_payload(
         modifierBreakdown=damage_roll.modifierBreakdown,
         total=damage_roll.total,
         effectNodeIds=effect_node_ids,
+        kind=DamageComponentKind.WEAPON_DICE,
     )
     return replace(
         attack_roll,
@@ -2805,7 +2814,7 @@ def resolve_roll_against_target(
     effect_resolution: ResolvedCharacterEffect | None = None,
 ) -> RollResolution:
     if effect_resolution is None:
-        roll = attack_roll_with_target_condition_modifiers(roll, target)
+        roll = attack_roll_with_target_condition_modifiers(roll, target, source)
         roll = attack_roll_with_critical_damage(roll)
     target_conditions = list(target.conditions)
     damage_blocked_by_creature_type = False
@@ -2930,7 +2939,11 @@ def character_effect_sheet_updates(
     return updates
 
 
-def attack_roll_with_target_condition_modifiers(roll: RollPayload, target: CharacterSheet) -> RollPayload:
+def attack_roll_with_target_condition_modifiers(
+    roll: RollPayload,
+    target: CharacterSheet,
+    source: CharacterSheet | None = None,
+) -> RollPayload:
     if roll.resolution != RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
         return roll
     advantage_conditions = unique_conditions([*(roll.advantageConditions or []), *condition_incoming_attack_advantage_conditions(target)])
@@ -2939,7 +2952,10 @@ def attack_roll_with_target_condition_modifiers(roll: RollPayload, target: Chara
         advantage_conditions = [condition for condition in advantage_conditions if condition != ConditionType.INVISIBLE]
     if roll.sourceConditions and ConditionType.SEE_INVISIBILITY in roll.sourceConditions:
         disadvantage_conditions = [condition for condition in disadvantage_conditions if condition != ConditionType.INVISIBLE]
-    modifier_breakdown = [*roll.modifierBreakdown, *target_incoming_attack_modifier_breakdown(target)]
+    modifier_breakdown = [
+        *roll.modifierBreakdown,
+        *target_incoming_attack_modifier_breakdown(target, roll, source),
+    ]
     modifier = sum(part.value for part in modifier_breakdown)
     if advantage_conditions == (roll.advantageConditions or []) and disadvantage_conditions == (roll.disadvantageConditions or []) and modifier_breakdown == roll.modifierBreakdown:
         return roll
@@ -2996,10 +3012,14 @@ def attack_roll_with_critical_damage(roll: RollPayload) -> RollPayload:
     )
 
 
-def target_incoming_attack_modifier_breakdown(target: CharacterSheet) -> list[RollModifierBreakdown]:
-    from dnd_board.rules.shared.character_effects import active_ongoing_modifiers
+def target_incoming_attack_modifier_breakdown(
+    target: CharacterSheet,
+    roll: RollPayload | None = None,
+    source: CharacterSheet | None = None,
+) -> list[RollModifierBreakdown]:
+    from dnd_board.rules.shared.character_effects import CharacterEffectExecutionContext, active_ongoing_modifiers
     from dnd_board.rules.shared.condition_effects import condition_modifiers
-    from dnd_board.rules.shared.effects import CalculationType, DiceAmount, FixedAmount, ModifierOperation, ModifierScope
+    from dnd_board.rules.shared.effects import AmountCalculation, CalculatedAmount, CalculationType, DiceAmount, EffectNodeId, FixedAmount, ModifierOperation, ModifierScope
 
     entries = [
         (enum_label(condition), modifier)
@@ -3012,12 +3032,23 @@ def target_incoming_attack_modifier_breakdown(target: CharacterSheet) -> list[Ro
     ] + [
         (active.sourceLabel, modifier)
         for active, modifier in active_ongoing_modifiers(target, CalculationType.ATTACK_ROLL, scope=ModifierScope.AGAINST_OWNER)
+        if roll is None or CharacterEffectExecutionContext(
+            roll,
+            target,
+            source,
+            owner=target,
+        ).evaluate_predicates(EffectNodeId(()), modifier.predicates)
     ]
     breakdown: list[RollModifierBreakdown] = []
     for source_label, modifier in entries:
         if modifier.operation not in {ModifierOperation.ADD, ModifierOperation.SUBTRACT}:
             continue
         value = modifier.amount.value if isinstance(modifier.amount, FixedAmount) else 0
+        if (
+            isinstance(modifier.amount, CalculatedAmount)
+            and modifier.amount.calculation == AmountCalculation.SOURCE_PROFICIENCY_BONUS
+        ):
+            value = target.proficiencyBonus * modifier.amount.multiplier
         if isinstance(modifier.amount, DiceAmount):
             value = modifier.amount.staticBonus + sum(random.randint(1, modifier.amount.diceType.value) for _ in range(modifier.amount.diceCount))
         if modifier.operation == ModifierOperation.SUBTRACT:

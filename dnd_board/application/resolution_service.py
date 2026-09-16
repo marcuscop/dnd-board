@@ -34,6 +34,7 @@ from dnd_board.character_sheet import (
     CharacterSheet,
     ClassType,
     DamageType,
+    DamageComponentKind,
     DiceType,
     RollLogEntry,
     RollLogEntryType,
@@ -74,6 +75,7 @@ from dnd_board.rules.shared.effects import (
     AbilityCheck,
     AmountCalculation,
     ApplyEffect,
+    ApplyEffectOperation,
     AttackRoll,
     AttackRollEffect,
     AttackRollType,
@@ -88,15 +90,18 @@ from dnd_board.rules.shared.effects import (
     EffectParticipantBindings,
     EffectRollInput,
     FixedAmount,
+    InteractionEffectRecipient,
     ModifyRoll,
     ModifyPendingDamage,
     PendingDamageModificationType,
+    PendingDamageRerollSelection,
     ResolutionEventType,
     ResolutionEvent,
     ResolutionEventResponse,
     RollOutcome,
     RollModificationType,
     RerollSavingThrow,
+    RerollPendingDamage,
     SavingThrowEffect,
     SequenceEffect,
     ResolutionId,
@@ -432,11 +437,20 @@ def continue_effect_resolution(
                     source=pending.roll.source,
                     sourceLabel=pending.roll.sourceLabel,
                 )
+        event_damage_components = node_roll.damageComponents
+        if advanced.eventType == ResolutionEventType.DAMAGE_PENDING and advanced.effectNodeId is not None:
+            matching_components = [
+                replace(component, effectNodeIds=[EffectNodeId(())])
+                for component in (node_roll.damageComponents or [])
+                if advanced.effectNodeId in component.effectNodeIds
+            ]
+            event_damage_components = matching_components or None
         event_roll = replace(
             node_roll,
             sheetId=current_source.id,
             tokenId=current_source.tokenId,
             pendingEffect=event_effect,
+            damageComponents=event_damage_components,
             effectInputs=(
                 EffectResolutionInputs(amounts=[EffectAmountInput(EffectNodeId(()), event_amount)])
                 if event_amount is not None
@@ -464,6 +478,7 @@ def continue_effect_resolution(
             operations.all_sheets(room),
             operations.source_sheet(room, pending.roll),
             current_source,
+            room.encounter,
         )
         if prompt is not None:
             execution_id = pending.active.execution.resolutionId.value
@@ -473,11 +488,17 @@ def continue_effect_resolution(
         if advanced.eventType == ResolutionEventType.ATTACK_ROLLED and advanced.effectNodeId is not None:
             finalize_attack_roll_event(pending, advanced.effectNodeId)
         response = default_effect_event_response(advanced)
+        if pending.pendingBoundEffects:
+            response = replace(response, boundEffects=list(pending.pendingBoundEffects))
+            pending.pendingBoundEffects.clear()
         if event_key not in pending.dispatchedEvents:
             pending.dispatchedEvents.add(event_key)
             response = replace(
                 response,
-                boundEffects=bound_effect_dispatches_for_event(room, pending, advanced, operations),
+                boundEffects=[
+                    *response.boundEffects,
+                    *bound_effect_dispatches_for_event(room, pending, advanced, operations),
+                ],
             )
 
 
@@ -495,8 +516,8 @@ def resolve_roll_or_prompt(
     prefixes = list(outcome_prefixes or [])
     pre_response_rolls = list(response_rolls or [])
 
-    working_roll = attack_roll_with_target_condition_modifiers(roll, target)
-    source = operations.source_sheet(room, working_roll)
+    source = operations.source_sheet(room, roll)
+    working_roll = attack_roll_with_target_condition_modifiers(roll, target, source)
     working_roll, contest_outcome, contest_rolls = resolve_contested_check_for_roll(
         working_roll,
         target,
@@ -655,7 +676,7 @@ def runtime_attack_roll_for_effect(
         sourceLabel=parent_roll.sourceLabel,
         label="Spell Attack" if attack.attackType == AttackRollType.SPELL else "Attack Roll",
     )
-    return attack_roll_with_target_condition_modifiers(attack_roll, target)
+    return attack_roll_with_target_condition_modifiers(attack_roll, target, source)
 
 
 def finalize_attack_roll_event(pending: PendingCharacterResolution, node_id: EffectNodeId) -> None:
@@ -807,11 +828,15 @@ async def _respond_to_effect_prompt(
         else None
     )
     owner = _sheet_by_id(operations.all_sheets(room), prompt.ownerSheetId) or target
+    rerolls_pending_damage = any(
+        isinstance(operation, RerollPendingDamage)
+        for operation in prompt.interaction.operations
+    )
     used_roll, used_outcomes, used_response_rolls, canceled_resolution = apply_resolution_interceptor(
         prompt,
         target,
         owner,
-        modify_damage_roll=live_pending_damage is None,
+        modify_damage_roll=live_pending_damage is None or rerolls_pending_damage,
     )
     pending.outcomePrefixes.extend(used_outcomes)
     replaced_response_roll_ids = {roll.id for roll in used_response_rolls}
@@ -824,6 +849,27 @@ async def _respond_to_effect_prompt(
     if canceled_resolution is not None:
         room.pending_effect_executions.pop(execution_id, None)
         return attach_resolution_context(canceled_resolution, pending.outcomePrefixes, pending.responseRolls)
+
+    owner_effects = [
+        operation.effect
+        for operation in prompt.interaction.operations
+        if isinstance(operation, ApplyEffectOperation)
+        and operation.recipient == InteractionEffectRecipient.OWNER
+    ]
+    if owner_effects:
+        pending.active.context.register_participant(owner)
+        pending.participantSnapshots.setdefault(owner.id, character_runtime_snapshot(owner))
+        pending.pendingBoundEffects.extend(
+            BoundEffect(
+                effect=effect,
+                bindings=EffectParticipantBindings(
+                    sourceSheetId=owner.id,
+                    targetSheetId=owner.id,
+                    ownerSheetId=owner.id,
+                ),
+            )
+            for effect in owner_effects
+        )
 
     pending_damage_modifications = [
         operation
@@ -864,6 +910,23 @@ async def _respond_to_effect_prompt(
             used_roll.pendingEffect,
             updated_amounts.get(effect_event.effectNodeId),
         )
+        if rerolls_pending_damage and used_roll.damageComponents:
+            rerolled_component = used_roll.damageComponents[0]
+            pending.roll = replace(
+                pending.roll,
+                damageComponents=[
+                    replace(
+                        component,
+                        dice=rerolled_component.dice,
+                        total=rerolled_component.total,
+                        modifierBreakdown=rerolled_component.modifierBreakdown,
+                    )
+                    if effect_event.effectNodeId in component.effectNodeIds
+                    else component
+                    for component in (pending.roll.damageComponents or [])
+                ],
+            )
+            pending.active.context.roll = pending.roll
     pending.active.context.amountInputs.update(updated_amounts)
     if effect_event.effectNodeId is not None:
         pending_damage = pending.active.context.pendingDamages.get(effect_event.effectNodeId)
@@ -1205,6 +1268,8 @@ def apply_resolution_interceptor(
             else "modifies"
         )
         return modified_roll, [f"{prompt.ownerName} {action} the incoming damage"], [], None
+    if operation_result.pendingDamageRerolls:
+        return modified_roll, [f"{prompt.ownerName} rerolls the weapon damage"], [], None
     return modified_roll, [], [], None
 
 
@@ -1254,9 +1319,74 @@ def _roll_after_interaction_operations(
                 updated = _scaled_damage_roll(updated, modification.numerator, modification.denominator)
             elif modification.modification == PendingDamageModificationType.REDUCE:
                 updated = _reduced_damage_roll(updated, _interaction_amount(owner, modification.amount))
+        for reroll in operation_result.pendingDamageRerolls:
+            updated = _rerolled_pending_damage_roll(updated, reroll, source_label)
     for modification in operation_result.rollModifications:
         updated = _modified_d20_roll(updated, modification, owner, source_label)
     return updated
+
+
+def _rerolled_pending_damage_roll(
+    roll: RollPayload,
+    reroll: RerollPendingDamage,
+    source_label: str,
+) -> RollPayload:
+    components = list(roll.damageComponents or [])
+    if not components:
+        return roll
+    amount_inputs = list(roll.effectInputs.amounts) if roll.effectInputs is not None else []
+    updated_components = []
+    for component in components:
+        if component.kind != DamageComponentKind.WEAPON_DICE or not component.dice:
+            updated_components.append(component)
+            continue
+        rerolled_dice = [random.randint(1, component.diceType.value) for _ in component.dice]
+        rerolled_total = sum(rerolled_dice) + component.modifier
+        if reroll.selection == PendingDamageRerollSelection.HIGHER:
+            keep_reroll = rerolled_total > component.total
+        elif reroll.selection == PendingDamageRerollSelection.LOWER:
+            keep_reroll = rerolled_total < component.total
+        else:
+            keep_reroll = True
+        kept_dice = rerolled_dice if keep_reroll else component.dice
+        kept_total = rerolled_total if keep_reroll else component.total
+        description = (
+            f"Original {component.dice}; rerolled {rerolled_dice}; "
+            f"kept {'reroll' if keep_reroll else 'original'}"
+        )
+        updated = replace(
+            component,
+            dice=kept_dice,
+            total=kept_total,
+            modifierBreakdown=[
+                *component.modifierBreakdown,
+                RollModifierBreakdown(source_label, 0, description),
+            ],
+        )
+        updated_components.append(updated)
+        if component.effectNodeIds:
+            amount_inputs = [
+                entry for entry in amount_inputs
+                if entry.effectNodeId not in component.effectNodeIds
+            ]
+            amount_inputs.extend(
+                EffectAmountInput(node_id, kept_total)
+                for node_id in component.effectNodeIds
+            )
+    return replace(
+        roll,
+        total=(
+            roll.total
+            if roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS
+            else sum(component.total for component in updated_components)
+        ),
+        damageComponents=updated_components,
+        effectInputs=(
+            replace(roll.effectInputs, amounts=amount_inputs)
+            if roll.effectInputs is not None
+            else None
+        ),
+    )
 
 
 def _scaled_damage_roll(roll: RollPayload, numerator: int, denominator: int) -> RollPayload:
