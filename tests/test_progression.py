@@ -47,6 +47,7 @@ from dnd_board.rules.feats import (
     feat_speed_bonus,
     general_feat_feature,
 )
+from dnd_board.rules.shared.effects import AbilityScoreAdjustment
 
 
 def hp_record(
@@ -87,8 +88,8 @@ def test_ability_score_progression_records_typed_grants_and_advances_entitlement
     record = ProgressionGrantRecord(result.source, result.grants)
 
     assert result.grants == (
-        AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityType.STRENGTH, 1),
-        AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityType.DEXTERITY, 1),
+        AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityScoreAdjustment(AbilityType.STRENGTH, 1, maximum=20)),
+        AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityScoreAdjustment(AbilityType.DEXTERITY, 1, maximum=20)),
     )
     assert apply_ability_score_progression_grants(
         AbilityScores(16, 14, 12, 10, 10, 8),
@@ -147,7 +148,7 @@ def test_defensive_duelist_grants_a_definition_backed_dexterity_choice() -> None
     )
     assert result.source.requiredFeat == GeneralFeatType.DEFENSIVE_DUELIST
     assert result.grants == (
-        AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityType.DEXTERITY, 1),
+        AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityScoreAdjustment(AbilityType.DEXTERITY, 1, maximum=20)),
     )
 
 
@@ -169,7 +170,7 @@ def test_war_caster_ability_choice_enforces_candidates_and_score_cap() -> None:
 
     assert rule is not None
     choice = rule.choices[0]
-    assert choice.candidates == (
+    assert choice.adjustment.candidates == (
         AbilityType.INTELLIGENCE,
         AbilityType.WISDOM,
         AbilityType.CHARISMA,
@@ -278,7 +279,7 @@ def test_level_nineteen_uses_epic_boon_progression_instead_of_asi() -> None:
             ClassType.WIZARD,
         ),
         tuple(
-            AbilityScoreGrant(ClassType.WIZARD, level, AbilityType.INTELLIGENCE, 1)
+            AbilityScoreGrant(ClassType.WIZARD, level, AbilityScoreAdjustment(AbilityType.INTELLIGENCE, 1, maximum=20))
             for level in (4, 8, 12, 16)
         ),
     )]

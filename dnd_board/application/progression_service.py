@@ -614,7 +614,7 @@ def progression_rule_error(rule, issue: SkillSelectionIssue) -> str:
         if issue == SkillSelectionIssue.WRONG_COUNT:
             return (
                 "Choose one eligible ability score"
-                if choice.points == 1
+                if choice.adjustment.points == 1
                 else "Choose one ability twice or two abilities once"
             )
         if issue == SkillSelectionIssue.INVALID_FEAT:

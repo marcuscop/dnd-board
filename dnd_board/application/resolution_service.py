@@ -22,6 +22,7 @@ from dnd_board.application.character_state_service import (
     apply_roll_result,
 )
 from dnd_board.application.resolution_interactions import (
+    automatic_interaction_effects_for_event,
     resolution_prompt_for_d20_test,
     resolution_prompt_for_effect_event,
 )
@@ -67,6 +68,7 @@ from dnd_board.rules.shared.character_effects import (
     ResolvedCharacterEffect,
     advance_character_effect_execution,
     first_contested_check_effect,
+    increased_damage_effect_node,
     reduced_damage_effect_node,
     resolved_d20,
     start_character_effect_execution,
@@ -497,6 +499,14 @@ def continue_effect_resolution(
                 response,
                 boundEffects=[
                     *response.boundEffects,
+                    *automatic_interaction_effects_for_event(
+                        event_roll,
+                        advanced,
+                        current_target,
+                        operations.all_sheets(room),
+                        current_source,
+                        room.encounter,
+                    ),
                     *bound_effect_dispatches_for_event(room, pending, advanced, operations),
                 ],
             )
@@ -994,6 +1004,7 @@ async def _claim_prompt(
         prompt.interaction.activation if use else None,
         ActionCategory.MAGIC if prompt.pendingRoll.source.section == SheetSectionType.SPELLS else ActionCategory.FEATURE,
         room.encounter.turnId if room.encounter is not None else None,
+        timing=prompt.interaction.activationTiming,
         resolution_response=True,
         sheet=owner,
         participant_sheets=operations.all_sheets(room),
@@ -1261,6 +1272,9 @@ def apply_resolution_interceptor(
     if operation_result.pendingDamageModifications:
         modification = operation_result.pendingDamageModifications[0]
         action = (
+            "increases"
+            if modification.modification == PendingDamageModificationType.INCREASE
+            else
             "halves"
             if modification.modification == PendingDamageModificationType.MULTIPLY
             and modification.numerator == 1
@@ -1284,7 +1298,9 @@ def apply_pending_damage_modifications(
         return
     amount = pending.currentAmount
     for modification in modifications:
-        if modification.modification == PendingDamageModificationType.PREVENT:
+        if modification.modification == PendingDamageModificationType.INCREASE:
+            amount += _interaction_amount(owner, modification.amount)
+        elif modification.modification == PendingDamageModificationType.PREVENT:
             amount = 0
         elif modification.modification == PendingDamageModificationType.MULTIPLY:
             if modification.denominator == 0:
@@ -1313,7 +1329,13 @@ def _roll_after_interaction_operations(
     updated = replace(roll, pendingEffect=pending_effect)
     if modify_damage:
         for modification in operation_result.pendingDamageModifications:
-            if modification.modification == PendingDamageModificationType.PREVENT:
+            if modification.modification == PendingDamageModificationType.INCREASE:
+                updated = _increased_damage_roll(
+                    updated,
+                    _interaction_amount(owner, modification.amount),
+                    source_label,
+                )
+            elif modification.modification == PendingDamageModificationType.PREVENT:
                 updated = _scaled_damage_roll(updated, 0, 1)
             elif modification.modification == PendingDamageModificationType.MULTIPLY:
                 updated = _scaled_damage_roll(updated, modification.numerator, modification.denominator)
@@ -1324,6 +1346,56 @@ def _roll_after_interaction_operations(
     for modification in operation_result.rollModifications:
         updated = _modified_d20_roll(updated, modification, owner, source_label)
     return updated
+
+
+def _increased_damage_roll(
+    roll: RollPayload,
+    amount: int,
+    source_label: str,
+) -> RollPayload:
+    increase = max(0, amount)
+    pending_effect = (
+        increased_damage_effect_node(roll.pendingEffect, increase)
+        if roll.pendingEffect is not None
+        else None
+    )
+    components = list(roll.damageComponents or [])
+    amount_inputs = list(roll.effectInputs.amounts) if roll.effectInputs is not None else []
+    if components:
+        component = components[0]
+        updated_total = component.total + increase
+        components[0] = replace(
+            component,
+            total=updated_total,
+            modifierBreakdown=[
+                *component.modifierBreakdown,
+                RollModifierBreakdown(source_label, increase, "Bonus damage"),
+            ],
+        )
+        if component.effectNodeIds:
+            amount_inputs = [
+                entry for entry in amount_inputs
+                if entry.effectNodeId not in component.effectNodeIds
+            ]
+            amount_inputs.extend(
+                EffectAmountInput(node_id, updated_total)
+                for node_id in component.effectNodeIds
+            )
+    return replace(
+        roll,
+        total=(
+            roll.total
+            if roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS
+            else roll.total + increase
+        ),
+        damageComponents=components or None,
+        pendingEffect=pending_effect,
+        effectInputs=(
+            replace(roll.effectInputs, amounts=amount_inputs)
+            if roll.effectInputs is not None
+            else None
+        ),
+    )
 
 
 def _rerolled_pending_damage_roll(

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from dnd_board.character_sheet import (
+    ActivationTiming,
     AbilityType,
     ArmorCategory,
     AttackAction,
@@ -33,9 +34,15 @@ from dnd_board.character_sheet import (
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
 from dnd_board.rules.species import SpeciesType
 from dnd_board.rules.shared.effects import (
+    AbilityScoreAdjustmentChoice,
     AmountCalculation,
+    AnyPredicate,
     ApplyEffect,
     ApplyEffectOperation,
+    ActivatedEffect,
+    AttackRoll,
+    AttackRollEffect,
+    AttackRollType,
     CalculatedAmount,
     CalculationType,
     CombinedAmount,
@@ -44,7 +51,11 @@ from dnd_board.rules.shared.effects import (
     FeatureMechanics,
     EffectDuration,
     EffectDurationType,
+    EndingCondition,
+    EndingConditionType,
     FixedAmount,
+    GrantedAction,
+    GrantedActionId,
     Interaction,
     InteractionDecision,
     InteractionDecisionType,
@@ -56,13 +67,16 @@ from dnd_board.rules.shared.effects import (
     ModifyPendingDamage,
     ModifyRoll,
     OwnerWearsArmorPredicate,
+    OwnerWearsArmorCategoryPredicate,
     OwnerWearsHeavyArmorPredicate,
+    OwnerAbilityScoreAtLeastPredicate,
     OwnerWieldsExactlyOneOneHandedWeaponPredicate,
     OwnerWieldsWeaponWithPropertyPredicate,
     OwnerWieldsShieldPredicate,
     OwnerWieldsWeaponOrShieldPredicate,
     PendingDamageModificationType,
     PendingDamageIsWeaponDicePredicate,
+    PendingDamageTypePredicate,
     PendingDamageRerollSelection,
     PromptResponder,
     RerollPendingDamage,
@@ -71,19 +85,27 @@ from dnd_board.rules.shared.effects import (
     RollOutcome,
     RollOutcomePredicate,
     RollModificationType,
+    SequenceEffect,
     SavingThrowAbilityPredicate,
+    SelectionId,
+    SelectWeaponEffect,
     SourceAttackKindPredicate,
+    SourceAttackCriticalPredicate,
     SourceAttackRangePredicate,
     SourceDamageAbilityModifierPredicate,
     SourceIsAttackPredicate,
     SourceIsOwnerPredicate,
+    SourceUsesTimeEconomyPredicate,
     SourceWeaponCategoryPredicate,
     TargetIsOwnerPredicate,
+    TargetHitPointsAtMostPredicate,
     WeaponHasAnyPropertyPredicate,
     WeaponHasPropertyPredicate,
     WithinDistancePredicate,
+    WeaponEligibility,
     InstallOngoingEffect,
     OngoingEffect,
+    OngoingReplacementPolicy,
 )
 from dnd_board.rules.encounter import TurnBoundary, TurnOccurrence, TurnParticipantReference, TurnTiming, UsageScope
 from dnd_board.rules.shared.resources import ResourceCost, ResourceId
@@ -121,6 +143,7 @@ class FeatFeatureField(Enum):
 
 
 class FeatAbilityId(Enum):
+    CHARGER = "charger"
     HEALER = "healer"
     LUCKY_ADVANTAGE = "luckyAdvantage"
     LUCKY_DISADVANTAGE = "luckyDisadvantage"
@@ -439,13 +462,6 @@ class FeatResourceDefinition:
 
 
 @dataclass(frozen=True)
-class FeatAbilityScoreIncrease:
-    candidates: tuple[AbilityType, ...]
-    amount: int = 1
-    scoreCap: int = 20
-
-
-@dataclass(frozen=True)
 class GeneralFeatDefinition:
     featType: GeneralFeatType
     source: RuleSource
@@ -455,7 +471,7 @@ class GeneralFeatDefinition:
     repeatable: bool = False
     mechanics: FeatureMechanics = field(default_factory=FeatureMechanics)
     resources: tuple[FeatResourceDefinition, ...] = ()
-    abilityScoreIncrease: FeatAbilityScoreIncrease | None = None
+    abilityScoreAdjustmentChoice: AbilityScoreAdjustmentChoice | None = None
 
 
 def general_feat(
@@ -467,7 +483,7 @@ def general_feat(
     category: FeatCategory = FeatCategory.GENERAL,
     mechanics: FeatureMechanics | None = None,
     resources: tuple[FeatResourceDefinition, ...] = (),
-    ability_score_increase: FeatAbilityScoreIncrease | None = None,
+    ability_score_adjustment_choice: AbilityScoreAdjustmentChoice | None = None,
 ) -> GeneralFeatDefinition:
     return GeneralFeatDefinition(
         featType=feat_type,
@@ -478,7 +494,7 @@ def general_feat(
         repeatable=repeatable,
         mechanics=mechanics or FeatureMechanics(),
         resources=resources,
-        abilityScoreIncrease=ability_score_increase,
+        abilityScoreAdjustmentChoice=ability_score_adjustment_choice,
     )
 
 
@@ -666,6 +682,123 @@ def war_caster_mechanics() -> FeatureMechanics:
     )])
 
 
+def charger_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(activatedEffects=[ActivatedEffect(
+        label="Charge Attack",
+        effect=SelectWeaponEffect(
+            SelectionId.WEAPON,
+            WeaponEligibility(wielded=False, attackRanges=(AttackRangeType.MELEE,)),
+            AttackRollEffect(
+                AttackRoll(AttackRollType.WEAPON),
+                onHit=ApplyEffect(DamageEffect(DiceAmount(1, DiceType.D8), None)),
+                weaponSelection=SelectionId.WEAPON,
+            ),
+        ),
+    )])
+
+
+def great_weapon_master_mechanics() -> FeatureMechanics:
+    hew_attack = FeatureMechanics(activatedEffects=[ActivatedEffect(
+        label="Hew Attack",
+        effect=SelectWeaponEffect(
+            SelectionId.WEAPON,
+            WeaponEligibility(wielded=False, attackRanges=(AttackRangeType.MELEE,)),
+            AttackRollEffect(
+                AttackRoll(AttackRollType.WEAPON),
+                weaponSelection=SelectionId.WEAPON,
+            ),
+        ),
+    )])
+    hew_grant = InstallOngoingEffect(OngoingEffect(
+        duration=EffectDuration(
+            EffectDurationType.UNTIL_END_OF_TURN,
+            timing=TurnTiming(
+                TurnParticipantReference.OWNER,
+                TurnBoundary.END,
+                TurnOccurrence.THIS,
+            ),
+        ),
+        label="Hew",
+        endingConditions=[EndingCondition(EndingConditionType.OWNER_ACTIVATES_ACTION)],
+        grantedActions=(GrantedAction(
+            GrantedActionId.HEW,
+            "Hew Attack",
+            TimeEconomy.BONUS_ACTION,
+            "After a qualifying melee Critical Hit or reducing a creature to 0 HP, attack once with the same weapon.",
+            hew_attack,
+        ),),
+        replacement=OngoingReplacementPolicy.SAME_SOURCE,
+    ))
+    return FeatureMechanics(interactions=[Interaction(
+        trigger=ResolutionEventType.DAMAGE_PENDING,
+        timing=InteractionTiming.BEFORE_EVENT,
+        decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+        predicates=[
+            SourceIsOwnerPredicate(),
+            SourceIsAttackPredicate(),
+            SourceUsesTimeEconomyPredicate(TimeEconomy.ACTION),
+            WeaponHasPropertyPredicate(WeaponProperty.HEAVY),
+        ],
+        operations=[ModifyPendingDamage(
+            PendingDamageModificationType.INCREASE,
+            amount=CalculatedAmount(AmountCalculation.SOURCE_PROFICIENCY_BONUS),
+        )],
+        activation=TimeEconomy.SPECIAL,
+        activationTiming=ActivationTiming.OWN_TURN,
+    ), Interaction(
+        trigger=ResolutionEventType.DAMAGE_APPLIED,
+        timing=InteractionTiming.AFTER_EVENT,
+        decision=InteractionDecision(InteractionDecisionType.AUTOMATIC),
+        predicates=[
+            SourceIsOwnerPredicate(),
+            SourceIsAttackPredicate(),
+            SourceAttackRangePredicate(AttackRangeType.MELEE),
+            AnyPredicate((
+                SourceAttackCriticalPredicate(),
+                TargetHitPointsAtMostPredicate(0),
+            )),
+        ],
+        operations=[ApplyEffectOperation(
+            hew_grant,
+            InteractionEffectRecipient.OWNER,
+            bindSourceAttackTo=SelectionId.WEAPON,
+        )],
+        activation=TimeEconomy.SPECIAL,
+        activationTiming=ActivationTiming.OWN_TURN,
+    )])
+
+
+def heavy_armor_master_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(passiveModifiers=[Modifier(
+        CalculationType.DAMAGE_TAKEN,
+        ModifierOperation.SUBTRACT,
+        predicates=[
+            SourceIsAttackPredicate(),
+            PendingDamageTypePredicate([
+                DamageType.BLUDGEONING,
+                DamageType.PIERCING,
+                DamageType.SLASHING,
+            ]),
+            OwnerWearsHeavyArmorPredicate(),
+        ],
+        amount=CalculatedAmount(AmountCalculation.SOURCE_PROFICIENCY_BONUS),
+        description="Reduce physical attack damage by Proficiency Bonus while wearing Heavy armor.",
+    )])
+
+
+def medium_armor_master_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(passiveModifiers=[Modifier(
+        CalculationType.ARMOR_CLASS,
+        ModifierOperation.ADD,
+        predicates=[
+            OwnerWearsArmorCategoryPredicate(ArmorCategory.MEDIUM),
+            OwnerAbilityScoreAtLeastPredicate(AbilityType.DEXTERITY, 16),
+        ],
+        amount=FixedAmount(1),
+        description="Increase the Medium armor Dexterity contribution cap from 2 to 3.",
+    )])
+
+
 GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.ACTOR: general_feat(GeneralFeatType.ACTOR, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Charisma; improve deception, performance, and mimicry."),
     GeneralFeatType.ALERT: general_feat(
@@ -682,7 +815,20 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.ARTIFICER_INITIATE: general_feat(GeneralFeatType.ARTIFICER_INITIATE, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn artificer magic and one artisan tool proficiency."),
     GeneralFeatType.ATHLETE: general_feat(GeneralFeatType.ATHLETE, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; improve climbing, standing, and jumping."),
     GeneralFeatType.BOUNTIFUL_LUCK: general_feat(GeneralFeatType.BOUNTIFUL_LUCK, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Let a nearby ally reroll a 1 on a d20.", (species_prerequisite(SpeciesType.HALFLING),)),
-    GeneralFeatType.CHARGER: general_feat(GeneralFeatType.CHARGER, RuleSource.PLAYERS_HANDBOOK_2024, "Dash into a melee attack with an added bonus after moving far enough."),
+    GeneralFeatType.CHARGER: general_feat(
+        GeneralFeatType.CHARGER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity. Dash 10 feet farther; after moving 10 feet straight toward a target, add 1d8 damage to one melee Attack-action hit on your turn or push the target 10 feet.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+        mechanics=charger_mechanics(),
+        resources=(FeatResourceDefinition(
+            ResourceId.CHARGER,
+            FixedAmount(1),
+            TimeEconomy.ACTION,
+            "Use Charge Attack after moving at least 10 feet straight toward the target.",
+        ),),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+    ),
     GeneralFeatType.CHEF: general_feat(GeneralFeatType.CHEF, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Constitution or Wisdom; gain cook's utensils and prepare restorative food."),
     GeneralFeatType.CROSSBOW_EXPERT: general_feat(GeneralFeatType.CROSSBOW_EXPERT, RuleSource.PLAYERS_HANDBOOK_2024, "Improve crossbow handling and close-range ranged attacks."),
     GeneralFeatType.CRAFTER: general_feat(GeneralFeatType.CRAFTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Artisan's Tools and craft mundane items faster."),
@@ -693,7 +839,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         "+1 Dexterity. While holding a Finesse weapon, use a Reaction when a melee attack hits you to add your Proficiency Bonus to AC against that attack and other melee attacks until your next turn.",
         (level_prerequisite(4), ability_prerequisite(13, AbilityType.DEXTERITY)),
         mechanics=defensive_duelist_mechanics(),
-        ability_score_increase=FeatAbilityScoreIncrease((AbilityType.DEXTERITY,)),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.DEXTERITY,)),
     ),
     GeneralFeatType.DRAGON_FEAR: general_feat(GeneralFeatType.DRAGON_FEAR, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength, Constitution, or Charisma; turn Breath Weapon into fear.", (species_prerequisite(SpeciesType.DRAGONBORN),)),
     GeneralFeatType.DRAGON_HIDE: general_feat(GeneralFeatType.DRAGON_HIDE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength, Constitution, or Charisma; gain natural armor and claws.", (species_prerequisite(SpeciesType.DRAGONBORN),)),
@@ -716,12 +862,26 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.GIFT_OF_THE_GEM_DRAGON: general_feat(GeneralFeatType.GIFT_OF_THE_GEM_DRAGON, RuleSource.FIZBANS_TREASURY_OF_DRAGONS, "+1 Intelligence, Wisdom, or Charisma; telekinetic retaliation."),
     GeneralFeatType.GIFT_OF_THE_METALLIC_DRAGON: general_feat(GeneralFeatType.GIFT_OF_THE_METALLIC_DRAGON, RuleSource.FIZBANS_TREASURY_OF_DRAGONS, "Learn cure wounds and protect with a reactive AC bonus."),
     GeneralFeatType.GRAPPLER: general_feat(GeneralFeatType.GRAPPLER, RuleSource.SYSTEM_REFERENCE_DOCUMENT, "Improve attacks and restraint options against grappled creatures.", (ability_prerequisite(13, AbilityType.STRENGTH),)),
-    GeneralFeatType.GREAT_WEAPON_MASTER: general_feat(GeneralFeatType.GREAT_WEAPON_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain heavy-weapon damage tradeoffs and bonus attacks after key hits."),
+    GeneralFeatType.GREAT_WEAPON_MASTER: general_feat(
+        GeneralFeatType.GREAT_WEAPON_MASTER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength. On your turn, add your Proficiency Bonus to Heavy-weapon Attack-action hit damage. After a melee Critical Hit or reducing a creature to 0 HP, attack with the same weapon as a Bonus Action.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.STRENGTH)),
+        mechanics=great_weapon_master_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH,)),
+    ),
     GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT: general_feat(GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; reduce damage and teleport.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.CLOUD_STRIKE))),
     GeneralFeatType.GUNNER: general_feat(GeneralFeatType.GUNNER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Dexterity; firearm proficiency and improved firearm attacks."),
     GeneralFeatType.HEALER: general_feat(GeneralFeatType.HEALER, RuleSource.PLAYERS_HANDBOOK_2024, "Use a healer's kit to stabilize or restore hit points."),
     GeneralFeatType.HEAVILY_ARMORED: general_feat(GeneralFeatType.HEAVILY_ARMORED, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength; gain heavy armor proficiency.", (armor_prerequisite(ArmorCategory.MEDIUM),)),
-    GeneralFeatType.HEAVY_ARMOR_MASTER: general_feat(GeneralFeatType.HEAVY_ARMOR_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength; reduce mundane weapon damage while wearing heavy armor.", (armor_prerequisite(ArmorCategory.HEAVY),)),
+    GeneralFeatType.HEAVY_ARMOR_MASTER: general_feat(
+        GeneralFeatType.HEAVY_ARMOR_MASTER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Constitution or Strength. While wearing Heavy armor, reduce Bludgeoning, Piercing, and Slashing damage from attacks by your Proficiency Bonus.",
+        (level_prerequisite(4), armor_prerequisite(ArmorCategory.HEAVY)),
+        mechanics=heavy_armor_master_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.CONSTITUTION, AbilityType.STRENGTH)),
+    ),
     GeneralFeatType.INFERNAL_CONSTITUTION: general_feat(GeneralFeatType.INFERNAL_CONSTITUTION, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Constitution; gain cold and poison resilience.", (species_prerequisite(SpeciesType.TIEFLING),)),
     GeneralFeatType.INSPIRING_LEADER: general_feat(GeneralFeatType.INSPIRING_LEADER, RuleSource.PLAYERS_HANDBOOK_2024, "Give temporary hit points to a small group after a speech.", (ability_prerequisite(13, AbilityType.CHARISMA),)),
     GeneralFeatType.KEEN_MIND: general_feat(GeneralFeatType.KEEN_MIND, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence; improve recall and orientation."),
@@ -754,7 +914,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     ),
     GeneralFeatType.MAGIC_INITIATE: general_feat(GeneralFeatType.MAGIC_INITIATE, RuleSource.PLAYERS_HANDBOOK_2024, "Learn two cantrips and one 1st-level spell from a class list."),
     GeneralFeatType.MARTIAL_ADEPT: general_feat(GeneralFeatType.MARTIAL_ADEPT, RuleSource.PLAYERS_HANDBOOK_2024, "Learn Battle Master maneuvers and gain a superiority die."),
-    GeneralFeatType.MEDIUM_ARMOR_MASTER: general_feat(GeneralFeatType.MEDIUM_ARMOR_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve medium armor stealth and Dexterity AC cap.", (armor_prerequisite(ArmorCategory.MEDIUM),)),
+    GeneralFeatType.MEDIUM_ARMOR_MASTER: general_feat(
+        GeneralFeatType.MEDIUM_ARMOR_MASTER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity. While wearing Medium armor with Dexterity 16+, add up to +3 Dexterity to AC instead of +2.",
+        (level_prerequisite(4), armor_prerequisite(ArmorCategory.MEDIUM)),
+        mechanics=medium_armor_master_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+    ),
     GeneralFeatType.METAMAGIC_ADEPT: general_feat(GeneralFeatType.METAMAGIC_ADEPT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn metamagic and gain sorcery points.", (spellcasting_prerequisite(),)),
     GeneralFeatType.MOBILE: general_feat(GeneralFeatType.MOBILE, RuleSource.PLAYERS_HANDBOOK_2024, "Increase speed and improve difficult-terrain dashes and skirmishing."),
     GeneralFeatType.MODERATELY_ARMORED: general_feat(GeneralFeatType.MODERATELY_ARMORED, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain medium armor and shield proficiency.", (armor_prerequisite(ArmorCategory.LIGHT),)),
@@ -812,7 +979,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         "+1 Intelligence, Wisdom, or Charisma; gain Advantage on Concentration saves, perform Somatic components with occupied hands, and cast certain spells as opportunity attacks.",
         (level_prerequisite(4), spellcasting_prerequisite()),
         mechanics=war_caster_mechanics(),
-        ability_score_increase=FeatAbilityScoreIncrease((
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((
             AbilityType.INTELLIGENCE,
             AbilityType.WISDOM,
             AbilityType.CHARISMA,
@@ -1459,7 +1626,10 @@ def feat_resource_maximum(
     raise ValueError(f"Unsupported feat resource capacity: {resource.maximumUses.calculation.name}")
 
 
-def feat_abilities(classes: list[CharacterClassLevel], feats=None) -> list[SheetAbility]:
+def feat_abilities(
+    classes: list[CharacterClassLevel],
+    feats=None,
+) -> list[SheetAbility]:
     abilities: list[SheetAbility] = []
     selected_feats = selected_general_feat_types(feats)
     feat_ability_specs = [
@@ -1483,6 +1653,16 @@ def feat_abilities(classes: list[CharacterClassLevel], feats=None) -> list[Sheet
             activation=activation,
             description=description,
             resourceId=resource_id,
+        ))
+    if GeneralFeatType.CHARGER in selected_feats:
+        abilities.append(SheetAbility(
+            id=FeatAbilityId.CHARGER.value,
+            name="Charge Attack",
+            source=enum_label(GeneralFeatType.CHARGER),
+            activation=TimeEconomy.ACTION,
+            description="After moving at least 10 feet straight toward the target, make a melee attack with 1d8 extra damage.",
+            resourceId=ResourceId.CHARGER,
+            mechanics=GENERAL_FEATS[GeneralFeatType.CHARGER].mechanics,
         ))
     for style in selected_fighting_styles(classes):
         definition = FIGHTING_STYLE_FEATS.get(style)

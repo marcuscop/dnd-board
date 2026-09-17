@@ -6,7 +6,9 @@ from time import time_ns
 from typing import Protocol, TypeAlias
 
 from dnd_board.character_sheet import (
+    ActivationTiming,
     AbilityType,
+    ArmorCategory,
     AttackDamageAbilityModifierMode,
     AttackKind,
     AttackRangeType,
@@ -47,6 +49,51 @@ class EffectResultValue(Enum):
     DAMAGE_APPLIED = auto()
     HEALING_ROLLED = auto()
     HEALING_APPLIED = auto()
+
+
+class AbilityScoreAdjustmentOperation(Enum):
+    ADD = auto()
+    SET = auto()
+
+
+@dataclass(frozen=True)
+class AbilityScoreAdjustmentChoice:
+    candidates: tuple[AbilityType, ...]
+    points: int = 1
+    minimum: int = 1
+    maximum: int = 20
+
+    def __post_init__(self) -> None:
+        if not self.candidates or len(set(self.candidates)) != len(self.candidates):
+            raise ValueError("Ability score adjustment choices require unique candidates")
+        if self.points <= 0:
+            raise ValueError("Ability score adjustment choice points must be positive")
+        if self.minimum < 1 or self.maximum > 30 or self.minimum > self.maximum:
+            raise ValueError("Ability score adjustment choice bounds must be within 1 to 30")
+
+
+@dataclass(frozen=True)
+class AbilityScoreAdjustment:
+    ability: AbilityType
+    amount: int
+    operation: AbilityScoreAdjustmentOperation = AbilityScoreAdjustmentOperation.ADD
+    minimum: int = 1
+    maximum: int = 30
+
+    def __post_init__(self) -> None:
+        if self.amount < 0:
+            raise ValueError("Ability score adjustment amount cannot be negative")
+        if self.minimum < 1 or self.maximum > 30 or self.minimum > self.maximum:
+            raise ValueError("Ability score adjustment bounds must be within 1 to 30")
+
+
+def adjusted_ability_score(current: int, adjustment: AbilityScoreAdjustment) -> int:
+    value = (
+        current + adjustment.amount
+        if adjustment.operation == AbilityScoreAdjustmentOperation.ADD
+        else adjustment.amount
+    )
+    return max(adjustment.minimum, min(adjustment.maximum, value))
 
 
 class AmountCalculation(Enum):
@@ -431,6 +478,22 @@ class PendingDamageIsWeaponDicePredicate:
 
 
 @dataclass(frozen=True)
+class PendingDamageTypePredicate:
+    damageTypes: list[DamageType]
+
+
+@dataclass(frozen=True)
+class OwnerAbilityScoreAtLeastPredicate:
+    ability: AbilityType
+    minimum: int
+
+
+@dataclass(frozen=True)
+class OwnerWearsArmorCategoryPredicate:
+    category: ArmorCategory
+
+
+@dataclass(frozen=True)
 class SourceAttackRangePredicate:
     attackRange: AttackRangeType
 
@@ -491,6 +554,25 @@ class SourceUsesTimeEconomyPredicate:
 
 
 @dataclass(frozen=True)
+class SourceAttackCriticalPredicate:
+    pass
+
+
+@dataclass(frozen=True)
+class TargetHitPointsAtMostPredicate:
+    maximum: int
+
+
+@dataclass(frozen=True)
+class AnyPredicate:
+    predicates: tuple[Predicate, ...]
+
+    def __post_init__(self) -> None:
+        if not self.predicates:
+            raise ValueError("Any predicate requires at least one alternative")
+
+
+@dataclass(frozen=True)
 class RandomChancePredicate:
     numerator: int
     denominator: int
@@ -519,6 +601,9 @@ Predicate: TypeAlias = (
     | WeaponHasAnyPropertyPredicate
     | OwnerWieldsWeaponWithPropertyPredicate
     | PendingDamageIsWeaponDicePredicate
+    | PendingDamageTypePredicate
+    | OwnerAbilityScoreAtLeastPredicate
+    | OwnerWearsArmorCategoryPredicate
     | SourceAttackRangePredicate
     | SourceWeaponCategoryPredicate
     | SourceAttackKindPredicate
@@ -531,6 +616,9 @@ Predicate: TypeAlias = (
     | AttackerIsVisiblePredicate
     | OwnerWearsArmorPredicate
     | SourceUsesTimeEconomyPredicate
+    | SourceAttackCriticalPredicate
+    | TargetHitPointsAtMostPredicate
+    | AnyPredicate
     | RandomChancePredicate
 )
 
@@ -538,6 +626,7 @@ Predicate: TypeAlias = (
 class CalculationType(Enum):
     ATTACK_ROLL = auto()
     DAMAGE_ROLL = auto()
+    DAMAGE_TAKEN = auto()
     SAVING_THROW = auto()
     ABILITY_CHECK = auto()
     ARMOR_CLASS = auto()
@@ -617,6 +706,7 @@ class EndingConditionType(Enum):
     TARGET_SUCCEEDS_SAVE = auto()
     TARGET_TAKES_DAMAGE = auto()
     REST_COMPLETED = auto()
+    OWNER_ACTIVATES_ACTION = auto()
     MANUAL = auto()
 
 
@@ -679,6 +769,7 @@ class RollModificationType(Enum):
 
 
 class PendingDamageModificationType(Enum):
+    INCREASE = auto()
     MULTIPLY = auto()
     REDUCE = auto()
     PREVENT = auto()
@@ -755,6 +846,7 @@ class InteractionEffectRecipient(Enum):
 class ApplyEffectOperation:
     effect: EffectNode
     recipient: InteractionEffectRecipient = InteractionEffectRecipient.EVENT_TARGET
+    bindSourceAttackTo: SelectionId | None = None
 
 
 @dataclass(frozen=True)
@@ -786,6 +878,7 @@ class Interaction:
     operations: list[ResolutionOperation] = field(default_factory=list)
     resourceCosts: tuple[ResourceCost, ...] = ()
     activation: TimeEconomy | None = None
+    activationTiming: ActivationTiming = ActivationTiming.UNRESTRICTED
     usageScope: UsageScope | None = None
     usageResource: ResourceId | None = None
 
@@ -836,6 +929,8 @@ class WeaponEligibility:
     equipmentIds: tuple[EquipmentId, ...] = ()
     properties: tuple[WeaponProperty, ...] = ()
     attackKinds: tuple[AttackKind, ...] = (AttackKind.STANDARD,)
+    attackRanges: tuple[AttackRangeType, ...] = ()
+    equipmentInstanceIds: tuple[EquipmentInstanceId, ...] = ()
 
 
 class WeaponAbilityReference(Enum):
@@ -994,6 +1089,8 @@ class OngoingEffect:
     endingConditions: list[EndingCondition] = field(default_factory=list)
     weaponAttackModifications: tuple[WeaponAttackModification, ...] = ()
     weaponAttackOptions: tuple[WeaponAttackOption, ...] = ()
+    abilityScoreAdjustments: tuple[AbilityScoreAdjustment, ...] = ()
+    grantedActions: tuple[GrantedAction, ...] = ()
     replacement: OngoingReplacementPolicy = OngoingReplacementPolicy.STACK
 
 
@@ -1274,6 +1371,19 @@ class FeatureMechanics:
     activatedEffects: list[EffectNode] = field(default_factory=list)
     passiveModifiers: list[Modifier] = field(default_factory=list)
     interactions: list[Interaction] = field(default_factory=list)
+
+
+class GrantedActionId(Enum):
+    HEW = "hew"
+
+
+@dataclass(frozen=True)
+class GrantedAction:
+    id: GrantedActionId
+    label: str
+    activation: TimeEconomy
+    description: str
+    mechanics: FeatureMechanics
 
 
 class EffectExecutionStatus(Enum):
@@ -2004,6 +2114,10 @@ def effect_without_conditions(effect: EffectNode | None, conditions: set[Conditi
 
 def effect_model_types() -> list[type[object]]:
     return [
+        AbilityScoreAdjustment,
+        AbilityScoreAdjustmentChoice,
+        AbilityScoreAdjustmentOperation,
+        AnyPredicate,
         ActionModificationType,
         ActiveOngoingEffect,
         ActiveScheduledEffect,
@@ -2058,6 +2172,8 @@ def effect_model_types() -> list[type[object]]:
         EndingConditionType,
         FeatureMechanics,
         FixedAmount,
+        GrantedAction,
+        GrantedActionId,
         HealingEffect,
         InstallOngoingEffect,
         InstanceScaling,
@@ -2085,7 +2201,9 @@ def effect_model_types() -> list[type[object]]:
         OngoingEffectId,
         OngoingReplacementPolicy,
         OwnerWearsArmorPredicate,
+        OwnerWearsArmorCategoryPredicate,
         OwnerWearsHeavyArmorPredicate,
+        OwnerAbilityScoreAtLeastPredicate,
         OwnerWieldsExactlyOneOneHandedWeaponPredicate,
         OwnerWieldsWeaponWithPropertyPredicate,
         OwnerWieldsShieldPredicate,
@@ -2093,6 +2211,7 @@ def effect_model_types() -> list[type[object]]:
         PendingEffectAddsConditionPredicate,
         PendingDamageModificationType,
         PendingDamageIsWeaponDicePredicate,
+        PendingDamageTypePredicate,
         PendingDamageRerollSelection,
         PendingResolution,
         PendingResolutionStatus,
@@ -2122,6 +2241,7 @@ def effect_model_types() -> list[type[object]]:
         SequenceEffect,
         SourceHasComponentPredicate,
         SourceHasConditionPredicate,
+        SourceAttackCriticalPredicate,
         SourceAttackKindPredicate,
         SourceAttackRangePredicate,
         SourceDamageAbilityModifierPredicate,
@@ -2132,6 +2252,7 @@ def effect_model_types() -> list[type[object]]:
         SourceIsSpellPredicate,
         SourceSpellPredicate,
         TargetHasConditionPredicate,
+        TargetHitPointsAtMostPredicate,
         TargetHasAnyCreatureTypePredicate,
         TargetHasCreatureTypePredicate,
         TargetIsOwnerPredicate,

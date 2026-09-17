@@ -41,6 +41,7 @@ from dnd_board.rules.shared.effects import (
     AppliedEffect,
     AppliedEffectResult,
     AmountScaling,
+    AnyPredicate,
     ApplyEffect,
     AttackRoll,
     AttackRollEffect,
@@ -88,7 +89,9 @@ from dnd_board.rules.shared.effects import (
     ModifierOperation,
     ModifierScope,
     OwnerWearsArmorPredicate,
+    OwnerWearsArmorCategoryPredicate,
     OwnerWearsHeavyArmorPredicate,
+    OwnerAbilityScoreAtLeastPredicate,
     OwnerWieldsExactlyOneOneHandedWeaponPredicate,
     OwnerWieldsWeaponWithPropertyPredicate,
     OwnerWieldsShieldPredicate,
@@ -114,10 +117,12 @@ from dnd_board.rules.shared.effects import (
     TargetHasAnyCreatureTypePredicate,
     TargetHasCreatureTypePredicate,
     TargetHasConditionPredicate,
+    TargetHitPointsAtMostPredicate,
     TargetIsOwnerPredicate,
     SourceHasComponentPredicate,
     SourceHasConditionPredicate,
     SourceAttackKindPredicate,
+    SourceAttackCriticalPredicate,
     SourceAttackRangePredicate,
     SourceDamageAbilityModifierPredicate,
     SourceIsAttackPredicate,
@@ -130,6 +135,7 @@ from dnd_board.rules.shared.effects import (
     RollOutcomePredicate,
     RandomChancePredicate,
     PendingDamageIsWeaponDicePredicate,
+    PendingDamageTypePredicate,
     WeaponHasPropertyPredicate,
     WeaponHasAnyPropertyPredicate,
     WithinDistancePredicate,
@@ -224,6 +230,7 @@ class CharacterEffectExecutionContext:
         attack_roll_outcomes: dict[EffectNodeId, RollOutcome] | None = None,
         distance_feet: int | None = None,
         attacker_visible: bool | None = None,
+        pending_damage_type: character_sheet.DamageType | None = None,
     ) -> None:
         self.roll = roll
         self._baseTarget = target
@@ -259,6 +266,7 @@ class CharacterEffectExecutionContext:
         } if roll.effectInputs else {}
         self.distanceFeet = distance_feet
         self.attackerVisible = attacker_visible
+        self.pendingDamageType = pending_damage_type
         self.lastSavingThrow: SavingThrow | None = None
         self.lastRollOutcome: RollOutcome | None = None
         self.scheduledEffects: list[ActiveScheduledEffect] = []
@@ -473,7 +481,24 @@ class CharacterEffectExecutionContext:
         if isinstance(effect, DamageEffect) and isinstance(effect.amount, FixedAmount):
             raw_damage = max(0, effect.amount.value)
             current_target = self.current_target()
-            reduction = active_damage_reduction_roll(effect.damageType, current_target)
+            reduction_entries = [
+                (label, modifier)
+                for label, modifier in applicable_character_modifiers(
+                    current_target,
+                    CalculationType.DAMAGE_TAKEN,
+                    ModifierScope.OWNER,
+                    self.roll,
+                    current_target,
+                    self.source,
+                    pending_damage_type=effect.damageType,
+                )
+                if modifier.operation == ModifierOperation.SUBTRACT
+                and modifier.amount is not None
+            ]
+            reduction = active_damage_reduction_roll(effect.damageType, current_target) + sum(
+                self.resolve_runtime_amount(node_id, modifier.amount, [])
+                for _label, modifier in reduction_entries
+            )
             adjusted_damage = damage_after_defenses(raw_damage, effect.damageType, current_target, reduction)
             adjusted_damage = max(0, adjusted_damage * effect.multiplierNumerator // effect.multiplierDenominator)
             remaining_damage = adjusted_damage
@@ -492,6 +517,7 @@ class CharacterEffectExecutionContext:
                     current_target,
                     reduction,
                     effect.multiplierDenominator > effect.multiplierNumerator,
+                    ", ".join(label for label, _modifier in reduction_entries) or None,
                 )
             )
             return AppliedEffectResult(effect=effect, amount=adjusted_damage, effectNodeId=node_id)
@@ -666,7 +692,10 @@ class CharacterEffectExecutionContext:
 
     def evaluate_predicates(self, node_id: EffectNodeId, predicates: list[Predicate]) -> bool:
         for predicate in predicates:
-            if isinstance(predicate, TargetIsOwnerPredicate):
+            if isinstance(predicate, AnyPredicate):
+                if not any(self.evaluate_predicates(node_id, [candidate]) for candidate in predicate.predicates):
+                    return False
+            elif isinstance(predicate, TargetIsOwnerPredicate):
                 if (self.target.id == self.owner.id) != predicate.expected:
                     return False
             elif isinstance(predicate, SourceIsOwnerPredicate):
@@ -723,6 +752,20 @@ class CharacterEffectExecutionContext:
             elif isinstance(predicate, WeaponHasAnyPropertyPredicate):
                 source_attack = self.source_attack()
                 if source_attack is None or not set(predicate.properties).intersection(source_attack.properties or []):
+                    return False
+            elif isinstance(predicate, PendingDamageTypePredicate):
+                if self.pendingDamageType not in predicate.damageTypes:
+                    return False
+            elif isinstance(predicate, OwnerAbilityScoreAtLeastPredicate):
+                if ability_score(self.owner, predicate.ability) < predicate.minimum:
+                    return False
+            elif isinstance(predicate, OwnerWearsArmorCategoryPredicate):
+                if not any(
+                    item.itemType == character_sheet.EquipmentType.ARMOR
+                    and item.slot == character_sheet.EquipmentSlot.ARMOR
+                    and item.armorCategory == predicate.category
+                    for item in self.owner.equipment
+                ):
                     return False
             elif isinstance(predicate, SourceAttackRangePredicate):
                 source_attack = self.source_attack()
@@ -809,6 +852,12 @@ class CharacterEffectExecutionContext:
                     return False
             elif isinstance(predicate, SourceUsesTimeEconomyPredicate):
                 if self.source_time_economy() != predicate.timeEconomy:
+                    return False
+            elif isinstance(predicate, SourceAttackCriticalPredicate):
+                if self.roll.criticalHit is not True:
+                    return False
+            elif isinstance(predicate, TargetHitPointsAtMostPredicate):
+                if self.hitPoints.current > predicate.maximum:
                     return False
             elif isinstance(predicate, RandomChancePredicate):
                 if random.randint(1, predicate.denominator) > predicate.numerator:
@@ -1025,9 +1074,17 @@ def applicable_character_modifiers(
     roll: RollPayload,
     target: CharacterSheet,
     source: CharacterSheet | None,
+    *,
+    pending_damage_type: character_sheet.DamageType | None = None,
 ) -> list[tuple[str, Modifier]]:
     """Return definition-owned modifiers whose participant predicates match this roll."""
-    context = CharacterEffectExecutionContext(roll, target, source, owner=owner)
+    context = CharacterEffectExecutionContext(
+        roll,
+        target,
+        source,
+        owner=owner,
+        pending_damage_type=pending_damage_type,
+    )
     entries = [
         (entry.name, modifier)
         for entry in (*owner.features, *owner.abilities, *owner.resources)
@@ -1662,9 +1719,112 @@ def resolved_damage_effect_node(effect: EffectNode, rolled_damage: int) -> Effec
     return resolved_amount_effect_node(effect, rolled_damage)
 
 
+def increased_damage_effect_node(effect: EffectNode, increase: int) -> EffectNode:
+    increased, _applied = _increased_damage_effect_node(effect, max(0, increase))
+    return increased
+
+
+def _increased_damage_effect_node(effect: EffectNode, increase: int) -> tuple[EffectNode, bool]:
+    if isinstance(effect, ActivatedEffect):
+        child, applied = _increased_damage_effect_node(effect.effect, increase)
+        return replace(effect, effect=child), applied
+    if isinstance(effect, ApplyEffect) and isinstance(effect.effect, DamageEffect) and isinstance(effect.effect.amount, FixedAmount):
+        return ApplyEffect(replace(
+            effect.effect,
+            amount=FixedAmount(effect.effect.amount.value + increase),
+        )), True
+    if isinstance(effect, SequenceEffect):
+        children: list[EffectNode] = []
+        applied = False
+        for child in effect.effects:
+            updated, child_applied = (
+                _increased_damage_effect_node(child, increase)
+                if not applied
+                else (child, False)
+            )
+            children.append(updated)
+            applied = applied or child_applied
+        return replace(effect, effects=children), applied
+    if isinstance(effect, AttackRollEffect) and effect.onHit is not None:
+        child, applied = _increased_damage_effect_node(effect.onHit, increase)
+        return replace(effect, onHit=child), applied
+    if isinstance(effect, SavingThrowEffect) and effect.onFailure is not None:
+        child, applied = _increased_damage_effect_node(effect.onFailure, increase)
+        return replace(effect, onFailure=child), applied
+    if isinstance(effect, ConditionalEffect):
+        child, applied = _increased_damage_effect_node(effect.whenTrue, increase)
+        return replace(effect, whenTrue=child), applied
+    if isinstance(effect, RepeatedEffect):
+        child, applied = _increased_damage_effect_node(effect.effect, increase)
+        return replace(effect, effect=child), applied
+    if isinstance(effect, SelectWeaponEffect):
+        child, applied = _increased_damage_effect_node(effect.effect, increase)
+        return replace(effect, effect=child), applied
+    return effect, False
+
+
 def reduced_damage_effect_node(effect: EffectNode, reduction: int) -> EffectNode:
     reduced, _remaining = _reduced_damage_effect_node(effect, max(0, reduction))
     return reduced
+
+
+def resolved_inherited_damage_types(
+    effect: EffectNode,
+    damage_type: character_sheet.DamageType,
+) -> EffectNode:
+    if isinstance(effect, ActivatedEffect):
+        return replace(effect, effect=resolved_inherited_damage_types(effect.effect, damage_type))
+    if isinstance(effect, ApplyEffect) and isinstance(effect.effect, DamageEffect):
+        return ApplyEffect(replace(
+            effect.effect,
+            damageType=effect.effect.damageType or damage_type,
+        ))
+    if isinstance(effect, SequenceEffect):
+        return replace(effect, effects=[
+            resolved_inherited_damage_types(child, damage_type)
+            for child in effect.effects
+        ])
+    if isinstance(effect, SavingThrowEffect):
+        return replace(
+            effect,
+            onFailure=resolved_optional_inherited_damage_types(effect.onFailure, damage_type),
+            onSuccess=resolved_optional_inherited_damage_types(effect.onSuccess, damage_type),
+        )
+    if isinstance(effect, AttackRollEffect):
+        return replace(
+            effect,
+            onHit=resolved_optional_inherited_damage_types(effect.onHit, damage_type),
+            onMiss=resolved_optional_inherited_damage_types(effect.onMiss, damage_type),
+        )
+    if isinstance(effect, ContestedCheckEffect):
+        return replace(
+            effect,
+            onSourceWin=resolved_optional_inherited_damage_types(effect.onSourceWin, damage_type),
+            onTargetWin=resolved_optional_inherited_damage_types(effect.onTargetWin, damage_type),
+        )
+    if isinstance(effect, ConditionalEffect):
+        return replace(
+            effect,
+            whenTrue=resolved_inherited_damage_types(effect.whenTrue, damage_type),
+            whenFalse=resolved_optional_inherited_damage_types(effect.whenFalse, damage_type),
+        )
+    if isinstance(effect, RepeatedEffect):
+        return replace(effect, effect=resolved_inherited_damage_types(effect.effect, damage_type))
+    if isinstance(effect, ChoiceEffect):
+        return replace(effect, choices=[
+            replace(choice, effect=resolved_inherited_damage_types(choice.effect, damage_type))
+            for choice in effect.choices
+        ])
+    if isinstance(effect, SelectWeaponEffect):
+        return replace(effect, effect=resolved_inherited_damage_types(effect.effect, damage_type))
+    return effect
+
+
+def resolved_optional_inherited_damage_types(
+    effect: EffectNode | None,
+    damage_type: character_sheet.DamageType,
+) -> EffectNode | None:
+    return resolved_inherited_damage_types(effect, damage_type) if effect is not None else None
 
 
 def _reduced_damage_effect_node(effect: EffectNode, remaining: int) -> tuple[EffectNode, int]:
@@ -2097,7 +2257,7 @@ def roll_effect_amount(
     amount: FixedAmount | DiceAmount | CalculatedAmount | CombinedAmount,
     scaling: list[AmountScaling],
     sheet: CharacterSheet,
-    spell: SpellEntry,
+    spell: SpellEntry | None,
     spell_slot_level: int | None,
 ) -> tuple[list[int], character_sheet.DiceType, list[RollModifierBreakdown], int]:
     amounts = amount.amounts if isinstance(amount, CombinedAmount) else [amount]
@@ -2105,7 +2265,7 @@ def roll_effect_amount(
     dice_type = character_sheet.DiceType.D4
     modifier_breakdown: list[RollModifierBreakdown] = []
     scaling_increments = [
-        (scale, effect_scaling_increments(scale, sheet, spell.level, spell_slot_level))
+        (scale, effect_scaling_increments(scale, sheet, spell.level if spell is not None else 0, spell_slot_level))
         for scale in scaling
     ]
     for part in amounts:
@@ -2120,6 +2280,8 @@ def roll_effect_amount(
             modifier_breakdown.append(RollModifierBreakdown(source="Spell", value=part.value))
         elif isinstance(part, CalculatedAmount):
             if part.calculation == AmountCalculation.SOURCE_SPELLCASTING_MODIFIER:
+                if spell is None:
+                    raise ValueError("A spellcasting modifier requires a source spell")
                 ability = spell_casting_ability(sheet, spell)
                 value = ability_modifier(getattr(sheet.abilityScores, enum_key(ability)))
                 source = enum_label(ability)

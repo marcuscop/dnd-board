@@ -30,7 +30,7 @@ from dnd_board.rules.encounter import (
 )
 from dnd_board.rules.shared.character_effects import character_allocation_value
 from dnd_board.rules.shared.effects import CalculationType, ResolutionEventType, ongoing_effects_after_turn_boundary
-from dnd_board.rules.shared.resources import ResourceId
+from dnd_board.rules.shared.resources import ResourceId, ResourceRecoveryTrigger, ResourceUpdate
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ class EncounterOperations:
     save: Callable[[Room], None]
     broadcast_room: Callable[[Room], Awaitable[None]]
     resolve_turn_boundary: Callable[[Room, CharacterSheet, ResolutionEventType], Awaitable[dict[str, Any]]]
+    recover_resources: Callable[[Room, CharacterSheet, ResourceRecoveryTrigger], list[ResourceUpdate]]
 
 
 class EncounterServiceError(Exception):
@@ -301,6 +302,7 @@ async def resume_turn_transition(
         operations.save(room)
         participant = sheets_by_id.get(encounter.currentParticipantId)
         if participant is not None:
+            operations.recover_resources(room, participant, ResourceRecoveryTrigger.TURN_ENDED)
             result = await operations.resolve_turn_boundary(room, participant, ResolutionEventType.TURN_ENDED)
             if "prompt" in result:
                 return room.encounter
@@ -319,6 +321,7 @@ async def resume_turn_transition(
         operations.save(room)
         participant = sheets_by_id.get(encounter.currentParticipantId)
         if participant is not None:
+            operations.recover_resources(room, participant, ResourceRecoveryTrigger.TURN_STARTED)
             result = await operations.resolve_turn_boundary(room, participant, ResolutionEventType.TURN_STARTED)
             if "prompt" in result:
                 return room.encounter

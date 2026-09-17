@@ -5,12 +5,12 @@ from dataclasses import dataclass, field, fields, is_dataclass, replace
 from enum import Enum, auto
 from time import time_ns
 from types import SimpleNamespace, UnionType
-from typing import TYPE_CHECKING, Any, Union, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, Any, Iterable, Union, get_args, get_origin, get_type_hints
 
 from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId, ResourceKey, ResourceKind, ResourceRecovery, ResourceState, ResourceUpdate
 
 if TYPE_CHECKING:
-    from dnd_board.rules.shared.effects import ActiveOngoingEffect, ActiveScheduledEffect, AppliedEffectResult, CalculationType, DiceAmount, EffectNode, EffectNodeId, EffectResolutionInputs, FeatureMechanics, Interaction, ModifierOperation, WeaponAttackOption
+    from dnd_board.rules.shared.effects import AbilityScoreAdjustment, ActiveOngoingEffect, ActiveScheduledEffect, AppliedEffectResult, CalculationType, DiceAmount, EffectNode, EffectNodeId, EffectResolutionInputs, FeatureMechanics, Interaction, ModifierOperation, WeaponAttackOption
     from dnd_board.rules.shared.character_effects import ResolvedCharacterEffect
     from dnd_board.rules.equipment import EquipmentId
     from dnd_board.rules.progression import ProgressionGrantRecord
@@ -1761,9 +1761,8 @@ def build_character_sheet(
     configured_spellbook = hydrated_spell_entries(sheet_config.spellbook if sheet_config and sheet_config.spellbook else [])
     configured_feats = sheet_config.feats if sheet_config and sheet_config.feats else []
     resources = apply_resource_overrides(sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes, ability_scores, configured_feats, proficiency_bonus), resource_overrides)
-    feat_abilities = default_feat_abilities(classes, configured_feats)
     subclass_abilities = default_subclass_abilities(classes)
-    abilities = [*resource_roll_abilities(resources), *feat_abilities, *subclass_abilities]
+    abilities = [*resource_roll_abilities(resources), *subclass_abilities]
     features = default_features(classes)
     feat_eligibility_sheet = SimpleNamespace(
         race=sheet_config.race if sheet_config and sheet_config.race else "",
@@ -1792,9 +1791,11 @@ def build_character_sheet(
     purse = sheet_config.purse if sheet_config and sheet_config.purse else Purse()
     armor_class = base_armor_class(sheet_config, equipment, dexterity_modifier)
     armor_class += default_armor_class_bonus(classes, equipment)
+    armor_class += default_feat_armor_class_bonus(configured_feats, equipment, ability_scores)
     attacks = sheet_config.attacks if sheet_config and sheet_config.attacks else default_attacks(kind)
     attacks = default_feat_attacks(classes, equipment, attacks)
     attacks = [attack_action_with_default_mechanics(attack) for attack in attacks]
+    abilities.extend(default_feat_abilities(classes, configured_feats))
     speed = (sheet_config.speed if sheet_config and sheet_config.speed is not None else 30) + default_feat_speed_bonus(configured_feats)
 
     sheet = CharacterSheet(
@@ -2445,7 +2446,7 @@ def condition_saving_throw_advantage_conditions(
 
 
 def condition_saving_throw_disadvantage_conditions(sheet: CharacterSheet, ability: AbilityType) -> list[ConditionType]:
-    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation, ModifierScope
     return modifier_conditions(sheet.conditions, CalculationType.SAVING_THROW, ModifierOperation.DISADVANTAGE, ability=ability, explicit_suppressions=sheet.suppressedConditions)
 
 
@@ -2542,7 +2543,7 @@ def cover_saving_throw_bonus_breakdown(conditions: list[ConditionType], ability:
 def condition_adjusted_armor_class(sheet: CharacterSheet) -> int:
     from dnd_board.rules.shared.character_effects import active_ongoing_modifiers
     from dnd_board.rules.shared.condition_effects import condition_modifiers
-    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation, OwnerWearsArmorPredicate
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation
 
     entries = [
         (enum_label(condition), modifier)
@@ -2553,11 +2554,7 @@ def condition_adjusted_armor_class(sheet: CharacterSheet) -> int:
     ]
     armor_class = sheet.armorClass
     for _condition, entry in entries:
-        if any(
-            isinstance(predicate, OwnerWearsArmorPredicate)
-            and bool(worn_armor(sheet.equipment)) != predicate.expected
-            for predicate in entry.predicates
-        ):
+        if not static_owner_modifier_applies(sheet, entry.predicates):
             continue
         amount = condition_modifier_amount(sheet, entry.amount)
         if entry.operation == ModifierOperation.MINIMUM:
@@ -2565,12 +2562,42 @@ def condition_adjusted_armor_class(sheet: CharacterSheet) -> int:
         elif entry.operation == ModifierOperation.SET:
             armor_class = amount
     for _condition, entry in entries:
+        if not static_owner_modifier_applies(sheet, entry.predicates):
+            continue
         amount = condition_modifier_amount(sheet, entry.amount)
         if entry.operation == ModifierOperation.ADD:
             armor_class += amount
         elif entry.operation == ModifierOperation.SUBTRACT:
             armor_class -= amount
     return armor_class
+
+
+def static_owner_modifier_applies(sheet: CharacterSheet, predicates: list[object]) -> bool:
+    from dnd_board.rules.shared.effects import (
+        OwnerAbilityScoreAtLeastPredicate,
+        OwnerWearsArmorCategoryPredicate,
+        OwnerWearsArmorPredicate,
+        OwnerWearsHeavyArmorPredicate,
+    )
+
+    armor = worn_armor(sheet.equipment)
+    for predicate in predicates:
+        if isinstance(predicate, OwnerWearsArmorPredicate):
+            if bool(armor) != predicate.expected:
+                return False
+        elif isinstance(predicate, OwnerWearsHeavyArmorPredicate):
+            wears_heavy = armor is not None and armor.armorCategory == ArmorCategory.HEAVY
+            if wears_heavy != predicate.expected:
+                return False
+        elif isinstance(predicate, OwnerWearsArmorCategoryPredicate):
+            if armor is None or armor.armorCategory != predicate.category:
+                return False
+        elif isinstance(predicate, OwnerAbilityScoreAtLeastPredicate):
+            if getattr(sheet.abilityScores, enum_key(predicate.ability)) < predicate.minimum:
+                return False
+        else:
+            return False
+    return True
 
 
 def condition_modifier_amount(sheet: CharacterSheet, amount: object) -> int:
@@ -3142,7 +3169,7 @@ def active_damage_reduction_types(target: CharacterSheet) -> set[DamageType]:
     return {DAMAGE_RESISTANCE_CONDITIONS[condition] for condition in target.conditions if condition in DAMAGE_RESISTANCE_CONDITIONS}
 
 
-def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0, save_halved: bool = False) -> str:
+def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0, save_halved: bool = False, damage_reduction_label: str | None = None) -> str:
     if (adjusted_damage == raw_damage and not save_halved) or damage_type is None:
         return f"deals {adjusted_damage} damage"
     damage_label = enum_label(damage_type)
@@ -3152,7 +3179,9 @@ def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageTyp
     if save_halved:
         adjustments.append("successful save")
     if damage_reduction:
-        adjustments.append(f"Resistance {damage_label} reduces damage by {damage_reduction}")
+        adjustments.append(
+            f"{damage_reduction_label or f'Resistance {damage_label}'} reduces damage by {damage_reduction}"
+        )
     if damage_type in effective_damage_resistances(target):
         adjustments.append(f"{damage_label} resistance")
     if damage_type in target.damageVulnerabilities:
@@ -3251,6 +3280,74 @@ def armor_item_class(item: EquipmentItem, dexterity_modifier: int) -> int:
 
 def ability_modifier_map(ability_scores: AbilityScores) -> dict[str, int]:
     return {enum_key(ability): ability_modifier(getattr(ability_scores, enum_key(ability))) for ability in ABILITY_NAMES}
+
+
+def ability_scores_after_adjustments(
+    base_scores: AbilityScores,
+    adjustments: Iterable[AbilityScoreAdjustment],
+) -> AbilityScores:
+    from dnd_board.rules.shared.effects import adjusted_ability_score
+
+    scores = replace(base_scores)
+    for adjustment in adjustments:
+        ability_key = enum_key(adjustment.ability)
+        setattr(scores, ability_key, adjusted_ability_score(getattr(scores, ability_key), adjustment))
+    return scores
+
+
+def apply_ongoing_ability_score_adjustments(
+    sheet: CharacterSheet,
+    *,
+    adjust_armor_class: bool = True,
+) -> CharacterSheet:
+    adjustments = [
+        adjustment
+        for active in sheet.ongoingEffects
+        for adjustment in active.effect.abilityScoreAdjustments
+    ]
+    if not adjustments:
+        return sheet
+
+    original_modifiers = sheet.abilityModifiers
+    adjusted_scores = ability_scores_after_adjustments(sheet.abilityScores, adjustments)
+    adjusted_modifiers = ability_modifier_map(adjusted_scores)
+
+    dexterity_key = enum_key(AbilityType.DEXTERITY)
+    dexterity_delta = adjusted_modifiers[dexterity_key] - original_modifiers[dexterity_key]
+    if adjust_armor_class and dexterity_delta:
+        sheet.armorClass += (
+            base_armor_class(None, sheet.equipment, adjusted_modifiers[dexterity_key])
+            - base_armor_class(None, sheet.equipment, original_modifiers[dexterity_key])
+        )
+    sheet.initiativeBonus += dexterity_delta
+    sheet.abilityScores = adjusted_scores
+    sheet.abilityModifiers = adjusted_modifiers
+    sheet.savingThrows = build_saving_throws(
+        adjusted_modifiers,
+        {saving_throw.ability for saving_throw in sheet.savingThrows if saving_throw.proficient},
+        sheet.proficiencyBonus,
+    )
+    skill_proficiencies = {skill.name: skill.proficiency for skill in sheet.skills}
+    sheet.skills = build_skills(adjusted_modifiers, skill_proficiencies, sheet.proficiencyBonus)
+    sheet.passiveChecks = build_passive_checks(adjusted_modifiers, skill_proficiencies, sheet.proficiencyBonus)
+    return sheet
+
+
+def ongoing_effect_abilities(sheet: CharacterSheet) -> list[SheetAbility]:
+    from dnd_board.rules.shared.weapon_effects import mechanics_bound_to_selections
+
+    return [
+        SheetAbility(
+            id=enum_key(action.id),
+            name=action.label,
+            source=active.sourceLabel,
+            activation=action.activation,
+            description=action.description,
+            mechanics=mechanics_bound_to_selections(action.mechanics, active.bindings),
+        )
+        for active in sheet.ongoingEffects
+        for action in active.effect.grantedActions
+    ]
 
 
 def build_saving_throws(ability_modifiers: dict[str, int], proficient_abilities: set[AbilityType], proficiency_bonus: int) -> list[SavingThrowBonus]:
@@ -3420,7 +3517,10 @@ def default_features(classes: list[CharacterClassLevel]) -> list[SheetFeature]:
     return [*fighter_features(classes), *rogue_features(classes), *wizard_features(classes)]
 
 
-def default_feat_abilities(classes: list[CharacterClassLevel], feats: list[SheetFeature] | None = None) -> list[SheetAbility]:
+def default_feat_abilities(
+    classes: list[CharacterClassLevel],
+    feats: list[SheetFeature] | None = None,
+) -> list[SheetAbility]:
     from dnd_board.rules.feats import feat_abilities
 
     return feat_abilities(classes, feats)
@@ -3436,6 +3536,24 @@ def default_feat_initiative_bonus(feats: list[SheetFeature], proficiency_bonus: 
     from dnd_board.rules.feats import feat_initiative_bonus
 
     return feat_initiative_bonus(feats, proficiency_bonus)
+
+
+def default_feat_armor_class_bonus(
+    feats: list[SheetFeature],
+    equipment: list[EquipmentItem],
+    ability_scores: AbilityScores,
+) -> int:
+    from dnd_board.rules.feats import selected_general_feat_modifiers
+    from dnd_board.rules.shared.effects import CalculationType, ModifierOperation, ModifierScope
+
+    sheet = SimpleNamespace(equipment=equipment, abilityScores=ability_scores)
+    return sum(
+        condition_modifier_amount(sheet, modifier.amount)
+        for _definition, modifier in selected_general_feat_modifiers(feats, CalculationType.ARMOR_CLASS)
+        if modifier.scope == ModifierScope.OWNER
+        and modifier.operation == ModifierOperation.ADD
+        and static_owner_modifier_applies(sheet, modifier.predicates)
+    )
 
 
 def default_subclass_abilities(classes: list[CharacterClassLevel]) -> list[SheetAbility]:

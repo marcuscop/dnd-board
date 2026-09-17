@@ -38,6 +38,7 @@ class ResourceId(Enum):
     LUCK_POINTS = "Luck Points"
     MAGE_SLAYER = "Mage Slayer"
     SAVAGE_ATTACKER = "Savage Attacker"
+    CHARGER = "Charger"
     BOON_OF_COMBAT_PROWESS = "Boon of Combat Prowess"
     BOON_OF_DIMENSIONAL_TRAVEL = "Boon of Dimensional Travel"
     BOON_OF_FATE = "Boon of Fate"
@@ -204,6 +205,11 @@ RESOURCE_DEFINITIONS: Mapping[ResourceId, ResourceDefinition] = {
     ResourceId.SAVAGE_ATTACKER: ResourceDefinition(
         ResourceKey(ResourceId.SAVAGE_ATTACKER, ResourceKind.FEATURE_USE),
         ResourceId.SAVAGE_ATTACKER.value,
+    ),
+    ResourceId.CHARGER: ResourceDefinition(
+        ResourceKey(ResourceId.CHARGER, ResourceKind.FEATURE_USE),
+        ResourceId.CHARGER.value,
+        (full_recovery(ResourceRecoveryTrigger.TURN_STARTED),),
     ),
     ResourceId.ARROWS: ResourceDefinition(ResourceKey(ResourceId.ARROWS, ResourceKind.AMMUNITION), ResourceId.ARROWS.value),
     ResourceId.BOLTS: ResourceDefinition(ResourceKey(ResourceId.BOLTS, ResourceKind.AMMUNITION), ResourceId.BOLTS.value),

@@ -34,6 +34,7 @@ from dnd_board.character_sheet import (
     RollResolutionMode,
     SheetFeature,
     SheetSectionType,
+    SkillType,
     SpellConeArea,
     SpellCubeArea,
     SpellCylinderArea,
@@ -60,6 +61,7 @@ from dnd_board.character_sheet import (
     build_spell_healing_roll_payload,
     build_spell_temporary_hit_points_roll_payload,
     attack_roll_with_critical_damage,
+    apply_ongoing_ability_score_adjustments,
     resolve_roll_against_target,
     RollSource,
     ability_modifier,
@@ -104,6 +106,8 @@ from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.equipment import EquipmentId
 from dnd_board.rules.shared.character_effects import added_condition_types, condition_change_effects, first_damage_effect
 from dnd_board.rules.shared.effects import (
+    AbilityScoreAdjustment,
+    ActiveOngoingEffect,
     ApplyEffect,
     ConditionChangeEffect,
     ConditionOperation,
@@ -111,10 +115,15 @@ from dnd_board.rules.shared.effects import (
     DifficultyClass,
     DifficultyClassType,
     EndingConditionType,
+    EffectDuration,
+    EffectDurationType,
+    EffectNodeId,
     FeatureMechanics,
     SavingThrow,
     SavingThrowEffect,
     SequenceEffect,
+    OngoingEffect,
+    OngoingEffectId,
     WeaponAttackOptionId,
 )
 from dnd_board.rules.shared.resources import ResourceCost, ResourceId
@@ -1669,6 +1678,33 @@ def basic_sheet():
         current_hp=None,
         resource_overrides={},
     )
+
+
+def test_ongoing_ability_score_adjustments_rebuild_derived_sheet_values() -> None:
+    sheet = basic_sheet()
+    sheet.ongoingEffects = [
+        ActiveOngoingEffect(
+            id=OngoingEffectId(1, EffectNodeId((0,))),
+            sourceSheetId=sheet.id,
+            targetSheetId=sheet.id,
+            sourceLabel="Agility",
+            effect=OngoingEffect(
+                EffectDuration(EffectDurationType.MANUAL),
+                abilityScoreAdjustments=(
+                    AbilityScoreAdjustment(AbilityType.DEXTERITY, 4, maximum=20),
+                ),
+            ),
+        )
+    ]
+
+    apply_ongoing_ability_score_adjustments(sheet)
+
+    assert sheet.abilityScores.dexterity == 16
+    assert sheet.abilityModifiers[enum_key(AbilityType.DEXTERITY)] == 3
+    assert sheet.initiativeBonus == 3
+    assert sheet.armorClass == 15
+    assert next(save for save in sheet.savingThrows if save.ability == AbilityType.DEXTERITY).modifier == 3
+    assert next(skill for skill in sheet.skills if skill.name == enum_key(SkillType.STEALTH)).modifier == 3
 
 
 def spell_sheet(level, spells):

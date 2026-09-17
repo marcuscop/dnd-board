@@ -1040,6 +1040,19 @@ function SheetAbilityList({
                 />
               )}
               {ability.description && <p>{ability.description}</p>}
+              {ability.controls.some((control) => control.kind === "boundWeaponAttack") && (
+                <div className="ability-roll-actions">
+                  {ability.controls.map((control) => control.kind === "boundWeaponAttack" && control.attackId ? (
+                    <button
+                      disabled={!canRoll || Boolean(resource && resource.currentUses === 0)}
+                      key={`${control.effectIndex ?? 0}:${control.attackId}`}
+                      onClick={() => onRollResourceAction(sheet, ability.id, control.attackId!)}
+                    >
+                      {control.label}
+                    </button>
+                  ) : null)}
+                </div>
+              )}
               {(ability.rollActions ?? []).length > 0 ? (
                 <RollActionList
                   canRoll={canRoll && (!resource || resource.currentUses > 0)}
@@ -1165,9 +1178,9 @@ function FullSheet({
   const metadata = [sheet.race, sheet.background, sheet.alignment].filter(Boolean).join(" · ");
   const [selectedWeaponOptions, setSelectedWeaponOptions] = useState<Record<string, string>>({});
   const encounterParticipant = encounter?.participantStates.find((participant) => participant.participantId === sheet.id);
-  const actionRemaining = encounterParticipant?.resources.find((resource) => resource.resource === "action")?.current ?? 0;
-  const bonusActionRemaining = encounterParticipant?.resources.find((resource) => resource.resource === "bonusAction")?.current ?? 0;
-  const reactionRemaining = encounterParticipant?.resources.find((resource) => resource.resource === "reaction")?.current ?? 0;
+  const actionBudget = encounterParticipant?.resources.find((resource) => resource.resource === "action");
+  const bonusActionBudget = encounterParticipant?.resources.find((resource) => resource.resource === "bonusAction");
+  const reactionBudget = encounterParticipant?.resources.find((resource) => resource.resource === "reaction");
 
   return (
     <section className="full-sheet">
@@ -1198,8 +1211,8 @@ function FullSheet({
       {encounter && (
         <div className="encounter-turn-notice">
           {encounter.currentParticipantId === sheet.id
-            ? `Current turn · Action ${actionRemaining}/1 · Bonus Action ${bonusActionRemaining}/1 · Reaction ${reactionRemaining}/1`
-            : `Waiting for ${currentParticipantName ?? "current participant"} · Reactions ${reactionRemaining}/1`}
+            ? `Current turn · Action ${actionBudget?.current ?? 0}/${actionBudget?.maximum ?? 0} · Bonus Action ${bonusActionBudget?.current ?? 0}/${bonusActionBudget?.maximum ?? 0} · Reaction ${reactionBudget?.current ?? 0}/${reactionBudget?.maximum ?? 0}`
+            : `Waiting for ${currentParticipantName ?? "current participant"} · Reactions ${reactionBudget?.current ?? 0}/${reactionBudget?.maximum ?? 0}`}
         </div>
       )}
 

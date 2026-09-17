@@ -1412,13 +1412,30 @@
                                   "$type": "int",
                                   "value": 4
                                 },
-                                "ability": {
-                                  "$type": "AbilityType",
-                                  "value": "WISDOM"
-                                },
-                                "amount": {
-                                  "$type": "int",
-                                  "value": 1
+                                "adjustment": {
+                                  "$type": "AbilityScoreAdjustment",
+                                  "fields": {
+                                    "ability": {
+                                      "$type": "AbilityType",
+                                      "value": "WISDOM"
+                                    },
+                                    "amount": {
+                                      "$type": "int",
+                                      "value": 1
+                                    },
+                                    "operation": {
+                                      "$type": "AbilityScoreAdjustmentOperation",
+                                      "value": "ADD"
+                                    },
+                                    "minimum": {
+                                      "$type": "int",
+                                      "value": 1
+                                    },
+                                    "maximum": {
+                                      "$type": "int",
+                                      "value": 20
+                                    }
+                                  }
                                 }
                               }
                             },
@@ -1433,13 +1450,30 @@
                                   "$type": "int",
                                   "value": 4
                                 },
-                                "ability": {
-                                  "$type": "AbilityType",
-                                  "value": "INTELLIGENCE"
-                                },
-                                "amount": {
-                                  "$type": "int",
-                                  "value": 1
+                                "adjustment": {
+                                  "$type": "AbilityScoreAdjustment",
+                                  "fields": {
+                                    "ability": {
+                                      "$type": "AbilityType",
+                                      "value": "INTELLIGENCE"
+                                    },
+                                    "amount": {
+                                      "$type": "int",
+                                      "value": 1
+                                    },
+                                    "operation": {
+                                      "$type": "AbilityScoreAdjustmentOperation",
+                                      "value": "ADD"
+                                    },
+                                    "minimum": {
+                                      "$type": "int",
+                                      "value": 1
+                                    },
+                                    "maximum": {
+                                      "$type": "int",
+                                      "value": 20
+                                    }
+                                  }
                                 }
                               }
                             }

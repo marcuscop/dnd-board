@@ -44,6 +44,7 @@ from dnd_board.rules.progression import (
     class_hit_die,
 )
 from dnd_board.rules.shared.effects import (
+    AbilityScoreAdjustment,
     ActiveOngoingEffect,
     ActiveScheduledEffect,
     AmountCalculation,
@@ -163,7 +164,7 @@ def ability_score_grants(
     }[class_type]
     return [ProgressionGrantRecord(
         source=ProgressionGrantSource(choice_id, class_type),
-        grants=(AbilityScoreGrant(class_type, class_level, ability, amount),),
+        grants=(AbilityScoreGrant(class_type, class_level, AbilityScoreAdjustment(ability, amount, maximum=20)),),
     )]
 
 
@@ -2264,6 +2265,313 @@ def test_war_caster_grants_advantage_on_concentration_saves(tmp_path, monkeypatc
     assert concentration["die"] == "2d20kh1"
     assert concentration["dice"] == [4, 16]
     assert concentration["modifierBreakdown"][-1]["source"] == "War Caster"
+
+
+@pytest.mark.parametrize(
+    ("feat_type", "properties", "bonus", "expected_label"),
+    (
+        (GeneralFeatType.CHARGER, [], 6, "Charger"),
+        (GeneralFeatType.GREAT_WEAPON_MASTER, [WeaponProperty.HEAVY], 3, "Great Weapon Master"),
+    ),
+)
+def test_martial_feat_interactions_add_damage_on_the_owner_turn(
+    tmp_path,
+    monkeypatch,
+    feat_type,
+    properties,
+    bonus,
+    expected_label,
+) -> None:
+    feat = general_feat_feature(enum_key(feat_type))
+    assert feat is not None
+    weapon = AttackAction(
+        id="heavy-blade",
+        name="Heavy Blade",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+        properties=properties,
+    )
+    write_party_campaign(
+        tmp_path,
+        f"{enum_key(feat_type)}-damage-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                attacks=[weapon],
+                feats=[feat],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    damage_rolls = iter([4, bonus])
+
+    def fixed_roll(_minimum: int, maximum: int) -> int:
+        return 15 if maximum == 20 else next(damage_rolls)
+
+    monkeypatch.setattr(random, "randint", fixed_roll)
+    client = TestClient(server.app)
+    room_id = f"{enum_key(feat_type)}-damage-test"
+    encounter = client.post(
+        f"/api/rooms/{room_id}/encounter?playerKey=dm",
+        json=[
+            {"participantId": "player-1", "initiative": 20},
+            {"participantId": "player-2", "initiative": 10},
+        ],
+    ).json()["encounter"]
+    if feat_type == GeneralFeatType.CHARGER:
+        projected_sheet = client.get(
+            f"/api/rooms/{room_id}/sheet/player-1?playerKey=player-1"
+        ).json()["sheet"]
+        charger_ability = next(
+            ability for ability in projected_sheet["abilities"]
+            if ability["id"] == "charger"
+        )
+        assert len(charger_ability["controls"]) == 1
+        charger_control = charger_ability["controls"][0]
+        assert charger_control["kind"] == "boundWeaponAttack"
+        assert charger_control["label"] == "Charge Attack Heavy Blade"
+        assert charger_control["attackId"] == "heavy-blade"
+        attack_response = client.post(
+            f"/api/rooms/{room_id}/sheet/player-1/abilities/charger/rolls/heavy-blade"
+            f"?playerKey=player-1&turnId={encounter['turnId']}"
+        ).json()
+        attack = attack_response["roll"]
+        resolve_response = client.post(
+            f"/api/rooms/{room_id}/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+        ).json()
+        assert "prompt" not in resolve_response
+        resolution = resolve_response["resolution"]
+        sheet = client.get(
+            f"/api/rooms/{room_id}/sheet/player-1?playerKey=player-1"
+        ).json()["sheet"]
+        charger_resource = next(resource for resource in sheet["resources"] if resource["resource"] == "charger")
+        assert charger_resource["currentUses"] == 0
+        next_encounter = client.post(
+            f"/api/rooms/{room_id}/encounter/advance?playerKey=dm&turnId={encounter['turnId']}"
+        ).json()["encounter"]
+        refreshed_encounter = client.post(
+            f"/api/rooms/{room_id}/encounter/advance?playerKey=dm&turnId={next_encounter['turnId']}"
+        ).json()["encounter"]
+        assert refreshed_encounter["currentParticipantId"] == "player-1"
+        refreshed_sheet = client.get(
+            f"/api/rooms/{room_id}/sheet/player-1?playerKey=player-1"
+        ).json()["sheet"]
+        refreshed_charger = next(
+            resource for resource in refreshed_sheet["resources"]
+            if resource["resource"] == "charger"
+        )
+        assert refreshed_charger["currentUses"] == 1
+    else:
+        attack = client.post(
+            f"/api/rooms/{room_id}/sheet/player-1/rolls/attack?playerKey=player-1&attackId=heavy-blade&turnId={encounter['turnId']}"
+        ).json()["roll"]
+        prompt = client.post(
+            f"/api/rooms/{room_id}/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+        ).json()["prompt"]
+        resolution = client.post(
+            f"/api/rooms/{room_id}/resolution-prompts/{prompt['id']}/respond?playerKey=player-1&use=true"
+        ).json()["resolution"]
+        assert prompt["label"] == expected_label
+
+    assert resolution["targetHp"]["current"] == 30 - (7 + bonus)
+    if feat_type == GeneralFeatType.GREAT_WEAPON_MASTER:
+        assert "increases the incoming damage" in resolution["outcome"]
+
+
+@pytest.mark.parametrize(
+    ("next_action", "target_hp", "attack_roll"),
+    (("hew", 4, 15), ("secondWind", 4, 15), ("hew", 30, 20)),
+)
+def test_great_weapon_master_hew_grants_bound_bonus_attack_until_next_action(
+    tmp_path,
+    monkeypatch,
+    next_action,
+    target_hp,
+    attack_roll,
+) -> None:
+    great_weapon_master = general_feat_feature(enum_key(GeneralFeatType.GREAT_WEAPON_MASTER))
+    assert great_weapon_master is not None
+    heavy_blade = AttackAction(
+        id="heavy-blade",
+        name="Heavy Blade",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+        properties=[WeaponProperty.HEAVY],
+    )
+    write_party_campaign(
+        tmp_path,
+        f"hew-{next_action}-{attack_roll}-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                attacks=[heavy_blade],
+                feats=[great_weapon_master],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=target_hp,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: attack_roll if maximum == 20 else 4)
+    client = TestClient(server.app)
+    room_id = f"hew-{next_action}-{attack_roll}-test"
+    encounter = client.post(
+        f"/api/rooms/{room_id}/encounter?playerKey=dm",
+        json=[
+            {"participantId": "player-1", "initiative": 20},
+            {"participantId": "player-2", "initiative": 10},
+        ],
+    ).json()["encounter"]
+    attack = client.post(
+        f"/api/rooms/{room_id}/sheet/player-1/rolls/attack"
+        f"?playerKey=player-1&attackId=heavy-blade&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/{room_id}/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    client.post(
+        f"/api/rooms/{room_id}/resolution-prompts/{prompt['id']}/respond?playerKey=player-1&use=false"
+    )
+
+    sheet = client.get(
+        f"/api/rooms/{room_id}/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+    hew = next(ability for ability in sheet["abilities"] if ability["id"] == "hew")
+    assert hew["activation"] == "bonusAction"
+    assert len(hew["controls"]) == 1
+    assert hew["controls"][0]["attackId"] == "heavy-blade"
+
+    if next_action == "hew":
+        response = client.post(
+            f"/api/rooms/{room_id}/sheet/player-1/abilities/hew/rolls/heavy-blade"
+            f"?playerKey=player-1&turnId={encounter['turnId']}"
+        )
+    else:
+        response = client.post(
+            f"/api/rooms/{room_id}/sheet/player-1/resources/secondWind/rolls/secondWindHeal"
+            f"?playerKey=player-1&turnId={encounter['turnId']}"
+        )
+    assert response.status_code == 200
+    after = client.get(
+        f"/api/rooms/{room_id}/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+    assert all(ability["id"] != "hew" for ability in after["abilities"])
+
+
+def test_heavy_armor_master_reduces_physical_attack_damage(tmp_path, monkeypatch) -> None:
+    heavy_armor_master = general_feat_feature(enum_key(GeneralFeatType.HEAVY_ARMOR_MASTER))
+    assert heavy_armor_master is not None
+    weapon = AttackAction(
+        id="longsword",
+        name="Longsword",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+    )
+    plate = EquipmentItem(
+        id="plate",
+        name="Plate",
+        itemType=EquipmentType.ARMOR,
+        slot=EquipmentSlot.ARMOR,
+        armorCategory=ArmorCategory.HEAVY,
+        armorClass=18,
+    )
+    write_party_campaign(
+        tmp_path,
+        "heavy-armor-master-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)], attacks=[weapon]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Armored Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                equipment=[plate],
+                feats=[heavy_armor_master],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: 15 if maximum == 20 else 4)
+    client = TestClient(server.app)
+
+    attack = client.post(
+        "/api/rooms/heavy-armor-master-test/sheet/player-1/rolls/attack?playerKey=dm&attackId=longsword"
+    ).json()["roll"]
+    resolution = client.post(
+        f"/api/rooms/heavy-armor-master-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["resolution"]
+
+    assert resolution["targetHp"]["current"] == 26
+    assert "Heavy Armor Master reduces damage by 3" in resolution["outcome"]
+
+
+def test_medium_armor_master_raises_medium_armor_dexterity_cap(tmp_path, monkeypatch) -> None:
+    medium_armor_master = general_feat_feature(enum_key(GeneralFeatType.MEDIUM_ARMOR_MASTER))
+    assert medium_armor_master is not None
+    half_plate = EquipmentItem(
+        id="half-plate",
+        name="Half Plate",
+        itemType=EquipmentType.ARMOR,
+        slot=EquipmentSlot.ARMOR,
+        armorCategory=ArmorCategory.MEDIUM,
+        armorClass=15,
+    )
+    write_party_campaign(
+        tmp_path,
+        "medium-armor-master-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Armored Character",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=14, dexterity=16, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                equipment=[half_plate],
+                feats=[medium_armor_master],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    sheet = client.get(
+        "/api/rooms/medium-armor-master-test/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+
+    assert sheet["armorClass"] == 18
 
 
 def test_lucky_attacker_can_gain_advantage(tmp_path, monkeypatch) -> None:
@@ -7127,7 +7435,11 @@ def test_member_progression_helper_error_and_pruning_paths(monkeypatch) -> None:
     assert member.baseAbilityScores == AbilityScores(19, 10, 13, 10, 10, 10)
     assert member.sheet.progressionGrants is not None
     assert any(
-        grant == AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityType.STRENGTH, 1)
+        grant == AbilityScoreGrant(
+            ClassType.FIGHTER,
+            4,
+            AbilityScoreAdjustment(AbilityType.STRENGTH, 1, maximum=20),
+        )
         for record in member.sheet.progressionGrants
         for grant in record.grants
     )

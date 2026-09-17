@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from dnd_board.application.sheet_projection import SpellControlKind, spell_control_projection
+from dnd_board.application.sheet_projection import ActionControlKind, spell_control_projection
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -31,7 +31,7 @@ def test_magic_missile_projection_exposes_upcast_instance_counts() -> None:
     assert controls.requiresSpellSlot is False
     assert [option.slotLevel for option in controls.castOptions] == [1, 2]
     assert [option.actions[0].instanceCount for option in controls.castOptions] == [3, 4]
-    assert controls.castOptions[0].actions[0].kind == SpellControlKind.DAMAGE
+    assert controls.castOptions[0].actions[0].kind == ActionControlKind.DAMAGE
     assert controls.castOptions[0].actions[0].label == "Dart"
 
 
@@ -44,7 +44,7 @@ def test_automatic_spell_slot_cost_is_part_of_projection() -> None:
 
     assert controls.requiresSpellSlot is True
     assert [option.slotLevel for option in controls.castOptions] == [1]
-    assert controls.castOptions[0].actions[0].kind == SpellControlKind.DAMAGE
+    assert controls.castOptions[0].actions[0].kind == ActionControlKind.DAMAGE
 
 
 def test_true_strike_projection_uses_weapon_name_for_wielded_weapon_controls() -> None:
@@ -74,7 +74,7 @@ def test_true_strike_projection_uses_weapon_name_for_wielded_weapon_controls() -
     controls = spell_control_projection(sheet, sheet.spells[0])
 
     assert [control.label for control in controls.actions] == ["Cast Longsword"]
-    assert controls.actions[0].kind == SpellControlKind.BOUND_WEAPON_ATTACK
+    assert controls.actions[0].kind == ActionControlKind.BOUND_WEAPON_ATTACK
     assert [choice.label for choice in controls.actions[0].choices] == ["Normal", "Radiant"]
 
 

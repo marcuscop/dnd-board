@@ -56,8 +56,11 @@ from dnd_board.character_sheet import (
     sanitize_identifier,
 )
 from dnd_board.rules.shared.weapon_effects import (
+    build_bound_weapon_attack_payload,
     build_bound_weapon_spell_attack_payload,
     build_bound_weapon_spell_effect_payload,
+    eligible_weapon_attacks,
+    weapon_selection_effect,
 )
 from dnd_board.rules.shared.character_effects import (
     activated_effect_node,
@@ -393,6 +396,29 @@ async def create_attack_action(
     turn_id: str | None = None,
 ) -> dict[str, Any]:
     attack = find_attack(sheet, attack_id)
+    return await _create_attack_action_for(
+        room,
+        player,
+        sheet,
+        attack,
+        operations,
+        damage_only=damage_only,
+        weapon_option=weapon_option,
+        turn_id=turn_id,
+    )
+
+
+async def _create_attack_action_for(
+    room: Room,
+    player: Player,
+    sheet: CharacterSheet,
+    attack,
+    operations: ActionOperations,
+    *,
+    damage_only: bool = False,
+    weapon_option: str | None = None,
+    turn_id: str | None = None,
+) -> dict[str, Any]:
     if weapon_option is not None and not any(
         enum_key(option.id) == weapon_option
         for option in attack.weaponAttackOptions or []
@@ -434,6 +460,81 @@ async def create_attack_action(
             participant_sheets=operations.all_sheets(room),
         ),
         activation_key=attack_activation_key,
+    )
+    return await store_outgoing_roll(room, sheet, payload, operations)
+
+
+async def create_bound_weapon_ability_action(
+    room: Room,
+    player: Player,
+    sheet: CharacterSheet,
+    entry,
+    attack_id: str,
+    operations: ActionOperations,
+    turn_id: str | None,
+) -> dict[str, Any]:
+    mechanics = entry.mechanics
+    if mechanics is None:
+        raise ActionServiceError(404, "Ability attack not found")
+    selection = next(
+        (
+            (effect_index, found[1])
+            for effect_index, root in enumerate(mechanics.activatedEffects)
+            if (found := weapon_selection_effect(root)) is not None
+            if any(attack.id == attack_id for attack in eligible_weapon_attacks(sheet, found[1].eligibility))
+        ),
+        None,
+    )
+    if selection is None:
+        raise ActionServiceError(404, "Ability attack not found")
+    effect_index, _selection = selection
+    await assert_activation_allowed(
+        room,
+        sheet,
+        player,
+        entry.activation,
+        entry.name,
+        "Attack Roll",
+        operations,
+        ActionCategory.ATTACK,
+        turn_id,
+        activation_key=ActivationKey(ActivationKind.ATTACK_ACTION, "attack"),
+    )
+    try:
+        payload = build_bound_weapon_attack_payload(
+            sheet,
+            player.player_key,
+            mechanics,
+            effect_index,
+            attack_id,
+            None,
+            source=RollSource(SheetSectionType.ABILITIES, entry.id, f"weapon-attack-{effect_index}"),
+            source_label=entry.name,
+            label=entry.name,
+        )
+    except ValueError as error:
+        raise ActionServiceError(400, str(error)) from error
+    attack = next(candidate for candidate in sheet.attacks if candidate.id == attack_id)
+    resource_costs = (
+        *((ResourceCost(entry.resourceId),) if entry.resourceId is not None else ()),
+        *attack.resourceCosts,
+    )
+    await consume_action_resources(
+        room,
+        sheet,
+        player,
+        resource_costs,
+        payload,
+        operations,
+        activation=entry.activation,
+        category=ActionCategory.ATTACK,
+        turn_id=turn_id,
+        activation_instances=character_allocation_value(
+            sheet,
+            CalculationType.ATTACKS_PER_ACTION,
+            participant_sheets=operations.all_sheets(room),
+        ),
+        activation_key=ActivationKey(ActivationKind.ATTACK_ACTION, "attack"),
     )
     return await store_outgoing_roll(room, sheet, payload, operations)
 
@@ -739,7 +840,17 @@ async def create_sheet_entry_action(
         None,
     )
     if action is None:
-        raise ActionServiceError(404, "Roll action not found")
+        if resource_entry:
+            raise ActionServiceError(404, "Roll action not found")
+        return await create_bound_weapon_ability_action(
+            room,
+            player,
+            sheet,
+            entry,
+            action_id,
+            operations,
+            turn_id,
+        )
     source_label = entry.name if resource_entry else entry.source
     await assert_activation_allowed(
         room,
@@ -839,8 +950,8 @@ async def store_outgoing_roll(
     operations: ActionOperations,
 ) -> dict[str, Any]:
     response = await store_roll(room, payload, operations)
-    clear_conditions_after_outgoing_roll(room, sheet, payload, operations)
-    if payload.resourcesSpent:
+    state_changed = clear_conditions_after_outgoing_roll(room, sheet, payload, operations)
+    if payload.resourcesSpent or state_changed:
         operations.save(room)
         await operations.broadcast_room(room)
     return response
@@ -1222,6 +1333,11 @@ def clear_conditions_after_outgoing_roll(
             EndingConditionType.OWNER_DEALS_DAMAGE,
             target_sheet_id=sheet.id,
         )
+    remaining_effects = ongoing_effects_after_ending(
+        remaining_effects,
+        EndingConditionType.OWNER_ACTIVATES_ACTION,
+        target_sheet_id=sheet.id,
+    )
     if not ended and remaining_effects == active_effects:
         return False
     next_conditions = [condition for condition in sheet.conditions if condition not in ended]

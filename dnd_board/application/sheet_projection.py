@@ -27,6 +27,7 @@ from dnd_board.rules.shared.effects import (
     ContestedCheckEffect,
     DamageEffect,
     EffectNode,
+    FeatureMechanics,
     HealingEffect,
     RepeatedEffect,
     SavingThrowEffect,
@@ -39,7 +40,7 @@ from dnd_board.rules.shared.weapon_effects import eligible_weapon_attacks, weapo
 from dnd_board.rules.shared.resources import ResourceId
 
 
-class SpellControlKind(Enum):
+class ActionControlKind(Enum):
     ATTACK = "attack"
     DAMAGE = "damage"
     HEALING = "healing"
@@ -56,8 +57,8 @@ class SpellControlChoice:
 
 
 @dataclass(frozen=True)
-class SpellActionControl:
-    kind: SpellControlKind
+class EffectActionControl:
+    kind: ActionControlKind
     label: str
     effectIndex: int | None = None
     instanceCount: int = 1
@@ -69,18 +70,25 @@ class SpellActionControl:
 @dataclass(frozen=True)
 class SpellCastOption:
     slotLevel: int
-    actions: tuple[SpellActionControl, ...]
+    actions: tuple[EffectActionControl, ...]
 
 
 @dataclass(frozen=True)
 class SpellControlProjection:
     requiresSpellSlot: bool
-    actions: tuple[SpellActionControl, ...]
+    actions: tuple[EffectActionControl, ...]
     castOptions: tuple[SpellCastOption, ...] = ()
 
 
 def project_sheet(sheet: CharacterSheet) -> dict[str, object]:
     projected = serialize_dataclass(sheet)
+    projected["abilities"] = [
+        {
+            **serialized,
+            "controls": serialize_dataclass(feature_action_controls(sheet, ability.mechanics)),
+        }
+        for ability, serialized in zip(sheet.abilities, projected["abilities"])
+    ]
     projected["spells"] = [
         {
             **serialized,
@@ -89,6 +97,15 @@ def project_sheet(sheet: CharacterSheet) -> dict[str, object]:
         for spell, serialized in zip(sheet.spells, projected["spells"])
     ]
     return projected
+
+
+def feature_action_controls(
+    sheet: CharacterSheet,
+    mechanics: FeatureMechanics | None,
+) -> tuple[EffectActionControl, ...]:
+    if mechanics is None:
+        return ()
+    return _bound_weapon_controls(sheet, mechanics.activatedEffects)
 
 
 def spell_control_projection(sheet: CharacterSheet, spell: SpellEntry) -> SpellControlProjection:
@@ -124,7 +141,7 @@ def spell_action_controls(
     sheet: CharacterSheet,
     spell: SpellEntry,
     spell_slot_level: int | None,
-) -> tuple[SpellActionControl, ...]:
+) -> tuple[EffectActionControl, ...]:
     if spell.mechanics is None:
         return ()
 
@@ -152,14 +169,14 @@ def spell_action_controls(
         and _contains_condition_change(root)
         and first_applied_effect(root, DamageEffect) is None
     ]
-    controls: list[SpellActionControl] = list(weapon_controls)
+    controls: list[EffectActionControl] = list(weapon_controls)
     has_attack = any(
         weapon_selection_effect(root) is None and first_attack_roll_effect(root) is not None
         for root in roots
     )
     has_combined_attack = any(first_attack_roll_effect(root) is not None for root in damage_actions)
     if has_attack and not has_combined_attack:
-        controls.append(SpellActionControl(SpellControlKind.ATTACK, "Attack Roll"))
+        controls.append(EffectActionControl(ActionControlKind.ATTACK, "Attack Roll"))
 
     for effect_index, root in enumerate(damage_actions):
         repeated = _direct_repeated_effect(root)
@@ -169,8 +186,8 @@ def spell_action_controls(
             else 1
         )
         authored_label = activated_effect_label(root, "")
-        controls.append(SpellActionControl(
-            kind=SpellControlKind.DAMAGE,
+        controls.append(EffectActionControl(
+            kind=ActionControlKind.DAMAGE,
             label=(authored_label or "Instance") if instance_count > 1
             else (authored_label or "Cast") if first_attack_roll_effect(root) is not None
             else (authored_label or "Damage"),
@@ -179,20 +196,20 @@ def spell_action_controls(
             choices=_effect_choices(root),
         ))
     for effect_index, root in enumerate(healing_actions):
-        controls.append(SpellActionControl(
-            SpellControlKind.HEALING,
+        controls.append(EffectActionControl(
+            ActionControlKind.HEALING,
             activated_effect_label(root, "Heal"),
             effectIndex=effect_index,
         ))
     for effect_index, root in enumerate(temporary_hit_point_actions):
-        controls.append(SpellActionControl(
-            SpellControlKind.TEMPORARY_HIT_POINTS,
+        controls.append(EffectActionControl(
+            ActionControlKind.TEMPORARY_HIT_POINTS,
             activated_effect_label(root, "Temp HP"),
             effectIndex=effect_index,
         ))
     for effect_index, root in enumerate(condition_actions):
-        controls.append(SpellActionControl(
-            SpellControlKind.EFFECT,
+        controls.append(EffectActionControl(
+            ActionControlKind.EFFECT,
             activated_effect_label(root, "Effect"),
             effectIndex=effect_index,
             choices=_effect_choices(root),
@@ -253,22 +270,22 @@ def _effect_choices(effect: EffectNode) -> tuple[SpellControlChoice, ...]:
 def _bound_weapon_controls(
     sheet: CharacterSheet,
     roots: list[EffectNode],
-) -> tuple[SpellActionControl, ...]:
-    controls: list[SpellActionControl] = []
+) -> tuple[EffectActionControl, ...]:
+    controls: list[EffectActionControl] = []
     for effect_index, root in enumerate(roots):
         found = weapon_selection_effect(root)
         if found is None:
             continue
         _node_id, selection = found
         kind = (
-            SpellControlKind.BOUND_WEAPON_ATTACK
+            ActionControlKind.BOUND_WEAPON_ATTACK
             if first_attack_roll_effect(selection.effect) is not None
-            else SpellControlKind.BOUND_WEAPON_EFFECT
+            else ActionControlKind.BOUND_WEAPON_EFFECT
         )
         choices = _effect_choices(selection.effect)
         label = activated_effect_label(root, "Use")
         for attack in eligible_weapon_attacks(sheet, selection.eligibility):
-            controls.append(SpellActionControl(
+            controls.append(EffectActionControl(
                 kind,
                 f"{label} {attack.name}",
                 effectIndex=effect_index,

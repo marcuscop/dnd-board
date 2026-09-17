@@ -87,6 +87,14 @@ def reset_sheet_resources(
         if rest_type == RestType.SHORT_REST
         else ResourceRecoveryTrigger.LONG_REST
     )
+    return recover_sheet_resources(room, sheet, recovery_trigger)
+
+
+def recover_sheet_resources(
+    room: Room,
+    sheet: CharacterSheet,
+    recovery_trigger: ResourceRecoveryTrigger,
+) -> list[ResourceUpdate]:
     recovery_definitions = dict(RESOURCE_DEFINITIONS)
     for resource in sheet.resources:
         recovery_definitions[resource.resource] = ResourceDefinition(

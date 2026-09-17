@@ -225,7 +225,7 @@ export type ConditionType =
   | "wardingBond"
   | "zoneOfTruth";
 export type ConditionDuration = "manual" | "untilShortRest" | "untilLongRest";
-export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "feat" | "skillProficiencies" | "expertise" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
+export type ProgressionChoiceType = "hitPoints" | "abilityScoreImprovement" | "featAbilityScoreIncrease" | "feat" | "skillProficiencies" | "expertise" | "subclass" | "fightingStyle" | "battleMasterManeuvers" | "arcaneShots" | "runes" | "spells";
 export type DamageType =
   | "acid"
   | "bludgeoning"
@@ -392,9 +392,9 @@ export type FeatureMechanics = {
   passiveModifiers: unknown[];
   interactions: unknown[];
 };
-export type SpellControlKind = "attack" | "damage" | "healing" | "temporaryHitPoints" | "effect" | "boundWeaponAttack" | "boundWeaponEffect";
-export type SpellActionControl = {
-  kind: SpellControlKind;
+export type ActionControlKind = "attack" | "damage" | "healing" | "temporaryHitPoints" | "effect" | "boundWeaponAttack" | "boundWeaponEffect";
+export type EffectActionControl = {
+  kind: ActionControlKind;
   label: string;
   effectIndex?: number;
   instanceCount: number;
@@ -404,8 +404,8 @@ export type SpellActionControl = {
 };
 export type SpellControlProjection = {
   requiresSpellSlot: boolean;
-  actions: SpellActionControl[];
-  castOptions: { slotLevel: number; actions: SpellActionControl[] }[];
+  actions: EffectActionControl[];
+  castOptions: { slotLevel: number; actions: EffectActionControl[] }[];
 };
 export type ResourceKind = "spellSlot" | "featureUse" | "itemCharge" | "ammunition" | "action" | "bonusAction" | "reaction";
 export type ResourceId =
@@ -429,6 +429,8 @@ export type ResourceId =
   | "strokeOfLuck"
   | "luckPoints"
   | "mageSlayer"
+  | "savageAttacker"
+  | "charger"
   | "boonOfCombatProwess"
   | "boonOfDimensionalTravel"
   | "boonOfFate"
@@ -723,6 +725,7 @@ export type CharacterSheet = {
     description: string;
     resourceId?: ResourceId;
     rollActions?: RollAction[];
+    controls: EffectActionControl[];
     mechanics?: FeatureMechanics;
   }[];
   resources: {

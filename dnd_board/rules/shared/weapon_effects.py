@@ -31,6 +31,8 @@ from dnd_board.rules.shared.effects import (
     ApplyEffect,
     AttackRollEffect,
     ChoiceEffect,
+    ConditionalEffect,
+    ContestedCheckEffect,
     DamageEffect,
     DiceAmount,
     EffectAmountInput,
@@ -38,9 +40,13 @@ from dnd_board.rules.shared.effects import (
     EffectNodeId,
     EffectResolutionInputs,
     EffectSelectionInput,
+    EffectSelectionBinding,
     EquipmentInstanceId,
+    FeatureMechanics,
     SelectionId,
     SelectWeaponEffect,
+    SavingThrowEffect,
+    RepeatedEffect,
     SequenceEffect,
     ThresholdDiceExpression,
     WeaponAbilityReference,
@@ -75,12 +81,83 @@ def weapon_is_eligible(
         return False
     if eligibility.attackKinds and attack.attackKind not in eligibility.attackKinds:
         return False
+    if eligibility.attackRanges and attack.attackRange not in eligibility.attackRanges:
+        return False
+    if eligibility.equipmentInstanceIds and attack.id not in {
+        equipment_id.value for equipment_id in eligibility.equipmentInstanceIds
+    }:
+        return False
     if eligibility.properties and not set(eligibility.properties).issubset(attack.properties or []):
         return False
     if eligibility.equipmentIds:
         if item is None or equipment_definition_id(item) not in eligibility.equipmentIds:
             return False
     return attack.damageDiceCount > 0
+
+
+def mechanics_bound_to_selections(
+    mechanics: FeatureMechanics,
+    bindings: tuple[EffectSelectionBinding, ...],
+) -> FeatureMechanics:
+    selected = {binding.selection: binding.equipmentInstanceId for binding in bindings}
+    return replace(
+        mechanics,
+        activatedEffects=[_effect_bound_to_selections(effect, selected) for effect in mechanics.activatedEffects],
+    )
+
+
+def _effect_bound_to_selections(
+    effect: EffectNode,
+    selected: dict[SelectionId, EquipmentInstanceId],
+) -> EffectNode:
+    if isinstance(effect, ActivatedEffect):
+        return replace(effect, effect=_effect_bound_to_selections(effect.effect, selected))
+    if isinstance(effect, SelectWeaponEffect):
+        equipment = selected.get(effect.selection)
+        eligibility = (
+            replace(effect.eligibility, equipmentInstanceIds=(equipment,))
+            if equipment is not None
+            else effect.eligibility
+        )
+        return replace(
+            effect,
+            eligibility=eligibility,
+            effect=_effect_bound_to_selections(effect.effect, selected),
+        )
+    if isinstance(effect, SequenceEffect):
+        return replace(effect, effects=[_effect_bound_to_selections(child, selected) for child in effect.effects])
+    if isinstance(effect, AttackRollEffect):
+        return replace(
+            effect,
+            onHit=_effect_bound_to_selections(effect.onHit, selected) if effect.onHit is not None else None,
+            onMiss=_effect_bound_to_selections(effect.onMiss, selected) if effect.onMiss is not None else None,
+        )
+    if isinstance(effect, SavingThrowEffect):
+        return replace(
+            effect,
+            onFailure=_effect_bound_to_selections(effect.onFailure, selected) if effect.onFailure is not None else None,
+            onSuccess=_effect_bound_to_selections(effect.onSuccess, selected) if effect.onSuccess is not None else None,
+        )
+    if isinstance(effect, ConditionalEffect):
+        return replace(
+            effect,
+            whenTrue=_effect_bound_to_selections(effect.whenTrue, selected),
+            whenFalse=_effect_bound_to_selections(effect.whenFalse, selected) if effect.whenFalse is not None else None,
+        )
+    if isinstance(effect, ContestedCheckEffect):
+        return replace(
+            effect,
+            onSourceWin=_effect_bound_to_selections(effect.onSourceWin, selected) if effect.onSourceWin is not None else None,
+            onTargetWin=_effect_bound_to_selections(effect.onTargetWin, selected) if effect.onTargetWin is not None else None,
+        )
+    if isinstance(effect, RepeatedEffect):
+        return replace(effect, effect=_effect_bound_to_selections(effect.effect, selected))
+    if isinstance(effect, ChoiceEffect):
+        return replace(
+            effect,
+            choices=[replace(choice, effect=_effect_bound_to_selections(choice.effect, selected)) for choice in effect.choices],
+        )
+    return effect
 
 
 def equipment_definition_id(item: EquipmentItem) -> EquipmentId | None:
@@ -260,21 +337,52 @@ def build_bound_weapon_spell_attack_payload(
     equipment_instance_id: str,
     choice_index: int | None,
 ) -> RollPayload:
-    if spell.mechanics is None or effect_index < 0 or effect_index >= len(spell.mechanics.activatedEffects):
+    if spell.mechanics is None:
         raise ValueError("Spell weapon effect not found")
-    authored_root = spell.mechanics.activatedEffects[effect_index]
+    return build_bound_weapon_attack_payload(
+        sheet,
+        roller,
+        spell.mechanics,
+        effect_index,
+        equipment_instance_id,
+        choice_index,
+        source=RollSource(SheetSectionType.SPELLS, enum_key(spell.id), f"weapon-attack-{effect_index}"),
+        source_label=f"{enum_label(spell.name)}",
+        label=enum_label(spell.name),
+        source_spell=spell,
+        eligibility_label="spell",
+    )
+
+
+def build_bound_weapon_attack_payload(
+    sheet: CharacterSheet,
+    roller: str,
+    mechanics: FeatureMechanics,
+    effect_index: int,
+    equipment_instance_id: str,
+    choice_index: int | None,
+    *,
+    source: RollSource,
+    source_label: str,
+    label: str,
+    source_spell: SpellEntry | None = None,
+    eligibility_label: str = "effect",
+) -> RollPayload:
+    if effect_index < 0 or effect_index >= len(mechanics.activatedEffects):
+        raise ValueError("Weapon effect not found")
+    authored_root = mechanics.activatedEffects[effect_index]
     _selected_root, selection_node_id, selection, selected = selected_weapon_effect(authored_root, choice_index)
     if not isinstance(selected, AttackRollEffect) or selected.weaponSelection != selection.selection:
-        raise ValueError("Selected spell effect is not a bound weapon attack")
+        raise ValueError("Selected effect is not a bound weapon attack")
     selected_attack = selected_weapon_attack(sheet, equipment_instance_id, selection.eligibility)
     if selected_attack is None:
-        raise ValueError("Selected weapon is not eligible for this spell")
+        raise ValueError(f"Selected weapon is not eligible for this {eligibility_label}")
     attack = ongoing_weapon_attack(sheet, selected_attack)
     modified_attack = apply_weapon_attack_modification(
         sheet,
         attack,
         selected.weaponModification or WeaponAttackModification(),
-        spell,
+        source_spell,
     )
     base_damage = ApplyEffect(DamageEffect(
         DiceAmount(modified_attack.damageDiceCount, modified_attack.damageDiceType),
@@ -285,11 +393,14 @@ def build_bound_weapon_spell_attack_payload(
         onHit=base_damage if selected.onHit is None else SequenceEffect([base_damage, selected.onHit]),
     )
     resolved_selection = replace(selection, effect=resolved_attack)
-    pending_effect = (
+    pending_effect: EffectNode = (
         replace(authored_root, effect=resolved_selection)
         if isinstance(authored_root, ActivatedEffect)
         else resolved_selection
     )
+    from dnd_board.rules.shared.character_effects import resolved_inherited_damage_types
+
+    pending_effect = resolved_inherited_damage_types(pending_effect, modified_attack.damageType)
 
     attack_roll = build_attack_roll_payload(sheet, roller, modified_attack)
     base_roll = build_damage_roll_payload(sheet, roller, modified_attack)
@@ -315,7 +426,7 @@ def build_bound_weapon_spell_attack_payload(
             damage.amount,
             damage.scaling,
             sheet,
-            spell,
+            source_spell,
             None,
         )
         amount_inputs.append(EffectAmountInput(node_id, total))
@@ -332,9 +443,9 @@ def build_bound_weapon_spell_attack_payload(
             ))
     return replace(
         attack_roll,
-        source=RollSource(SheetSectionType.SPELLS, enum_key(spell.id), f"weapon-attack-{effect_index}"),
-        sourceLabel=f"{enum_label(spell.name)}: {attack.name}",
-        label=enum_label(spell.name),
+        source=source,
+        sourceLabel=f"{source_label}: {attack.name}",
+        label=label,
         damageType=components[0].damageType,
         damageComponents=components,
         boundAttackId=attack.id,

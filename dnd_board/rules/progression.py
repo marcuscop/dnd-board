@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from dnd_board.character_sheet import (
@@ -25,6 +25,7 @@ from dnd_board.character_sheet import (
     SpellSchool,
     SpellSource,
     SpellEntry,
+    ability_scores_after_adjustments,
     enum_key,
     enum_label,
     enum_value,
@@ -66,6 +67,8 @@ from dnd_board.rules.shared.progression_definitions import (
     SpellPool,
 )
 from dnd_board.rules.shared.effects import (
+    AbilityScoreAdjustment,
+    AbilityScoreAdjustmentChoice,
     CalculationType,
     Modifier,
 )
@@ -253,13 +256,12 @@ class HitPointGrant:
 class AbilityScoreGrant:
     characterClass: ClassType
     minimumClassLevel: int
-    ability: AbilityType
-    amount: int
+    adjustment: AbilityScoreAdjustment
 
     def __post_init__(self) -> None:
         if self.minimumClassLevel < 1:
             raise ValueError("Grant minimum class level must be positive")
-        if self.amount < 1:
+        if self.adjustment.amount < 1:
             raise ValueError("Ability score grant amount must be positive")
 
 
@@ -354,9 +356,7 @@ class FeatChoiceDefinition:
 class AbilityScoreChoiceDefinition:
     characterClass: ClassType
     classLevel: int
-    candidates: tuple[AbilityType, ...] = tuple(AbilityType)
-    scoreCap: int = 20
-    points: int = 2
+    adjustment: AbilityScoreAdjustmentChoice
     featChoice: FeatChoiceDefinition | None = None
 
 
@@ -518,7 +518,7 @@ def progression_rule(
                 for record in records
                 for grant in record.grants
                 if isinstance(grant, FeatGrant)
-                and GENERAL_FEATS[grant.feat].abilityScoreIncrease is not None
+                and GENERAL_FEATS[grant.feat].abilityScoreAdjustmentChoice is not None
                 and (required_feat is None or grant.feat == required_feat)
                 and (required_feat is not None or grant.feat not in completed_feats)
             ),
@@ -527,15 +527,15 @@ def progression_rule(
         if feat_entry is None:
             return None
         feat_record, feat_grant = feat_entry
-        increase = GENERAL_FEATS[feat_grant.feat].abilityScoreIncrease
-        if increase is None:
+        adjustment = GENERAL_FEATS[feat_grant.feat].abilityScoreAdjustmentChoice
+        if adjustment is None:
             return None
         return ProgressionRule(
             choice_id,
             ProgressionChoicePresentation(
                 ProgressionChoiceType.FEAT_ABILITY_SCORE_INCREASE,
                 f"{enum_label(feat_grant.feat)} Ability Score Increase",
-                f"Increase one eligible ability score by {increase.amount}, to a maximum of {increase.scoreCap}.",
+                f"Increase one eligible ability score by {adjustment.points}, to a maximum of {adjustment.maximum}.",
             ),
             (ClassLevelRequirement(
                 feat_grant.characterClass,
@@ -545,9 +545,7 @@ def progression_rule(
             (AbilityScoreChoiceDefinition(
                 feat_grant.characterClass,
                 feat_grant.minimumClassLevel,
-                candidates=increase.candidates,
-                scoreCap=increase.scoreCap,
-                points=increase.amount,
+                adjustment=adjustment,
             ),),
             sourceFeat=feat_grant.feat,
         )
@@ -579,6 +577,7 @@ def progression_rule(
             (AbilityScoreChoiceDefinition(
                 ability_score_class,
                 class_level,
+                adjustment=AbilityScoreAdjustmentChoice(tuple(AbilityType), points=2),
                 featChoice=feat_choice_definition(
                     ability_score_class,
                     class_level,
@@ -1066,26 +1065,30 @@ def evaluate_ability_score_progression_choice(
             selected_fighting_styles=selected_fighting_styles,
             feat_eligibility_sheet=feat_eligibility_sheet,
         )
-    if len(clean_values) == 1 and choice.points > 1:
+    if len(clean_values) == 1 and choice.adjustment.points > 1:
         clean_values.append(clean_values[0])
-    if len(clean_values) != choice.points:
+    if len(clean_values) != choice.adjustment.points:
         raise ProgressionRuleViolation(SkillSelectionIssue.WRONG_COUNT)
     selected = [enum_value(AbilityType, value) for value in clean_values]
-    if any(ability is None or ability not in choice.candidates for ability in selected):
+    if any(ability is None or ability not in choice.adjustment.candidates for ability in selected):
         raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_OPTION)
     grants: list[AbilityScoreGrant] = []
-    for ability in choice.candidates:
+    for ability in choice.adjustment.candidates:
         requested = selected.count(ability)
         if requested <= 0:
             continue
         current = getattr(ability_scores, enum_key(ability))
-        amount = min(requested, max(0, choice.scoreCap - current))
+        amount = min(requested, max(0, choice.adjustment.maximum - current))
         if amount > 0:
             grants.append(AbilityScoreGrant(
                 choice.characterClass,
                 choice.classLevel,
-                ability,
-                amount,
+                AbilityScoreAdjustment(
+                    ability,
+                    amount,
+                    minimum=choice.adjustment.minimum,
+                    maximum=choice.adjustment.maximum,
+                ),
             ))
     if not grants:
         raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_OPTION)
@@ -1457,25 +1460,15 @@ def apply_ability_score_progression_grants(
     records: list[ProgressionGrantRecord],
     score_cap: int = 20,
 ) -> AbilityScores:
-    scores = AbilityScores(
-        strength=base_scores.strength,
-        dexterity=base_scores.dexterity,
-        constitution=base_scores.constitution,
-        intelligence=base_scores.intelligence,
-        wisdom=base_scores.wisdom,
-        charisma=base_scores.charisma,
+    return ability_scores_after_adjustments(
+        base_scores,
+        (
+            replace(grant.adjustment, maximum=min(score_cap, grant.adjustment.maximum))
+            for record in records
+            for grant in record.grants
+            if isinstance(grant, AbilityScoreGrant)
+        ),
     )
-    for record in records:
-        for grant in record.grants:
-            if not isinstance(grant, AbilityScoreGrant):
-                continue
-            ability_key = enum_key(grant.ability)
-            setattr(
-                scores,
-                ability_key,
-                min(score_cap, getattr(scores, ability_key) + grant.amount),
-            )
-    return scores
 
 
 def progression_feat_grants(
@@ -1993,15 +1986,15 @@ def ability_score_progression_choice(
             choice_type=rule.presentation.choiceType,
             label=rule.presentation.label,
             description=rule.presentation.description,
-            minimum=choice.points,
-            maximum=choice.points,
+            minimum=choice.adjustment.points,
+            maximum=choice.adjustment.points,
             selected=[],
             options=[
                 ProgressionChoiceOption(
                     value=enum_key(ability),
                     label=enum_label(ability),
                 )
-                for ability in choice.candidates
+                for ability in choice.adjustment.candidates
             ],
         )
     return single_choice(

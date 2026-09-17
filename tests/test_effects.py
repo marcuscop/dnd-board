@@ -29,6 +29,9 @@ from dnd_board.rules.shared.character_effects import (
 from dnd_board.rules.shared.condition_effects import normalize_conditions
 from dnd_board.rules.shared.effects import (
     ActiveOngoingEffect,
+    AbilityScoreAdjustment,
+    AbilityScoreAdjustmentChoice,
+    AbilityScoreAdjustmentOperation,
     AbilityCheck,
     AmountCalculation,
     AppliedEffect,
@@ -115,6 +118,7 @@ from dnd_board.rules.shared.effects import (
     TargetHasConditionPredicate,
     TemporaryHitPointsEffect,
     apply_interaction_operations,
+    adjusted_ability_score,
     multiplied_damage_effect,
 )
 from dnd_board.rules.spells import spell_entry
@@ -569,6 +573,26 @@ def test_feature_mechanics_with_passive_and_prompted_interaction_round_trips() -
     )
 
     assert typed_json_to_value(typed_json_from_value(mechanics), FeatureMechanics) == mechanics
+
+
+def test_ability_score_adjustment_is_shared_and_round_trips_in_ongoing_effects() -> None:
+    choice = AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY))
+    increase = AbilityScoreAdjustment(AbilityType.STRENGTH, 2, maximum=20)
+    replacement = AbilityScoreAdjustment(
+        AbilityType.DEXTERITY,
+        18,
+        AbilityScoreAdjustmentOperation.SET,
+        maximum=20,
+    )
+    ongoing = OngoingEffect(
+        EffectDuration(EffectDurationType.MANUAL),
+        abilityScoreAdjustments=(increase, replacement),
+    )
+
+    assert adjusted_ability_score(19, increase) == 20
+    assert adjusted_ability_score(10, replacement) == 18
+    assert typed_json_to_value(typed_json_from_value(choice), AbilityScoreAdjustmentChoice) == choice
+    assert typed_json_to_value(typed_json_from_value(ongoing), OngoingEffect) == ongoing
 
 
 def test_pending_resolution_round_trips_for_future_prompt_persistence() -> None:

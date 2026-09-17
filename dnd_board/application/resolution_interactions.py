@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from time import time_ns
 
 from dnd_board.character_sheet import (
+    ActivationTiming,
     AbilityType,
     CharacterSheet,
     D20TestType,
@@ -27,10 +28,16 @@ from dnd_board.rules.shared.character_effects import (
 from dnd_board.rules.shared.condition_effects import condition_ongoing_effects
 from dnd_board.rules.shared.effects import (
     ApplyEffectOperation,
+    BoundEffect,
     CancelPendingAction,
     EffectNodeId,
+    EffectParticipantBindings,
+    EffectSelectionBinding,
+    EquipmentInstanceId,
     Interaction,
     InteractionDecisionType,
+    InteractionEffectRecipient,
+    InteractionTiming,
     ModifyAction,
     ModifyPendingDamage,
     ModifyRoll,
@@ -431,6 +438,11 @@ def _damage_prompt(
                 interaction_source.interaction.usageResource,
                 interaction_source.interaction.usageScope,
             )
+            and (
+                interaction_source.interaction.activationTiming != ActivationTiming.OWN_TURN
+                or encounter is None
+                or encounter.currentParticipantId == owner.id
+            )
         ),
         None,
     )
@@ -591,6 +603,61 @@ def matching_sheet_interactions(
             roll_outcome=roll_outcome,
         )
     ]
+
+
+def automatic_interaction_effects_for_event(
+    event_roll: RollPayload,
+    event: ResolutionEvent,
+    target: CharacterSheet,
+    sheets: list[CharacterSheet],
+    source: CharacterSheet | None,
+    encounter: EncounterState | None = None,
+) -> list[BoundEffect]:
+    bound_effects: list[BoundEffect] = []
+    for owner in sheets:
+        context = CharacterEffectExecutionContext(event_roll, target, source, owner=owner)
+        source_attack = context.source_attack()
+        for interaction_source in matching_sheet_interactions(
+            owner,
+            event.eventType,
+            event_roll,
+            source_sheet=source,
+            target=target,
+            roll_outcome=event.rollOutcome,
+        ):
+            interaction = interaction_source.interaction
+            if (
+                interaction.decision.decisionType != InteractionDecisionType.AUTOMATIC
+                or interaction.timing != InteractionTiming.AFTER_EVENT
+                or (
+                    interaction.activationTiming == ActivationTiming.OWN_TURN
+                    and encounter is not None
+                    and encounter.currentParticipantId != owner.id
+                )
+            ):
+                continue
+            for operation in interaction.operations:
+                if not isinstance(operation, ApplyEffectOperation):
+                    continue
+                recipient = owner if operation.recipient == InteractionEffectRecipient.OWNER else target
+                selections = ()
+                if operation.bindSourceAttackTo is not None:
+                    if source_attack is None:
+                        continue
+                    selections = (EffectSelectionBinding(
+                        operation.bindSourceAttackTo,
+                        EquipmentInstanceId(source_attack.id),
+                    ),)
+                bound_effects.append(BoundEffect(
+                    effect=operation.effect,
+                    bindings=EffectParticipantBindings(
+                        sourceSheetId=owner.id,
+                        targetSheetId=recipient.id,
+                        ownerSheetId=owner.id,
+                        selections=selections,
+                    ),
+                ))
+    return bound_effects
 
 
 def interceptor_type_for_interaction(

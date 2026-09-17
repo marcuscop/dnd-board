@@ -278,6 +278,8 @@ def board_operations() -> BoardOperations:
 
 
 def encounter_operations() -> EncounterOperations:
+    from dnd_board.application.resource_service import recover_sheet_resources
+
     return EncounterOperations(
         save=save_room_to_disk,
         broadcast_room=broadcast_room_state,
@@ -287,6 +289,7 @@ def encounter_operations() -> EncounterOperations:
             event_type,
             resolution_operations(),
         ),
+        recover_resources=recover_sheet_resources,
     )
 
 
@@ -1413,6 +1416,17 @@ def token_to_sheet(
         if active_concentration is not None:
             sheet.activeConcentration = active_concentration_status(active_concentration)
         sheet.speed = base_speed
+    from dnd_board.character_sheet import apply_ongoing_ability_score_adjustments, ongoing_effect_abilities
+
+    sheet.abilities.extend(ongoing_effect_abilities(sheet))
+    apply_ongoing_ability_score_adjustments(
+        sheet,
+        adjust_armor_class=not (
+            party_member is not None
+            and party_member.sheet is not None
+            and party_member.sheet.armorClass is not None
+        ),
+    )
     sheet.armorClass = condition_adjusted_armor_class(sheet)
     sheet.speed = condition_adjusted_speed_for_exhaustion(
         sheet.speed,
