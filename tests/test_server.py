@@ -2482,6 +2482,339 @@ def test_great_weapon_master_hew_grants_bound_bonus_attack_until_next_action(
     assert all(ability["id"] != "hew" for ability in after["abilities"])
 
 
+@pytest.mark.parametrize(
+    ("feat_type", "primary", "secondary", "granted_id", "expected_attack_id", "expected_die", "expected_total", "expected_damage_type"),
+    (
+        (
+            GeneralFeatType.DUAL_WIELDER,
+            AttackAction(
+                id="club",
+                name="Club",
+                ability=AbilityType.STRENGTH,
+                damageDiceCount=1,
+                damageDiceType=DiceType.D4,
+                damageType=DamageType.BLUDGEONING,
+                properties=[WeaponProperty.LIGHT],
+            ),
+            AttackAction(
+                id="spear",
+                name="Spear",
+                ability=AbilityType.STRENGTH,
+                damageDiceCount=1,
+                damageDiceType=DiceType.D6,
+                damageType=DamageType.PIERCING,
+                properties=[WeaponProperty.THROWN, WeaponProperty.VERSATILE],
+            ),
+            "dualWielder",
+            "spear",
+            "1d6",
+            3,
+            "piercing",
+        ),
+        (
+            GeneralFeatType.POLEARM_MASTER,
+            AttackAction(
+                id="quarterstaff",
+                name="Quarterstaff",
+                ability=AbilityType.STRENGTH,
+                damageDiceCount=1,
+                damageDiceType=DiceType.D6,
+                damageType=DamageType.BLUDGEONING,
+                properties=[WeaponProperty.VERSATILE],
+            ),
+            AttackAction(
+                id="club",
+                name="Club",
+                ability=AbilityType.STRENGTH,
+                damageDiceCount=1,
+                damageDiceType=DiceType.D4,
+                damageType=DamageType.BLUDGEONING,
+                properties=[WeaponProperty.LIGHT],
+            ),
+            "poleStrike",
+            "quarterstaff",
+            "1d4",
+            6,
+            "bludgeoning",
+        ),
+    ),
+)
+def test_weapon_feats_grant_bound_bonus_attacks(
+    tmp_path,
+    monkeypatch,
+    feat_type,
+    primary,
+    secondary,
+    granted_id,
+    expected_attack_id,
+    expected_die,
+    expected_total,
+    expected_damage_type,
+) -> None:
+    feat = general_feat_feature(enum_key(feat_type))
+    assert feat is not None
+    equipment = [
+        EquipmentItem(
+            id=primary.id,
+            name=primary.name,
+            definitionId=EquipmentId.QUARTERSTAFF if primary.id == "quarterstaff" else EquipmentId.CLUB,
+            itemType=EquipmentType.WEAPON,
+            slot=EquipmentSlot.MAIN_HAND,
+        ),
+        EquipmentItem(
+            id=secondary.id,
+            name=secondary.name,
+            definitionId=EquipmentId.SPEAR if secondary.id == "spear" else EquipmentId.CLUB,
+            itemType=EquipmentType.WEAPON,
+            slot=EquipmentSlot.OFF_HAND,
+        ),
+    ]
+    room_id = f"{enum_key(feat_type)}-follow-up-test"
+    write_party_campaign(
+        tmp_path,
+        room_id,
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                attacks=[primary, secondary],
+                equipment=equipment,
+                feats=[feat],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: 15 if maximum == 20 else 3)
+    client = TestClient(server.app)
+    encounter = client.post(
+        f"/api/rooms/{room_id}/encounter?playerKey=dm",
+        json=[
+            {"participantId": "player-1", "initiative": 20},
+            {"participantId": "player-2", "initiative": 10},
+        ],
+    ).json()["encounter"]
+
+    attack = client.post(
+        f"/api/rooms/{room_id}/sheet/player-1/rolls/attack"
+        f"?playerKey=player-1&attackId={primary.id}&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    response = client.post(
+        f"/api/rooms/{room_id}/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+    assert response.status_code == 200
+
+    sheet = client.get(
+        f"/api/rooms/{room_id}/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+    granted = next(ability for ability in sheet["abilities"] if ability["id"] == granted_id)
+    assert granted["activation"] == "bonusAction"
+    assert [control["attackId"] for control in granted["controls"]] == [expected_attack_id]
+    follow_up = client.post(
+        f"/api/rooms/{room_id}/sheet/player-1/abilities/{granted_id}/rolls/{expected_attack_id}"
+        f"?playerKey=player-1&turnId={encounter['turnId']}"
+    )
+    assert follow_up.status_code == 200
+    component = follow_up.json()["roll"]["damageComponents"][0]
+    assert component["die"] == expected_die
+    assert component["total"] == expected_total
+    assert component["damageType"] == expected_damage_type
+
+
+def test_sentinel_guardian_reaction_applies_halt(tmp_path, monkeypatch) -> None:
+    sentinel = general_feat_feature(enum_key(GeneralFeatType.SENTINEL))
+    assert sentinel is not None
+    spear = AttackAction(
+        id="spear",
+        name="Spear",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D6,
+        damageType=DamageType.PIERCING,
+        properties=[WeaponProperty.THROWN, WeaponProperty.VERSATILE],
+    )
+    write_party_campaign(
+        tmp_path,
+        "sentinel-guardian-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Sentinel",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                attacks=[spear],
+                equipment=[EquipmentItem(
+                    id="spear",
+                    name="Spear",
+                    definitionId=EquipmentId.SPEAR,
+                    itemType=EquipmentType.WEAPON,
+                    slot=EquipmentSlot.MAIN_HAND,
+                )],
+                feats=[sentinel],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: 15 if maximum == 20 else 3)
+    client = TestClient(server.app)
+    encounter = client.post(
+        "/api/rooms/sentinel-guardian-test/encounter?playerKey=dm",
+        json=[
+            {"participantId": "player-2", "initiative": 20},
+            {"participantId": "player-1", "initiative": 10},
+        ],
+    ).json()["encounter"]
+    sheet = client.get(
+        "/api/rooms/sentinel-guardian-test/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+    guardian = next(ability for ability in sheet["abilities"] if ability["id"] == "sentinelGuardian")
+    assert guardian["activation"] == "reaction"
+    assert guardian["controls"][0]["attackId"] == "spear"
+
+    attack = client.post(
+        "/api/rooms/sentinel-guardian-test/sheet/player-1/abilities/sentinelGuardian/rolls/spear"
+        f"?playerKey=player-1&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    resolution = client.post(
+        f"/api/rooms/sentinel-guardian-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+    assert resolution.status_code == 200
+    target = client.get(
+        "/api/rooms/sentinel-guardian-test/sheet/player-2?playerKey=player-2"
+    ).json()["sheet"]
+    assert target["speed"] == 0
+    assert any(effect["effect"]["label"] == "Sentinel: Halt" for effect in target["ongoingEffects"])
+
+
+def test_light_weapon_property_requires_wielded_distinct_weapon_and_grants_bonus_attack(tmp_path, monkeypatch) -> None:
+    club = AttackAction(
+        id="club",
+        name="Club",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D4,
+        damageType=DamageType.BLUDGEONING,
+        properties=[WeaponProperty.LIGHT],
+    )
+    sickle = AttackAction(
+        id="sickle",
+        name="Sickle",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D4,
+        damageType=DamageType.SLASHING,
+        properties=[WeaponProperty.LIGHT],
+    )
+    write_party_campaign(
+        tmp_path,
+        "light-weapon-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=14, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                attacks=[club, sickle],
+                equipment=[
+                    EquipmentItem(
+                        id="club",
+                        name="Club",
+                        definitionId=EquipmentId.CLUB,
+                        itemType=EquipmentType.WEAPON,
+                        slot=EquipmentSlot.MAIN_HAND,
+                    ),
+                    EquipmentItem(
+                        id="sickle",
+                        name="Sickle",
+                        definitionId=EquipmentId.SICKLE,
+                        itemType=EquipmentType.WEAPON,
+                        slot=EquipmentSlot.CARRIED,
+                    ),
+                ],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: 15 if maximum == 20 else 3)
+    client = TestClient(server.app)
+    encounter = client.post(
+        "/api/rooms/light-weapon-test/encounter?playerKey=dm",
+        json=[
+            {"participantId": "player-1", "initiative": 20},
+            {"participantId": "player-2", "initiative": 10},
+        ],
+    ).json()["encounter"]
+
+    initial_sheet = client.get(
+        "/api/rooms/light-weapon-test/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+    initial_sickle = next(attack for attack in initial_sheet["attacks"] if attack["id"] == "sickle")
+    assert initial_sickle["available"] is False
+    blocked = client.post(
+        "/api/rooms/light-weapon-test/sheet/player-1/rolls/attack"
+        f"?playerKey=player-1&attackId=sickle&turnId={encounter['turnId']}"
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "Sickle is not currently wielded"
+
+    equipped = client.post(
+        "/api/rooms/light-weapon-test/sheet/player-1/equipment/sickle/slot"
+        "?playerKey=player-1&slot=offHand"
+    )
+    assert equipped.status_code == 200
+    equipped_sickle = next(attack for attack in equipped.json()["sheet"]["attacks"] if attack["id"] == "sickle")
+    assert equipped_sickle["available"] is True
+
+    attack = client.post(
+        "/api/rooms/light-weapon-test/sheet/player-1/rolls/attack"
+        f"?playerKey=player-1&attackId=club&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    resolved = client.post(
+        f"/api/rooms/light-weapon-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+    assert resolved.status_code == 200
+    sheet = client.get(
+        "/api/rooms/light-weapon-test/sheet/player-1?playerKey=player-1"
+    ).json()["sheet"]
+    light_attack = next(ability for ability in sheet["abilities"] if ability["id"] == "lightWeaponAttack")
+    assert light_attack["activation"] == "bonusAction"
+    assert [control["attackId"] for control in light_attack["controls"]] == ["sickle"]
+
+    follow_up = client.post(
+        "/api/rooms/light-weapon-test/sheet/player-1/abilities/lightWeaponAttack/rolls/sickle"
+        f"?playerKey=player-1&turnId={encounter['turnId']}"
+    )
+    assert follow_up.status_code == 200
+    component = follow_up.json()["roll"]["damageComponents"][0]
+    assert component["die"] == "1d4"
+    assert component["total"] == 3
+
+
 def test_heavy_armor_master_reduces_physical_attack_damage(tmp_path, monkeypatch) -> None:
     heavy_armor_master = general_feat_feature(enum_key(GeneralFeatType.HEAVY_ARMOR_MASTER))
     assert heavy_armor_master is not None
@@ -7391,6 +7724,24 @@ def test_server_state_helpers_cover_rest_equipment_and_room_edges(tmp_path, monk
     assert room.equipment_slots[sheet.tokenId]["chain"] == EquipmentSlot.CARRIED
     assert room.equipment_slots[sheet.tokenId]["sword"] == EquipmentSlot.CARRIED
     assert valid_equipment_slots(EquipmentItem(id="gear", name="Gear", itemType=EquipmentType.GEAR, slot=EquipmentSlot.CARRIED)) == {EquipmentSlot.CARRIED}
+    assert valid_equipment_slots(EquipmentItem(
+        id="heavy-crossbow",
+        name="Heavy Crossbow",
+        definitionId=EquipmentId.HEAVY_CROSSBOW,
+        itemType=EquipmentType.WEAPON,
+    )) == {EquipmentSlot.CARRIED, EquipmentSlot.TWO_HANDS}
+    assert valid_equipment_slots(EquipmentItem(
+        id="spear",
+        name="Spear",
+        definitionId=EquipmentId.SPEAR,
+        itemType=EquipmentType.WEAPON,
+    )) == {EquipmentSlot.CARRIED, EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND, EquipmentSlot.TWO_HANDS}
+    assert valid_equipment_slots(EquipmentItem(
+        id="club",
+        name="Club",
+        definitionId=EquipmentId.CLUB,
+        itemType=EquipmentType.WEAPON,
+    )) == {EquipmentSlot.CARRIED, EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND}
 
     history_roll = RollPayload("roll", "sheet", "token", "player", RollSource(SheetSectionType.ATTACKS, "a", "b"), "A", RollResolutionMode.NONE, "Roll", None, [], DiceType.D20, "d20", 0, [], 0, 1)
     room.roll_history = [RollLogEntry(str(index), RollLogEntryType.ROLL_CREATED, index, history_roll) for index in range(server.ROLL_HISTORY_LIMIT + 3)]

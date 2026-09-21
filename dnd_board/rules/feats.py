@@ -32,10 +32,12 @@ from dnd_board.character_sheet import (
     enum_label,
 )
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
+from dnd_board.rules.equipment import EquipmentId
 from dnd_board.rules.species import SpeciesType
 from dnd_board.rules.shared.effects import (
     AbilityScoreAdjustmentChoice,
     AmountCalculation,
+    AllPredicate,
     AnyPredicate,
     ApplyEffect,
     ApplyEffectOperation,
@@ -51,6 +53,7 @@ from dnd_board.rules.shared.effects import (
     FeatureMechanics,
     EffectDuration,
     EffectDurationType,
+    EffectSelectionExclusion,
     EndingCondition,
     EndingConditionType,
     FixedAmount,
@@ -97,12 +100,17 @@ from dnd_board.rules.shared.effects import (
     SourceIsOwnerPredicate,
     SourceUsesTimeEconomyPredicate,
     SourceWeaponCategoryPredicate,
+    SourceWeaponEquipmentPredicate,
     TargetIsOwnerPredicate,
     TargetHitPointsAtMostPredicate,
     WeaponHasAnyPropertyPredicate,
     WeaponHasPropertyPredicate,
     WithinDistancePredicate,
     WeaponEligibility,
+    WeaponAttackModification,
+    WeaponDamageTypeReference,
+    ThresholdDiceExpression,
+    DiceThreshold,
     InstallOngoingEffect,
     OngoingEffect,
     OngoingReplacementPolicy,
@@ -144,6 +152,8 @@ class FeatFeatureField(Enum):
 
 class FeatAbilityId(Enum):
     CHARGER = "charger"
+    POLEARM_REACTIVE_STRIKE = "polearmReactiveStrike"
+    SENTINEL_GUARDIAN = "sentinelGuardian"
     HEALER = "healer"
     LUCKY_ADVANTAGE = "luckyAdvantage"
     LUCKY_DISADVANTAGE = "luckyDisadvantage"
@@ -685,6 +695,11 @@ def war_caster_mechanics() -> FeatureMechanics:
 def charger_mechanics() -> FeatureMechanics:
     return FeatureMechanics(activatedEffects=[ActivatedEffect(
         label="Charge Attack",
+        description="After moving at least 10 feet straight toward the target, make a melee attack with 1d8 extra damage.",
+        actionId=FeatAbilityId.CHARGER,
+        activation=TimeEconomy.ACTION,
+        activationTiming=ActivationTiming.OWN_TURN,
+        resourceId=ResourceId.CHARGER,
         effect=SelectWeaponEffect(
             SelectionId.WEAPON,
             WeaponEligibility(wielded=False, attackRanges=(AttackRangeType.MELEE,)),
@@ -695,6 +710,211 @@ def charger_mechanics() -> FeatureMechanics:
             ),
         ),
     )])
+
+
+def crossbow_expert_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(passiveModifiers=[Modifier(
+        CalculationType.DAMAGE_ROLL,
+        ModifierOperation.ADD,
+        predicates=[
+            SourceAttackKindPredicate(AttackKind.TWO_WEAPON_FIGHTING),
+            SourceAttackRangePredicate(AttackRangeType.RANGED),
+            WeaponHasPropertyPredicate(WeaponProperty.LIGHT),
+            SourceDamageAbilityModifierPredicate((
+                AttackDamageAbilityModifierMode.EXCLUDED,
+                AttackDamageAbilityModifierMode.NEGATIVE_ONLY,
+            )),
+        ],
+        amount=CalculatedAmount(AmountCalculation.SOURCE_POSITIVE_ABILITY_MODIFIER),
+        description="Add the attack ability modifier to the Light crossbow extra attack when positive.",
+    )])
+
+
+def temporary_weapon_action(
+    action_id: GrantedActionId,
+    label: str,
+    description: str,
+    mechanics: FeatureMechanics,
+    *,
+    selection_exclusions: tuple[EffectSelectionExclusion, ...] = (),
+    expires_on_other_action: bool = True,
+) -> InstallOngoingEffect:
+    return InstallOngoingEffect(OngoingEffect(
+        duration=EffectDuration(
+            EffectDurationType.UNTIL_END_OF_TURN,
+            timing=TurnTiming(
+                TurnParticipantReference.OWNER,
+                TurnBoundary.END,
+                TurnOccurrence.THIS,
+            ),
+        ),
+        label=label,
+        endingConditions=(
+            [EndingCondition(EndingConditionType.OWNER_ACTIVATES_ACTION)]
+            if expires_on_other_action
+            else []
+        ),
+        grantedActions=(GrantedAction(
+            action_id,
+            label,
+            TimeEconomy.BONUS_ACTION,
+            description,
+            mechanics,
+            selectionExclusions=selection_exclusions,
+        ),),
+        replacement=OngoingReplacementPolicy.SAME_SOURCE,
+    ))
+
+
+def dual_wielder_mechanics() -> FeatureMechanics:
+    follow_up = FeatureMechanics(activatedEffects=[ActivatedEffect(
+        label="Dual Wielder Attack",
+        effect=SelectWeaponEffect(
+            SelectionId.WEAPON,
+            WeaponEligibility(
+                attackRanges=(AttackRangeType.MELEE,),
+                excludedProperties=(WeaponProperty.TWO_HANDED,),
+            ),
+            AttackRollEffect(
+                AttackRoll(AttackRollType.WEAPON),
+                weaponSelection=SelectionId.WEAPON,
+                weaponModification=WeaponAttackModification(
+                    attackKind=AttackKind.TWO_WEAPON_FIGHTING,
+                    damageAbilityModifier=AttackDamageAbilityModifierMode.NEGATIVE_ONLY,
+                ),
+            ),
+        ),
+    )])
+    grant = temporary_weapon_action(
+        GrantedActionId.DUAL_WIELDER,
+        "Dual Wielder Attack",
+        "After attacking with a Light weapon, make one Bonus Action attack with a different melee weapon that lacks Two-Handed.",
+        follow_up,
+        selection_exclusions=(EffectSelectionExclusion(SelectionId.WEAPON, SelectionId.TRIGGER_WEAPON),),
+        expires_on_other_action=False,
+    )
+    return FeatureMechanics(interactions=[Interaction(
+        trigger=ResolutionEventType.ATTACK_ROLLED,
+        timing=InteractionTiming.AFTER_EVENT,
+        decision=InteractionDecision(InteractionDecisionType.AUTOMATIC),
+        predicates=[
+            SourceIsOwnerPredicate(),
+            SourceIsAttackPredicate(),
+            SourceUsesTimeEconomyPredicate(TimeEconomy.ACTION),
+            WeaponHasPropertyPredicate(WeaponProperty.LIGHT),
+        ],
+        operations=[ApplyEffectOperation(
+            grant,
+            InteractionEffectRecipient.OWNER,
+            bindSourceAttackTo=SelectionId.TRIGGER_WEAPON,
+        )],
+        activation=TimeEconomy.SPECIAL,
+        activationTiming=ActivationTiming.OWN_TURN,
+    )])
+
+
+def polearm_eligibility() -> WeaponEligibility:
+    return WeaponEligibility(alternatives=(
+        WeaponEligibility(equipmentIds=(EquipmentId.QUARTERSTAFF, EquipmentId.SPEAR)),
+        WeaponEligibility(properties=(WeaponProperty.HEAVY, WeaponProperty.REACH)),
+    ))
+
+
+def polearm_master_mechanics() -> FeatureMechanics:
+    pole_strike = FeatureMechanics(activatedEffects=[ActivatedEffect(
+        label="Pole Strike",
+        effect=SelectWeaponEffect(
+            SelectionId.WEAPON,
+            polearm_eligibility(),
+            AttackRollEffect(
+                AttackRoll(AttackRollType.WEAPON),
+                weaponSelection=SelectionId.WEAPON,
+                weaponModification=WeaponAttackModification(
+                    damageDice=ThresholdDiceExpression((DiceThreshold(1, DiceAmount(1, DiceType.D4)),)),
+                    damageType=WeaponDamageTypeReference.FIXED,
+                    fixedDamageType=DamageType.BLUDGEONING,
+                ),
+            ),
+        ),
+    )])
+    pole_strike_grant = temporary_weapon_action(
+        GrantedActionId.POLE_STRIKE,
+        "Pole Strike",
+        "After attacking with a qualifying polearm, make a Bonus Action attack with its opposite end for 1d4 Bludgeoning damage.",
+        pole_strike,
+    )
+    reactive_strike = ActivatedEffect(
+        label="Reactive Strike",
+        description="When a creature enters your reach, use your Reaction to make a melee attack with the qualifying polearm.",
+        actionId=FeatAbilityId.POLEARM_REACTIVE_STRIKE,
+        activation=TimeEconomy.REACTION,
+        effect=SelectWeaponEffect(
+            SelectionId.WEAPON,
+            polearm_eligibility(),
+            AttackRollEffect(AttackRoll(AttackRollType.WEAPON), weaponSelection=SelectionId.WEAPON),
+        ),
+    )
+    return FeatureMechanics(
+        activatedEffects=[reactive_strike],
+        interactions=[Interaction(
+            trigger=ResolutionEventType.ATTACK_ROLLED,
+            timing=InteractionTiming.AFTER_EVENT,
+            decision=InteractionDecision(InteractionDecisionType.AUTOMATIC),
+            predicates=[
+                SourceIsOwnerPredicate(),
+                SourceIsAttackPredicate(),
+                SourceUsesTimeEconomyPredicate(TimeEconomy.ACTION),
+                AnyPredicate((
+                    SourceWeaponEquipmentPredicate((EquipmentId.QUARTERSTAFF, EquipmentId.SPEAR)),
+                    AllPredicate((
+                        WeaponHasPropertyPredicate(WeaponProperty.HEAVY),
+                        WeaponHasPropertyPredicate(WeaponProperty.REACH),
+                    )),
+                )),
+            ],
+            operations=[ApplyEffectOperation(
+                pole_strike_grant,
+                InteractionEffectRecipient.OWNER,
+                bindSourceAttackTo=SelectionId.WEAPON,
+            )],
+            activation=TimeEconomy.SPECIAL,
+            activationTiming=ActivationTiming.OWN_TURN,
+        )],
+    )
+
+
+def sentinel_mechanics() -> FeatureMechanics:
+    halt = InstallOngoingEffect(OngoingEffect(
+        duration=EffectDuration(
+            EffectDurationType.UNTIL_END_OF_TURN,
+            timing=TurnTiming(TurnParticipantReference.TARGET, TurnBoundary.END, TurnOccurrence.THIS),
+        ),
+        label="Sentinel: Halt",
+        modifiers=[Modifier(
+            CalculationType.SPEED,
+            ModifierOperation.SET,
+            amount=FixedAmount(0),
+            description="Speed is 0 for the rest of the current turn.",
+        )],
+        replacement=OngoingReplacementPolicy.SAME_SOURCE,
+    ))
+    guardian = ActivatedEffect(
+        label="Guardian",
+        description="When a nearby creature Disengages or attacks someone else, use your Reaction to make an Opportunity Attack; a hit sets its Speed to 0 for the rest of the turn.",
+        actionId=FeatAbilityId.SENTINEL_GUARDIAN,
+        activation=TimeEconomy.REACTION,
+        effect=SelectWeaponEffect(
+            SelectionId.WEAPON,
+            WeaponEligibility(attackRanges=(AttackRangeType.MELEE,)),
+            AttackRollEffect(
+                AttackRoll(AttackRollType.WEAPON),
+                weaponSelection=SelectionId.WEAPON,
+                weaponModification=WeaponAttackModification(attackKind=AttackKind.OPPORTUNITY),
+                onHit=halt,
+            ),
+        ),
+    )
+    return FeatureMechanics(activatedEffects=[guardian])
 
 
 def great_weapon_master_mechanics() -> FeatureMechanics:
@@ -830,7 +1050,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
     ),
     GeneralFeatType.CHEF: general_feat(GeneralFeatType.CHEF, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Constitution or Wisdom; gain cook's utensils and prepare restorative food."),
-    GeneralFeatType.CROSSBOW_EXPERT: general_feat(GeneralFeatType.CROSSBOW_EXPERT, RuleSource.PLAYERS_HANDBOOK_2024, "Improve crossbow handling and close-range ranged attacks."),
+    GeneralFeatType.CROSSBOW_EXPERT: general_feat(
+        GeneralFeatType.CROSSBOW_EXPERT,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Dexterity. Ignore Loading for crossbows, load them without a free hand, avoid close-range disadvantage, and add your ability modifier to a Light crossbow's extra attack.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.DEXTERITY)),
+        mechanics=crossbow_expert_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.DEXTERITY,)),
+    ),
     GeneralFeatType.CRAFTER: general_feat(GeneralFeatType.CRAFTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Artisan's Tools and craft mundane items faster."),
     GeneralFeatType.CRUSHER: general_feat(GeneralFeatType.CRUSHER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Strength or Constitution; add control and critical riders to bludgeoning hits."),
     GeneralFeatType.DEFENSIVE_DUELIST: general_feat(
@@ -844,7 +1071,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.DRAGON_FEAR: general_feat(GeneralFeatType.DRAGON_FEAR, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength, Constitution, or Charisma; turn Breath Weapon into fear.", (species_prerequisite(SpeciesType.DRAGONBORN),)),
     GeneralFeatType.DRAGON_HIDE: general_feat(GeneralFeatType.DRAGON_HIDE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength, Constitution, or Charisma; gain natural armor and claws.", (species_prerequisite(SpeciesType.DRAGONBORN),)),
     GeneralFeatType.DROW_HIGH_MAGIC: general_feat(GeneralFeatType.DROW_HIGH_MAGIC, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Gain drow innate spells.", (species_prerequisite(SpeciesType.ELF),)),
-    GeneralFeatType.DUAL_WIELDER: general_feat(GeneralFeatType.DUAL_WIELDER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve AC, weapon options, and drawing weapons while dual wielding."),
+    GeneralFeatType.DUAL_WIELDER: general_feat(
+        GeneralFeatType.DUAL_WIELDER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity. After attacking with a Light weapon, make a Bonus Action attack with a different one-handed melee weapon; draw or stow two weapons together.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+        mechanics=dual_wielder_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+    ),
     GeneralFeatType.DUNGEON_DELVER: general_feat(GeneralFeatType.DUNGEON_DELVER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve trap detection, trap saves, and dungeon exploration."),
     GeneralFeatType.DURABLE: general_feat(GeneralFeatType.DURABLE, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Constitution; improve healing from Hit Dice."),
     GeneralFeatType.DWARF_FORTITUDE: general_feat(GeneralFeatType.DWARF_FORTITUDE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Constitution; spend a Hit Die when taking the Dodge action.", (species_prerequisite(SpeciesType.DWARF),)),
@@ -931,7 +1165,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.ORCISH_FURY: general_feat(GeneralFeatType.ORCISH_FURY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength or Constitution; add weapon damage and retaliate after endurance.", (species_prerequisite(SpeciesType.ORC),)),
     GeneralFeatType.PIERCER: general_feat(GeneralFeatType.PIERCER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Strength or Dexterity; improve piercing damage dice and criticals."),
     GeneralFeatType.POISONER: general_feat(GeneralFeatType.POISONER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Gain poisoner tools, faster poison application, and better poison attacks."),
-    GeneralFeatType.POLEARM_MASTER: general_feat(GeneralFeatType.POLEARM_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Make extra polearm attacks and opportunity attacks when foes enter reach."),
+    GeneralFeatType.POLEARM_MASTER: general_feat(
+        GeneralFeatType.POLEARM_MASTER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity. Follow a qualifying polearm Attack action with a d4 Bonus Action strike, and make a Reactive Strike when a creature enters your reach.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+        mechanics=polearm_master_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+    ),
     GeneralFeatType.PRODIGY: general_feat(GeneralFeatType.PRODIGY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Gain a skill, tool, language, and expertise.", (species_prerequisite(SpeciesType.HUMAN, SpeciesType.ORC, SpeciesType.ELF),)),
     GeneralFeatType.RESILIENT: general_feat(GeneralFeatType.RESILIENT, RuleSource.PLAYERS_HANDBOOK_2024, "+1 in one ability and proficiency in that ability's saving throws."),
     GeneralFeatType.RITUAL_CASTER: general_feat(GeneralFeatType.RITUAL_CASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain a ritual book and cast ritual spells.", (ability_prerequisite(13, AbilityType.INTELLIGENCE, AbilityType.WISDOM),)),
@@ -943,7 +1184,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         mechanics=savage_attacker_mechanics(),
     ),
     GeneralFeatType.SECOND_CHANCE: general_feat(GeneralFeatType.SECOND_CHANCE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Dexterity, Constitution, or Charisma; force an attacker to reroll.", (species_prerequisite(SpeciesType.HALFLING),)),
-    GeneralFeatType.SENTINEL: general_feat(GeneralFeatType.SENTINEL, RuleSource.PLAYERS_HANDBOOK_2024, "Improve opportunity attacks and lock down nearby enemies."),
+    GeneralFeatType.SENTINEL: general_feat(
+        GeneralFeatType.SENTINEL,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity. React when a nearby creature Disengages or attacks another target; an Opportunity Attack hit sets its Speed to 0 for the rest of the turn.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+        mechanics=sentinel_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+    ),
     GeneralFeatType.SHADOW_TOUCHED: general_feat(GeneralFeatType.SHADOW_TOUCHED, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; learn invisibility and another spell."),
     GeneralFeatType.SHARPSHOOTER: general_feat(GeneralFeatType.SHARPSHOOTER, RuleSource.PLAYERS_HANDBOOK_2024, "Ignore common ranged penalties and trade accuracy for damage."),
     GeneralFeatType.SHIELD_MASTER: general_feat(GeneralFeatType.SHIELD_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Add shield tactics to attacks and Dexterity saves."),
@@ -1360,7 +1608,10 @@ FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
             ModifierOperation.ADD,
             predicates=[
                 SourceAttackKindPredicate(AttackKind.TWO_WEAPON_FIGHTING),
-                SourceDamageAbilityModifierPredicate(AttackDamageAbilityModifierMode.EXCLUDED),
+                SourceDamageAbilityModifierPredicate((
+                    AttackDamageAbilityModifierMode.EXCLUDED,
+                    AttackDamageAbilityModifierMode.NEGATIVE_ONLY,
+                )),
             ],
             amount=CalculatedAmount(AmountCalculation.SOURCE_ABILITY_MODIFIER),
             description="Add the attack ability modifier to two-weapon fighting bonus attack damage.",
@@ -1654,16 +1905,20 @@ def feat_abilities(
             description=description,
             resourceId=resource_id,
         ))
-    if GeneralFeatType.CHARGER in selected_feats:
-        abilities.append(SheetAbility(
-            id=FeatAbilityId.CHARGER.value,
-            name="Charge Attack",
-            source=enum_label(GeneralFeatType.CHARGER),
-            activation=TimeEconomy.ACTION,
-            description="After moving at least 10 feet straight toward the target, make a melee attack with 1d8 extra damage.",
-            resourceId=ResourceId.CHARGER,
-            mechanics=GENERAL_FEATS[GeneralFeatType.CHARGER].mechanics,
-        ))
+    for feat_type in selected_feats:
+        definition = GENERAL_FEATS[feat_type]
+        for effect in definition.mechanics.activatedEffects:
+            if not isinstance(effect, ActivatedEffect) or effect.actionId is None or effect.activation is None:
+                continue
+            abilities.append(SheetAbility(
+                id=enum_key(effect.actionId),
+                name=effect.label or enum_label(feat_type),
+                source=enum_label(feat_type),
+                activation=effect.activation,
+                description=effect.description or definition.description,
+                resourceId=effect.resourceId,
+                mechanics=FeatureMechanics(activatedEffects=[effect]),
+            ))
     for style in selected_fighting_styles(classes):
         definition = FIGHTING_STYLE_FEATS.get(style)
         if definition is None:
@@ -1805,14 +2060,17 @@ def attack_roll_modifiers(classes: list[CharacterClassLevel], action: AttackActi
     ]
 
 
-def damage_roll_modifiers(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], action: AttackAction, ability_modifier_value: int) -> list[RollModifierBreakdown]:
+def damage_roll_modifiers(classes: list[CharacterClassLevel], feats, equipment: list[EquipmentItem], action: AttackAction, ability_modifier_value: int) -> list[RollModifierBreakdown]:
     return [
         RollModifierBreakdown(
             source=enum_label(definition.featType),
             value=modifier_amount(modifier, ability_modifier_value),
             description=modifier.description,
         )
-        for definition, modifier in fighting_style_modifiers(classes, CalculationType.DAMAGE_ROLL)
+        for definition, modifier in [
+            *fighting_style_modifiers(classes, CalculationType.DAMAGE_ROLL),
+            *selected_general_feat_modifiers(feats, CalculationType.DAMAGE_ROLL),
+        ]
         if modifier.operation == ModifierOperation.ADD
         and fighting_style_modifier_applies(modifier, equipment, action)
     ]
@@ -1848,8 +2106,11 @@ def modifier_fixed_amount(modifier: Modifier) -> int:
 
 
 def modifier_amount(modifier: Modifier, ability_modifier_value: int) -> int:
-    if isinstance(modifier.amount, CalculatedAmount) and modifier.amount.calculation == AmountCalculation.SOURCE_ABILITY_MODIFIER:
-        return ability_modifier_value
+    if isinstance(modifier.amount, CalculatedAmount):
+        if modifier.amount.calculation == AmountCalculation.SOURCE_ABILITY_MODIFIER:
+            return ability_modifier_value
+        if modifier.amount.calculation == AmountCalculation.SOURCE_POSITIVE_ABILITY_MODIFIER:
+            return max(0, ability_modifier_value)
     return modifier_fixed_amount(modifier)
 
 
@@ -1869,7 +2130,7 @@ def fighting_style_modifier_applies(
             if action is None or action.attackKind != predicate.attackKind:
                 return False
         elif isinstance(predicate, SourceDamageAbilityModifierPredicate):
-            if action is None or action.damageAbilityModifier != predicate.mode:
+            if action is None or action.damageAbilityModifier not in predicate.modes:
                 return False
         elif isinstance(predicate, WeaponHasPropertyPredicate):
             if action is None or predicate.property not in weapon_properties(action):

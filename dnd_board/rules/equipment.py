@@ -55,6 +55,10 @@ class EquipmentId(Enum):
     GLASS_BOTTLE = "Glass Bottle"
     GRAPPLING_HOOK = "Grappling Hook"
     GREATCLUB = "Greatclub"
+    GLAIVE = "Glaive"
+    HALBERD = "Halberd"
+    HAND_CROSSBOW = "Hand Crossbow"
+    HEAVY_CROSSBOW = "Heavy Crossbow"
     HEALERS_KIT = "Healer's Kit"
     HOLY_SYMBOL = "Holy Symbol"
     HOLY_WATER = "Holy Water"
@@ -80,6 +84,7 @@ class EquipmentId(Enum):
     PAPER = "Paper"
     PARCHMENT = "Parchment"
     PERFUME = "Perfume"
+    PIKE = "Pike"
     POLE = "Pole"
     PORTABLE_RAM = "Portable Ram"
     POUCH = "Pouch"
@@ -207,6 +212,23 @@ def equipment_type_for_category(category: EquipmentCategory) -> EquipmentType:
     return EquipmentType.GEAR
 
 
+def valid_equipment_slots(item: EquipmentItem) -> set[EquipmentSlot]:
+    if item.itemType == EquipmentType.ARMOR:
+        return {EquipmentSlot.CARRIED, EquipmentSlot.ARMOR}
+    if item.itemType == EquipmentType.SHIELD:
+        return {EquipmentSlot.CARRIED, EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND}
+    if item.itemType != EquipmentType.WEAPON:
+        return {EquipmentSlot.CARRIED}
+    definition = equipment_definition(item.definitionId or item.id)
+    properties = set(definition.properties) if definition is not None else set()
+    if WeaponProperty.TWO_HANDED in properties:
+        return {EquipmentSlot.CARRIED, EquipmentSlot.TWO_HANDS}
+    slots = {EquipmentSlot.CARRIED, EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND}
+    if definition is None or WeaponProperty.VERSATILE in properties:
+        slots.add(EquipmentSlot.TWO_HANDS)
+    return slots
+
+
 def equipment_definition(value: str | EquipmentId) -> EquipmentDefinition | None:
     equipment_id = value if isinstance(value, EquipmentId) else enum_value(EquipmentId, value)
     return EQUIPMENT_DEFINITIONS.get(equipment_id)
@@ -289,13 +311,18 @@ EQUIPMENT_DEFINITIONS: dict[EquipmentId, EquipmentDefinition] = {
     EquipmentId.CLUB: weapon_definition(EquipmentId.CLUB, WeaponTrainingCategory.SIMPLE, WeaponCategory.MELEE, 1, DiceType.D4, DamageType.BLUDGEONING, (WeaponProperty.LIGHT,), WeaponMastery.SLOW, 2, cost_sp(1)),
     EquipmentId.GREATCLUB: weapon_definition(EquipmentId.GREATCLUB, WeaponTrainingCategory.SIMPLE, WeaponCategory.MELEE, 1, DiceType.D8, DamageType.BLUDGEONING, (WeaponProperty.TWO_HANDED,), WeaponMastery.PUSH, 10, cost_sp(2)),
     EquipmentId.JAVELIN: weapon_definition(EquipmentId.JAVELIN, WeaponTrainingCategory.SIMPLE, WeaponCategory.MELEE, 1, DiceType.D6, DamageType.PIERCING, (WeaponProperty.THROWN,), WeaponMastery.SLOW, 2, cost_sp(5), 30, 120),
-    EquipmentId.LIGHT_CROSSBOW: weapon_definition(EquipmentId.LIGHT_CROSSBOW, WeaponTrainingCategory.SIMPLE, WeaponCategory.RANGED, 1, DiceType.D8, DamageType.PIERCING, (WeaponProperty.AMMUNITION, WeaponProperty.TWO_HANDED), WeaponMastery.SLOW, 5, cost_gp(25), 80, 320),
+    EquipmentId.LIGHT_CROSSBOW: weapon_definition(EquipmentId.LIGHT_CROSSBOW, WeaponTrainingCategory.SIMPLE, WeaponCategory.RANGED, 1, DiceType.D8, DamageType.PIERCING, (WeaponProperty.AMMUNITION, WeaponProperty.LOADING, WeaponProperty.TWO_HANDED), WeaponMastery.SLOW, 5, cost_gp(25), 80, 320),
     EquipmentId.LIGHT_HAMMER: weapon_definition(EquipmentId.LIGHT_HAMMER, WeaponTrainingCategory.SIMPLE, WeaponCategory.MELEE, 1, DiceType.D4, DamageType.BLUDGEONING, (WeaponProperty.LIGHT, WeaponProperty.THROWN), WeaponMastery.NICK, 2, cost_gp(2), 20, 60),
     EquipmentId.MACE: weapon_definition(EquipmentId.MACE, WeaponTrainingCategory.SIMPLE, WeaponCategory.MELEE, 1, DiceType.D6, DamageType.BLUDGEONING, (), WeaponMastery.SAP, 4, cost_gp(5)),
     EquipmentId.QUARTERSTAFF: weapon_definition(EquipmentId.QUARTERSTAFF, WeaponTrainingCategory.SIMPLE, WeaponCategory.MELEE, 1, DiceType.D6, DamageType.BLUDGEONING, (WeaponProperty.VERSATILE,), WeaponMastery.TOPPLE, 4, cost_sp(2)),
     EquipmentId.SHORTBOW: weapon_definition(EquipmentId.SHORTBOW, WeaponTrainingCategory.SIMPLE, WeaponCategory.RANGED, 1, DiceType.D6, DamageType.PIERCING, (WeaponProperty.AMMUNITION, WeaponProperty.TWO_HANDED), WeaponMastery.VEX, 2, cost_gp(25), 80, 320),
     EquipmentId.SICKLE: weapon_definition(EquipmentId.SICKLE, WeaponTrainingCategory.SIMPLE, WeaponCategory.MELEE, 1, DiceType.D4, DamageType.SLASHING, (WeaponProperty.LIGHT,), WeaponMastery.NICK, 2, cost_gp(1)),
     EquipmentId.SPEAR: weapon_definition(EquipmentId.SPEAR, WeaponTrainingCategory.SIMPLE, WeaponCategory.MELEE, 1, DiceType.D6, DamageType.PIERCING, (WeaponProperty.THROWN, WeaponProperty.VERSATILE), WeaponMastery.SAP, 3, cost_gp(1), 20, 60),
+    EquipmentId.GLAIVE: weapon_definition(EquipmentId.GLAIVE, WeaponTrainingCategory.MARTIAL, WeaponCategory.MELEE, 1, DiceType.D10, DamageType.SLASHING, (WeaponProperty.HEAVY, WeaponProperty.REACH, WeaponProperty.TWO_HANDED), WeaponMastery.GRAZE, 6, cost_gp(20)),
+    EquipmentId.HALBERD: weapon_definition(EquipmentId.HALBERD, WeaponTrainingCategory.MARTIAL, WeaponCategory.MELEE, 1, DiceType.D10, DamageType.SLASHING, (WeaponProperty.HEAVY, WeaponProperty.REACH, WeaponProperty.TWO_HANDED), WeaponMastery.CLEAVE, 6, cost_gp(20)),
+    EquipmentId.HAND_CROSSBOW: weapon_definition(EquipmentId.HAND_CROSSBOW, WeaponTrainingCategory.MARTIAL, WeaponCategory.RANGED, 1, DiceType.D6, DamageType.PIERCING, (WeaponProperty.AMMUNITION, WeaponProperty.LIGHT, WeaponProperty.LOADING), WeaponMastery.VEX, 3, cost_gp(75), 30, 120),
+    EquipmentId.HEAVY_CROSSBOW: weapon_definition(EquipmentId.HEAVY_CROSSBOW, WeaponTrainingCategory.MARTIAL, WeaponCategory.RANGED, 1, DiceType.D10, DamageType.PIERCING, (WeaponProperty.AMMUNITION, WeaponProperty.HEAVY, WeaponProperty.LOADING, WeaponProperty.TWO_HANDED), WeaponMastery.PUSH, 18, cost_gp(50), 100, 400),
+    EquipmentId.PIKE: weapon_definition(EquipmentId.PIKE, WeaponTrainingCategory.MARTIAL, WeaponCategory.MELEE, 1, DiceType.D10, DamageType.PIERCING, (WeaponProperty.HEAVY, WeaponProperty.REACH, WeaponProperty.TWO_HANDED), WeaponMastery.PUSH, 18, cost_gp(5)),
     EquipmentId.ARCANE_FOCUS: gear_definition(EquipmentId.ARCANE_FOCUS, 0, VARIABLE_COST, category=EquipmentCategory.FOCUS),
     EquipmentId.ARROWS: gear_definition(EquipmentId.ARROWS, 1, cost_gp(1), "Ammunition for bows.", EquipmentCategory.AMMUNITION),
     EquipmentId.BOLTS: gear_definition(EquipmentId.BOLTS, 1.5, cost_gp(1), "Ammunition for crossbows.", EquipmentCategory.AMMUNITION),

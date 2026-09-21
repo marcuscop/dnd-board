@@ -1,4 +1,5 @@
 from dataclasses import replace
+import random
 
 import pytest
 
@@ -7,6 +8,8 @@ from dnd_board.character_sheet import (
     AbilityType,
     AttackAction,
     AttackDamageAbilityModifierMode,
+    AttackKind,
+    AttackRangeType,
     AttackActionType,
     CharacterClassLevel,
     ClassType,
@@ -49,6 +52,8 @@ from dnd_board.character_sheet import (
     SpellTargeting,
     TimeEconomy,
     TokenKind,
+    WeaponCategory,
+    WeaponProperty,
     build_attack_roll_payload,
     build_combined_attack_roll_payload,
     build_character_sheet,
@@ -104,6 +109,7 @@ from dnd_board.rules.shared.weapon_effects import (
 )
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.equipment import EquipmentId
+from dnd_board.rules.feats import GeneralFeatType, general_feat_feature
 from dnd_board.rules.shared.character_effects import added_condition_types, condition_change_effects, first_damage_effect
 from dnd_board.rules.shared.effects import (
     AbilityScoreAdjustment,
@@ -1705,6 +1711,33 @@ def test_ongoing_ability_score_adjustments_rebuild_derived_sheet_values() -> Non
     assert sheet.armorClass == 15
     assert next(save for save in sheet.savingThrows if save.ability == AbilityType.DEXTERITY).modifier == 3
     assert next(skill for skill in sheet.skills if skill.name == enum_key(SkillType.STEALTH)).modifier == 3
+
+
+def test_crossbow_expert_adds_positive_modifier_to_light_crossbow_extra_attack(monkeypatch) -> None:
+    sheet = basic_sheet()
+    crossbow_expert = general_feat_feature(enum_key(GeneralFeatType.CROSSBOW_EXPERT))
+    assert crossbow_expert is not None
+    sheet.features.append(crossbow_expert)
+    sheet.abilityScores.dexterity = 16
+    attack = AttackAction(
+        id="hand-crossbow",
+        name="Hand Crossbow",
+        ability=AbilityType.DEXTERITY,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D6,
+        damageType=DamageType.PIERCING,
+        attackRange=AttackRangeType.RANGED,
+        weaponCategory=WeaponCategory.RANGED,
+        damageAbilityModifier=AttackDamageAbilityModifierMode.NEGATIVE_ONLY,
+        attackKind=AttackKind.TWO_WEAPON_FIGHTING,
+        properties=[WeaponProperty.AMMUNITION, WeaponProperty.LIGHT, WeaponProperty.LOADING],
+    )
+    monkeypatch.setattr(random, "randint", lambda _minimum, _maximum: 2)
+
+    roll = build_damage_roll_payload(sheet, "player-1", attack)
+
+    assert roll.total == 5
+    assert next(part for part in roll.modifierBreakdown if part.source == "Crossbow Expert").value == 3
 
 
 def spell_sheet(level, spells):

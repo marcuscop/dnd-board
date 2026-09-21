@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 from dnd_board.character_sheet import (
+    ActivationTiming,
     AttackAction,
+    AttackDamageAbilityModifierMode,
+    AttackKind,
     CharacterSheet,
     DamageComponentKind,
     DiceType,
@@ -14,6 +17,8 @@ from dnd_board.character_sheet import (
     RollSource,
     SheetSectionType,
     SpellEntry,
+    TimeEconomy,
+    WeaponProperty,
     attack_action_with_default_mechanics,
     attack_equipment_item,
     build_attack_roll_payload,
@@ -29,7 +34,10 @@ from dnd_board.rules.shared.effects import (
     ActiveOngoingEffect,
     ActivatedEffect,
     ApplyEffect,
+    ApplyEffectOperation,
     AttackRollEffect,
+    AttackRoll,
+    AttackRollType,
     ChoiceEffect,
     ConditionalEffect,
     ContestedCheckEffect,
@@ -41,13 +49,30 @@ from dnd_board.rules.shared.effects import (
     EffectResolutionInputs,
     EffectSelectionInput,
     EffectSelectionBinding,
+    EffectSelectionExclusion,
+    EffectDuration,
+    EffectDurationType,
     EquipmentInstanceId,
     FeatureMechanics,
+    GrantedAction,
+    GrantedActionId,
+    InstallOngoingEffect,
+    Interaction,
+    InteractionDecision,
+    InteractionDecisionType,
+    InteractionEffectRecipient,
+    InteractionTiming,
+    OngoingEffect,
+    OngoingReplacementPolicy,
+    ResolutionEventType,
     SelectionId,
     SelectWeaponEffect,
     SavingThrowEffect,
     RepeatedEffect,
     SequenceEffect,
+    SourceIsAttackPredicate,
+    SourceIsOwnerPredicate,
+    SourceUsesTimeEconomyPredicate,
     ThresholdDiceExpression,
     WeaponAbilityReference,
     WeaponAttackModification,
@@ -55,7 +80,65 @@ from dnd_board.rules.shared.effects import (
     WeaponAttackOptionId,
     WeaponDamageTypeReference,
     WeaponEligibility,
+    WeaponHasPropertyPredicate,
 )
+from dnd_board.rules.encounter import TurnBoundary, TurnOccurrence, TurnParticipantReference, TurnTiming
+
+
+def light_weapon_property_mechanics() -> FeatureMechanics:
+    follow_up = FeatureMechanics(activatedEffects=[ActivatedEffect(
+        label="Light Weapon Attack",
+        effect=SelectWeaponEffect(
+            SelectionId.WEAPON,
+            WeaponEligibility(properties=(WeaponProperty.LIGHT,)),
+            AttackRollEffect(
+                AttackRoll(AttackRollType.WEAPON),
+                weaponSelection=SelectionId.WEAPON,
+                weaponModification=WeaponAttackModification(
+                    attackKind=AttackKind.TWO_WEAPON_FIGHTING,
+                    damageAbilityModifier=AttackDamageAbilityModifierMode.NEGATIVE_ONLY,
+                ),
+            ),
+        ),
+    )])
+    grant = InstallOngoingEffect(OngoingEffect(
+        duration=EffectDuration(
+            EffectDurationType.UNTIL_END_OF_TURN,
+            timing=TurnTiming(
+                TurnParticipantReference.OWNER,
+                TurnBoundary.END,
+                TurnOccurrence.THIS,
+            ),
+        ),
+        label="Light Weapon Attack",
+        grantedActions=(GrantedAction(
+            GrantedActionId.LIGHT_WEAPON_ATTACK,
+            "Light Weapon Attack",
+            TimeEconomy.BONUS_ACTION,
+            "After attacking with a Light weapon, attack with a different wielded Light weapon.",
+            follow_up,
+            selectionExclusions=(EffectSelectionExclusion(SelectionId.WEAPON, SelectionId.TRIGGER_WEAPON),),
+        ),),
+        replacement=OngoingReplacementPolicy.SAME_SOURCE,
+    ))
+    return FeatureMechanics(interactions=[Interaction(
+        trigger=ResolutionEventType.ATTACK_ROLLED,
+        timing=InteractionTiming.AFTER_EVENT,
+        decision=InteractionDecision(InteractionDecisionType.AUTOMATIC),
+        predicates=[
+            SourceIsOwnerPredicate(),
+            SourceIsAttackPredicate(),
+            SourceUsesTimeEconomyPredicate(TimeEconomy.ACTION),
+            WeaponHasPropertyPredicate(WeaponProperty.LIGHT),
+        ],
+        operations=[ApplyEffectOperation(
+            grant,
+            InteractionEffectRecipient.OWNER,
+            bindSourceAttackTo=SelectionId.TRIGGER_WEAPON,
+        )],
+        activation=TimeEconomy.SPECIAL,
+        activationTiming=ActivationTiming.OWN_TURN,
+    )])
 
 
 def eligible_weapon_attacks(
@@ -74,6 +157,11 @@ def weapon_is_eligible(
     attack: AttackAction,
     eligibility: WeaponEligibility,
 ) -> bool:
+    if eligibility.alternatives and not any(
+        weapon_is_eligible(sheet, attack, alternative)
+        for alternative in eligibility.alternatives
+    ):
+        return False
     item = attack_equipment_item(sheet, attack)
     if eligibility.wielded and item is None:
         return False
@@ -89,73 +177,90 @@ def weapon_is_eligible(
         return False
     if eligibility.properties and not set(eligibility.properties).issubset(attack.properties or []):
         return False
+    if eligibility.excludedProperties and set(eligibility.excludedProperties).intersection(attack.properties or []):
+        return False
     if eligibility.equipmentIds:
         if item is None or equipment_definition_id(item) not in eligibility.equipmentIds:
             return False
+    if attack.id in {equipment_id.value for equipment_id in eligibility.excludedEquipmentInstanceIds}:
+        return False
     return attack.damageDiceCount > 0
 
 
 def mechanics_bound_to_selections(
     mechanics: FeatureMechanics,
     bindings: tuple[EffectSelectionBinding, ...],
+    exclusions: tuple[EffectSelectionExclusion, ...] = (),
 ) -> FeatureMechanics:
     selected = {binding.selection: binding.equipmentInstanceId for binding in bindings}
+    excluded = {
+        exclusion.selection: selected[exclusion.boundSelection]
+        for exclusion in exclusions
+        if exclusion.boundSelection in selected
+    }
     return replace(
         mechanics,
-        activatedEffects=[_effect_bound_to_selections(effect, selected) for effect in mechanics.activatedEffects],
+        activatedEffects=[_effect_bound_to_selections(effect, selected, excluded) for effect in mechanics.activatedEffects],
     )
 
 
 def _effect_bound_to_selections(
     effect: EffectNode,
     selected: dict[SelectionId, EquipmentInstanceId],
+    excluded: dict[SelectionId, EquipmentInstanceId],
 ) -> EffectNode:
     if isinstance(effect, ActivatedEffect):
-        return replace(effect, effect=_effect_bound_to_selections(effect.effect, selected))
+        return replace(effect, effect=_effect_bound_to_selections(effect.effect, selected, excluded))
     if isinstance(effect, SelectWeaponEffect):
         equipment = selected.get(effect.selection)
+        excluded_equipment = excluded.get(effect.selection)
         eligibility = (
             replace(effect.eligibility, equipmentInstanceIds=(equipment,))
             if equipment is not None
             else effect.eligibility
         )
+        if excluded_equipment is not None:
+            eligibility = replace(
+                eligibility,
+                excludedEquipmentInstanceIds=(excluded_equipment,),
+            )
         return replace(
             effect,
             eligibility=eligibility,
-            effect=_effect_bound_to_selections(effect.effect, selected),
+            effect=_effect_bound_to_selections(effect.effect, selected, excluded),
         )
     if isinstance(effect, SequenceEffect):
-        return replace(effect, effects=[_effect_bound_to_selections(child, selected) for child in effect.effects])
+        return replace(effect, effects=[_effect_bound_to_selections(child, selected, excluded) for child in effect.effects])
     if isinstance(effect, AttackRollEffect):
         return replace(
             effect,
-            onHit=_effect_bound_to_selections(effect.onHit, selected) if effect.onHit is not None else None,
-            onMiss=_effect_bound_to_selections(effect.onMiss, selected) if effect.onMiss is not None else None,
+            onHit=_effect_bound_to_selections(effect.onHit, selected, excluded) if effect.onHit is not None else None,
+            onMiss=_effect_bound_to_selections(effect.onMiss, selected, excluded) if effect.onMiss is not None else None,
         )
     if isinstance(effect, SavingThrowEffect):
         return replace(
             effect,
-            onFailure=_effect_bound_to_selections(effect.onFailure, selected) if effect.onFailure is not None else None,
-            onSuccess=_effect_bound_to_selections(effect.onSuccess, selected) if effect.onSuccess is not None else None,
+            onFailure=_effect_bound_to_selections(effect.onFailure, selected, excluded) if effect.onFailure is not None else None,
+            onSuccess=_effect_bound_to_selections(effect.onSuccess, selected, excluded) if effect.onSuccess is not None else None,
         )
     if isinstance(effect, ConditionalEffect):
         return replace(
             effect,
-            whenTrue=_effect_bound_to_selections(effect.whenTrue, selected),
-            whenFalse=_effect_bound_to_selections(effect.whenFalse, selected) if effect.whenFalse is not None else None,
+            whenTrue=_effect_bound_to_selections(effect.whenTrue, selected, excluded),
+            whenFalse=_effect_bound_to_selections(effect.whenFalse, selected, excluded) if effect.whenFalse is not None else None,
         )
     if isinstance(effect, ContestedCheckEffect):
         return replace(
             effect,
-            onSourceWin=_effect_bound_to_selections(effect.onSourceWin, selected) if effect.onSourceWin is not None else None,
-            onTargetWin=_effect_bound_to_selections(effect.onTargetWin, selected) if effect.onTargetWin is not None else None,
+            onSourceWin=_effect_bound_to_selections(effect.onSourceWin, selected, excluded) if effect.onSourceWin is not None else None,
+            onTargetWin=_effect_bound_to_selections(effect.onTargetWin, selected, excluded) if effect.onTargetWin is not None else None,
         )
     if isinstance(effect, RepeatedEffect):
-        return replace(effect, effect=_effect_bound_to_selections(effect.effect, selected))
+        return replace(effect, effect=_effect_bound_to_selections(effect.effect, selected, excluded))
     if isinstance(effect, ChoiceEffect):
         return replace(
             effect,
-            choices=[replace(choice, effect=_effect_bound_to_selections(choice.effect, selected)) for choice in effect.choices],
+            choices=[replace(choice, effect=_effect_bound_to_selections(choice.effect, selected, excluded)) for choice in effect.choices],
         )
     return effect
 
@@ -225,6 +330,8 @@ def apply_weapon_attack_modification(
         damageDiceCount=damage_count,
         damageDiceType=damage_type,
         damageType=attack_damage_type,
+        attackKind=modification.attackKind or attack.attackKind,
+        damageAbilityModifier=modification.damageAbilityModifier or attack.damageAbilityModifier,
         mechanics=None,
     ))
 

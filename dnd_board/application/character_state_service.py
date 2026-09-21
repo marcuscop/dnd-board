@@ -69,6 +69,7 @@ from dnd_board.rules.shared.effects import (
 from dnd_board.rules.encounter import ActionAllowance, AllowanceSource, grant_action_allowance
 from dnd_board.rules.shared.resources import ResourceUpdate
 from dnd_board.rules.shared.condition_effects import normalize_conditions
+from dnd_board.rules.equipment import valid_equipment_slots
 
 
 @dataclass(frozen=True)
@@ -529,16 +530,6 @@ def remove_active_ongoing_effect(
     else:
         room.ongoing_effects.pop(sheet.tokenId, None)
     return True
-
-
-def valid_equipment_slots(item: EquipmentItem) -> set[EquipmentSlot]:
-    if item.itemType == EquipmentType.ARMOR:
-        return {EquipmentSlot.CARRIED, EquipmentSlot.ARMOR}
-    if item.itemType == EquipmentType.SHIELD:
-        return {EquipmentSlot.CARRIED, EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND}
-    if item.itemType == EquipmentType.WEAPON:
-        return {EquipmentSlot.CARRIED, EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND, EquipmentSlot.TWO_HANDS}
-    return {EquipmentSlot.CARRIED}
 
 
 def updated_conditions(

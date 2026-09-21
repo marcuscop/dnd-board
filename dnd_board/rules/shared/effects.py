@@ -98,6 +98,7 @@ def adjusted_ability_score(current: int, adjustment: AbilityScoreAdjustment) -> 
 
 class AmountCalculation(Enum):
     SOURCE_ABILITY_MODIFIER = auto()
+    SOURCE_POSITIVE_ABILITY_MODIFIER = auto()
     SOURCE_SPELLCASTING_MODIFIER = auto()
     SOURCE_CLASS_LEVEL = auto()
     SOURCE_CHARACTER_LEVEL = auto()
@@ -510,7 +511,12 @@ class SourceAttackKindPredicate:
 
 @dataclass(frozen=True)
 class SourceDamageAbilityModifierPredicate:
-    mode: AttackDamageAbilityModifierMode
+    modes: tuple[AttackDamageAbilityModifierMode, ...]
+
+
+@dataclass(frozen=True)
+class SourceWeaponEquipmentPredicate:
+    equipmentIds: tuple[EquipmentId, ...]
 
 
 @dataclass(frozen=True)
@@ -573,6 +579,15 @@ class AnyPredicate:
 
 
 @dataclass(frozen=True)
+class AllPredicate:
+    predicates: tuple[Predicate, ...]
+
+    def __post_init__(self) -> None:
+        if not self.predicates:
+            raise ValueError("All predicate requires at least one predicate")
+
+
+@dataclass(frozen=True)
 class RandomChancePredicate:
     numerator: int
     denominator: int
@@ -608,6 +623,7 @@ Predicate: TypeAlias = (
     | SourceWeaponCategoryPredicate
     | SourceAttackKindPredicate
     | SourceDamageAbilityModifierPredicate
+    | SourceWeaponEquipmentPredicate
     | OwnerWieldsExactlyOneOneHandedWeaponPredicate
     | OwnerWearsHeavyArmorPredicate
     | OwnerWieldsShieldPredicate
@@ -619,6 +635,7 @@ Predicate: TypeAlias = (
     | SourceAttackCriticalPredicate
     | TargetHitPointsAtMostPredicate
     | AnyPredicate
+    | AllPredicate
     | RandomChancePredicate
 )
 
@@ -911,6 +928,7 @@ class EffectNodeId:
 
 class SelectionId(Enum):
     WEAPON = auto()
+    TRIGGER_WEAPON = auto()
 
 
 @dataclass(frozen=True)
@@ -928,9 +946,12 @@ class WeaponEligibility:
     proficient: bool = True
     equipmentIds: tuple[EquipmentId, ...] = ()
     properties: tuple[WeaponProperty, ...] = ()
+    excludedProperties: tuple[WeaponProperty, ...] = ()
     attackKinds: tuple[AttackKind, ...] = (AttackKind.STANDARD,)
     attackRanges: tuple[AttackRangeType, ...] = ()
     equipmentInstanceIds: tuple[EquipmentInstanceId, ...] = ()
+    excludedEquipmentInstanceIds: tuple[EquipmentInstanceId, ...] = ()
+    alternatives: tuple[WeaponEligibility, ...] = ()
 
 
 class WeaponAbilityReference(Enum):
@@ -983,6 +1004,8 @@ class WeaponAttackModification:
     damageDice: ThresholdDiceExpression | None = None
     damageType: WeaponDamageTypeReference = WeaponDamageTypeReference.ORIGINAL
     fixedDamageType: DamageType | None = None
+    attackKind: AttackKind | None = None
+    damageAbilityModifier: AttackDamageAbilityModifierMode | None = None
 
     def __post_init__(self) -> None:
         if self.damageType == WeaponDamageTypeReference.FIXED and self.fixedDamageType is None:
@@ -1000,6 +1023,12 @@ class WeaponAttackOption:
 class EffectSelectionBinding:
     selection: SelectionId
     equipmentInstanceId: EquipmentInstanceId
+
+
+@dataclass(frozen=True)
+class EffectSelectionExclusion:
+    selection: SelectionId
+    boundSelection: SelectionId
 
 
 @dataclass(frozen=True)
@@ -1123,6 +1152,10 @@ class ActivatedEffect:
     effect: EffectNode
     label: str = ""
     description: str = ""
+    actionId: Enum | None = None
+    activation: TimeEconomy | None = None
+    activationTiming: ActivationTiming = ActivationTiming.UNRESTRICTED
+    resourceId: ResourceId | None = None
 
 
 @dataclass(frozen=True)
@@ -1374,7 +1407,10 @@ class FeatureMechanics:
 
 
 class GrantedActionId(Enum):
+    DUAL_WIELDER = "dualWielder"
     HEW = "hew"
+    LIGHT_WEAPON_ATTACK = "lightWeaponAttack"
+    POLE_STRIKE = "poleStrike"
 
 
 @dataclass(frozen=True)
@@ -1384,6 +1420,7 @@ class GrantedAction:
     activation: TimeEconomy
     description: str
     mechanics: FeatureMechanics
+    selectionExclusions: tuple[EffectSelectionExclusion, ...] = ()
 
 
 class EffectExecutionStatus(Enum):
@@ -2117,6 +2154,7 @@ def effect_model_types() -> list[type[object]]:
         AbilityScoreAdjustment,
         AbilityScoreAdjustmentChoice,
         AbilityScoreAdjustmentOperation,
+        AllPredicate,
         AnyPredicate,
         ActionModificationType,
         ActiveOngoingEffect,
@@ -2160,6 +2198,7 @@ def effect_model_types() -> list[type[object]]:
         EffectExecutionStatus,
         EffectAmountInput,
         EffectSelectionBinding,
+        EffectSelectionExclusion,
         EffectSelectionInput,
         EffectNodeId,
         EffectResolutionInputs,
@@ -2245,6 +2284,7 @@ def effect_model_types() -> list[type[object]]:
         SourceAttackKindPredicate,
         SourceAttackRangePredicate,
         SourceDamageAbilityModifierPredicate,
+        SourceWeaponEquipmentPredicate,
         SourceUsesTimeEconomyPredicate,
         SourceWeaponCategoryPredicate,
         SourceIsAttackPredicate,

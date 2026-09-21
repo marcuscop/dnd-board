@@ -52,6 +52,7 @@ from dnd_board.rules.shared.effects import (
     SourceIsOwnerPredicate,
 )
 from dnd_board.rules.shared.resources import ResourceId
+from dnd_board.rules.shared.weapon_effects import light_weapon_property_mechanics
 from dnd_board.rules.encounter import EncounterState, interaction_usage_allowed
 
 
@@ -532,6 +533,8 @@ def sheet_interaction_sources(sheet: CharacterSheet) -> list[SheetInteractionSou
                 for interaction in mechanics.interactions
                 if _interaction_resources_available(interaction, available)
             )
+
+    add_mechanics("Light Weapon Property", light_weapon_property_mechanics())
 
     seen_spells: set[SpellId] = set()
     for spell in [*sheet.spells, *sheet.spellbook]:

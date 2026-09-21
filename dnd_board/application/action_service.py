@@ -54,6 +54,7 @@ from dnd_board.character_sheet import (
     roll_resolution_to_dict,
     resolution_interceptor_prompt_to_dict,
     sanitize_identifier,
+    weapon_attack_is_wielded,
 )
 from dnd_board.rules.shared.weapon_effects import (
     build_bound_weapon_attack_payload,
@@ -419,6 +420,8 @@ async def _create_attack_action_for(
     weapon_option: str | None = None,
     turn_id: str | None = None,
 ) -> dict[str, Any]:
+    if not weapon_attack_is_wielded(sheet, attack):
+        raise ActionServiceError(409, f"{attack.name} is not currently wielded")
     if weapon_option is not None and not any(
         enum_key(option.id) == weapon_option
         for option in attack.weaponAttackOptions or []

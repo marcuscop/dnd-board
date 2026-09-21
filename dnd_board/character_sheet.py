@@ -941,6 +941,8 @@ class WeaponProperty(Enum):
     FINESSE = auto()
     HEAVY = auto()
     LIGHT = auto()
+    LOADING = auto()
+    REACH = auto()
     THROWN = auto()
     TWO_HANDED = auto()
     VERSATILE = auto()
@@ -1003,11 +1005,13 @@ class ArmorCategory(Enum):
 class AttackDamageAbilityModifierMode(Enum):
     INCLUDED = auto()
     EXCLUDED = auto()
+    NEGATIVE_ONLY = auto()
 
 
 class AttackKind(Enum):
     STANDARD = auto()
     TWO_WEAPON_FIGHTING = auto()
+    OPPORTUNITY = auto()
 
 
 class AttackActionType(Enum):
@@ -1907,9 +1911,18 @@ def build_damage_roll_payload(
         direct_damage = direct_damage_effect_at(action.mechanics, 0)
     ability_score = getattr(sheet.abilityScores, enum_key(action.ability))
     modifier_breakdown = []
+    ability_bonus = ability_modifier(ability_score)
     if action.damageAbilityModifier == AttackDamageAbilityModifierMode.INCLUDED:
-        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(action.ability), value=ability_modifier(ability_score)))
-    modifier_breakdown.extend(damage_roll_modifier_breakdown(sheet.classes, sheet.equipment, action, ability_modifier(ability_score)))
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(action.ability), value=ability_bonus))
+    elif action.damageAbilityModifier == AttackDamageAbilityModifierMode.NEGATIVE_ONLY and ability_bonus < 0:
+        modifier_breakdown.append(RollModifierBreakdown(source=enum_label(action.ability), value=ability_bonus))
+    modifier_breakdown.extend(damage_roll_modifier_breakdown(
+        sheet.classes,
+        sheet.features,
+        sheet.equipment,
+        action,
+        ability_modifier(ability_score),
+    ))
     if action.toHitBonus:
         modifier_breakdown.append(RollModifierBreakdown(source=f"{action.name} Attack Bonus", value=action.toHitBonus))
     if action.damageBonus:
@@ -2052,7 +2065,16 @@ def effective_attack_action(
 
 
 def weapon_attack_is_wielded(sheet: CharacterSheet, action: AttackAction) -> bool:
-    return attack_equipment_item(sheet, action) is not None
+    return not attack_requires_wielded_weapon(sheet, action) or attack_equipment_item(sheet, action) is not None
+
+
+def attack_requires_wielded_weapon(sheet: CharacterSheet, action: AttackAction) -> bool:
+    if action.attackType == AttackActionType.UNARMED_STRIKE:
+        return False
+    return any(
+        item.itemType == EquipmentType.WEAPON and item.id == action.id
+        for item in sheet.equipment
+    )
 
 
 def attack_equipment_item(sheet: CharacterSheet, action: AttackAction) -> EquipmentItem | None:
@@ -3343,7 +3365,11 @@ def ongoing_effect_abilities(sheet: CharacterSheet) -> list[SheetAbility]:
             source=active.sourceLabel,
             activation=action.activation,
             description=action.description,
-            mechanics=mechanics_bound_to_selections(action.mechanics, active.bindings),
+            mechanics=mechanics_bound_to_selections(
+                action.mechanics,
+                active.bindings,
+                action.selectionExclusions,
+            ),
         )
         for active in sheet.ongoingEffects
         for action in active.effect.grantedActions
@@ -3648,10 +3674,10 @@ def attack_roll_modifier_breakdown(classes: list[CharacterClassLevel], action: A
     return attack_roll_modifiers(classes, action)
 
 
-def damage_roll_modifier_breakdown(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], action: AttackAction, ability_modifier_value: int) -> list[RollModifierBreakdown]:
+def damage_roll_modifier_breakdown(classes: list[CharacterClassLevel], feats, equipment: list[EquipmentItem], action: AttackAction, ability_modifier_value: int) -> list[RollModifierBreakdown]:
     from dnd_board.rules.feats import damage_roll_modifiers
 
-    return damage_roll_modifiers(classes, equipment, action, ability_modifier_value)
+    return damage_roll_modifiers(classes, feats, equipment, action, ability_modifier_value)
 
 
 def uses_great_weapon_fighting(classes: list[CharacterClassLevel], action: AttackAction) -> bool:

@@ -517,6 +517,9 @@ export type AttackAction = {
   mechanics?: FeatureMechanics;
   resourceCosts: ResourceCost[];
   weaponAttackOptions?: Array<{ id: string; label: string }>;
+  available: boolean;
+  unavailableReason?: string;
+  requiresWieldedWeapon: boolean;
 };
 
 export type RollAction = {
@@ -857,6 +860,7 @@ export type CharacterSheet = {
     itemTypeLabel: string;
     slot: EquipmentSlot;
     slotLabel: string;
+    validSlots: EquipmentSlot[];
     armorCategory?: ArmorCategory;
     armorCategoryLabel?: string;
     armorClass: number;

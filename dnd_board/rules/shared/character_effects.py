@@ -41,6 +41,7 @@ from dnd_board.rules.shared.effects import (
     AppliedEffect,
     AppliedEffectResult,
     AmountScaling,
+    AllPredicate,
     AnyPredicate,
     ApplyEffect,
     AttackRoll,
@@ -125,6 +126,7 @@ from dnd_board.rules.shared.effects import (
     SourceAttackCriticalPredicate,
     SourceAttackRangePredicate,
     SourceDamageAbilityModifierPredicate,
+    SourceWeaponEquipmentPredicate,
     SourceIsAttackPredicate,
     SourceIsOwnerPredicate,
     SourceIsSpellPredicate,
@@ -650,9 +652,20 @@ class CharacterEffectExecutionContext:
             return sum(character_sheet.random.randint(1, amount.diceType.value) for _ in range(amount.diceCount)) + amount.staticBonus
         if isinstance(amount, DerivedAmount):
             raise TypeError("Derived runtime amounts require a preceding applied result")
-        if amount.calculation == AmountCalculation.SOURCE_ABILITY_MODIFIER and amount.ability is not None:
-            score = ability_score(source, amount.ability)
+        if amount.calculation in {
+            AmountCalculation.SOURCE_ABILITY_MODIFIER,
+            AmountCalculation.SOURCE_POSITIVE_ABILITY_MODIFIER,
+        }:
+            ability = amount.ability
+            if ability is None:
+                source_attack = self.source_attack()
+                ability = source_attack.ability if source_attack is not None else None
+            if ability is None:
+                raise ValueError("An ability modifier amount requires an ability or source attack")
+            score = ability_score(source, ability)
             value = ability_modifier(score)
+            if amount.calculation == AmountCalculation.SOURCE_POSITIVE_ABILITY_MODIFIER:
+                value = max(0, value)
         elif amount.calculation == AmountCalculation.SOURCE_SPELLCASTING_MODIFIER:
             spell = self.source_spell()
             if spell is None:
@@ -692,7 +705,10 @@ class CharacterEffectExecutionContext:
 
     def evaluate_predicates(self, node_id: EffectNodeId, predicates: list[Predicate]) -> bool:
         for predicate in predicates:
-            if isinstance(predicate, AnyPredicate):
+            if isinstance(predicate, AllPredicate):
+                if not self.evaluate_predicates(node_id, list(predicate.predicates)):
+                    return False
+            elif isinstance(predicate, AnyPredicate):
                 if not any(self.evaluate_predicates(node_id, [candidate]) for candidate in predicate.predicates):
                     return False
             elif isinstance(predicate, TargetIsOwnerPredicate):
@@ -781,7 +797,17 @@ class CharacterEffectExecutionContext:
                     return False
             elif isinstance(predicate, SourceDamageAbilityModifierPredicate):
                 source_attack = self.source_attack()
-                if source_attack is None or source_attack.damageAbilityModifier != predicate.mode:
+                if source_attack is None or source_attack.damageAbilityModifier not in predicate.modes:
+                    return False
+            elif isinstance(predicate, SourceWeaponEquipmentPredicate):
+                source_attack = self.source_attack()
+                source_item = (
+                    character_sheet.attack_equipment_item(self.source, source_attack)
+                    if self.source is not None and source_attack is not None
+                    else None
+                )
+                equipment_id = source_item.definitionId if source_item is not None else None
+                if equipment_id not in predicate.equipmentIds:
                     return False
             elif isinstance(predicate, WithinDistancePredicate):
                 # Target selection remains the manual geometry boundary until a board geometry engine exists.
@@ -2285,8 +2311,13 @@ def roll_effect_amount(
                 ability = spell_casting_ability(sheet, spell)
                 value = ability_modifier(getattr(sheet.abilityScores, enum_key(ability)))
                 source = enum_label(ability)
-            elif part.calculation == AmountCalculation.SOURCE_ABILITY_MODIFIER and part.ability is not None:
+            elif part.calculation in {
+                AmountCalculation.SOURCE_ABILITY_MODIFIER,
+                AmountCalculation.SOURCE_POSITIVE_ABILITY_MODIFIER,
+            } and part.ability is not None:
                 value = ability_modifier(getattr(sheet.abilityScores, enum_key(part.ability)))
+                if part.calculation == AmountCalculation.SOURCE_POSITIVE_ABILITY_MODIFIER:
+                    value = max(0, value)
                 source = enum_label(part.ability)
             elif part.calculation == AmountCalculation.SOURCE_CLASS_LEVEL and part.characterClass is not None:
                 value = sum(level.level for level in sheet.classes if level.name == part.characterClass)

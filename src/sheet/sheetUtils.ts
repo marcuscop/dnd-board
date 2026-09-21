@@ -53,11 +53,8 @@ export function formatSigned(value: number) {
   return value >= 0 ? `+${value}` : String(value);
 }
 
-export function equipmentSlotOptions(itemType: CharacterSheet["equipment"][number]["itemType"]): EquipmentSlot[] {
-  if (itemType === "armor") return ["carried", "armor"];
-  if (itemType === "shield") return ["carried", "mainHand", "offHand"];
-  if (itemType === "weapon") return ["carried", "mainHand", "offHand", "twoHands"];
-  return ["carried"];
+export function equipmentSlotOptions(item: CharacterSheet["equipment"][number]): EquipmentSlot[] {
+  return item.validSlots;
 }
 
 export function hasPurseCoins(sheet: CharacterSheet) {

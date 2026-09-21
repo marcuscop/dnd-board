@@ -1363,7 +1363,11 @@ function FullSheet({
                 ))}
               </select>
             )}
-            <button disabled={!canRoll} onClick={() => onRollAttack(sheet, attack.id, weaponOption)}>
+            <button
+              disabled={!canRoll || !attack.available}
+              title={attack.unavailableReason}
+              onClick={() => onRollAttack(sheet, attack.id, weaponOption)}
+            >
               Attack
             </button>
             <InlineRolls
@@ -1449,7 +1453,7 @@ function FullSheet({
                       <small>{item.itemTypeLabel} · {item.slotLabel}</small>
                     </span>
                     <select disabled={!canRoll} value={item.slot} onChange={(event) => onUpdateEquipmentSlot(sheet, item.id, event.target.value as EquipmentSlot)}>
-                      {equipmentSlotOptions(item.itemType).map((slot) => (
+                      {equipmentSlotOptions(item).map((slot) => (
                         <option key={slot} value={slot}>{cleanName(slot)}</option>
                       ))}
                     </select>

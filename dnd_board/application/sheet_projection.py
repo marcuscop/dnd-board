@@ -6,9 +6,13 @@ from enum import Enum
 from dnd_board.character_sheet import (
     CharacterSheet,
     DamageType,
+    EquipmentSlot,
     SpellEntry,
+    enum_key,
     enum_label,
     serialize_dataclass,
+    attack_requires_wielded_weapon,
+    weapon_attack_is_wielded,
 )
 from dnd_board.rules.shared.character_effects import (
     activated_effect_label,
@@ -38,6 +42,7 @@ from dnd_board.rules.shared.effects import (
 )
 from dnd_board.rules.shared.weapon_effects import eligible_weapon_attacks, weapon_selection_effect
 from dnd_board.rules.shared.resources import ResourceId
+from dnd_board.rules.equipment import valid_equipment_slots
 
 
 class ActionControlKind(Enum):
@@ -82,6 +87,30 @@ class SpellControlProjection:
 
 def project_sheet(sheet: CharacterSheet) -> dict[str, object]:
     projected = serialize_dataclass(sheet)
+    projected["attacks"] = [
+        {
+            **serialized,
+            "available": weapon_attack_is_wielded(sheet, attack),
+            "unavailableReason": (
+                None
+                if weapon_attack_is_wielded(sheet, attack)
+                else "Weapon is not wielded"
+            ),
+            "requiresWieldedWeapon": attack_requires_wielded_weapon(sheet, attack),
+        }
+        for attack, serialized in zip(sheet.attacks, projected["attacks"])
+    ]
+    projected["equipment"] = [
+        {
+            **serialized,
+            "validSlots": [
+                enum_key(slot)
+                for slot in EquipmentSlot
+                if slot in valid_equipment_slots(item)
+            ],
+        }
+        for item, serialized in zip(sheet.equipment, projected["equipment"])
+    ]
     projected["abilities"] = [
         {
             **serialized,
