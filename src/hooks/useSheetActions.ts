@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { postJson } from "../api/client";
 import type { DamageDefenseType } from "../sheet/SheetView";
+import type { RestHitDieSelection } from "../sheet/RestControls";
 import type {
   CharacterBuilderDraft,
   CharacterSheet,
@@ -82,6 +83,10 @@ export function useSheetActions(options: SheetActionOptions) {
     try { await postJson(`${sheetPath(sheet)}/rolls/saving-throw`, { playerKey, ability }); } catch (error) { fail(error); }
   }, [fail, playerKey, sheetPath]);
 
+  const rollDeathSavingThrow = useCallback(async (sheet: CharacterSheet) => {
+    try { await postJson(`${sheetPath(sheet)}/rolls/death-saving-throw`, { playerKey }); } catch (error) { fail(error); }
+  }, [fail, playerKey, sheetPath]);
+
   const rollResourceAction = useCallback(async (sheet: CharacterSheet, abilityId: string, actionId: string) => {
     try {
       const body = await postJson<{ roll: RollPayload; resolution?: RollLogEntry["resolution"]; logEntry?: RollLogEntry }>(
@@ -142,9 +147,14 @@ export function useSheetActions(options: SheetActionOptions) {
     } catch (error) { fail(error); }
   }, [fail, playerKey, roomId, setResolutionPrompts, setRollHistory, setRolls, setSheets]);
 
-  const restSheets = useCallback(async (rest: "short" | "long") => {
-    try { applySheetState(await postJson<SheetStateResponse>(`/api/rooms/${encodeURIComponent(roomId)}/sheet/rest`, { playerKey, rest })); }
-    catch (error) { fail(error); }
+  const restSheets = useCallback(async (rest: "short" | "long", hitDice: RestHitDieSelection[] = []): Promise<boolean> => {
+    try {
+      applySheetState(await postJson<SheetStateResponse>(`/api/rooms/${encodeURIComponent(roomId)}/sheet/rest`, { playerKey, rest }, hitDice));
+      return true;
+    } catch (error) {
+      fail(error);
+      return false;
+    }
   }, [applySheetState, fail, playerKey, roomId]);
 
   const clearSheetRolls = useCallback(async (sheet: CharacterSheet) => {
@@ -215,6 +225,7 @@ export function useSheetActions(options: SheetActionOptions) {
     rollDamage,
     rollResourceAction,
     rollSavingThrow,
+    rollDeathSavingThrow,
     rollSpellAttack,
     rollSpellDamage,
     rollSpellEffect,

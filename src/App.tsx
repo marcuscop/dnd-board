@@ -65,6 +65,7 @@ export function App() {
         onRollAbilityCheck={sheetActions.rollAbilityCheck}
         onRollResourceAction={sheetActions.rollResourceAction}
         onRollSavingThrow={sheetActions.rollSavingThrow}
+        onRollDeathSavingThrow={sheetActions.rollDeathSavingThrow}
         onRollSpellAttack={sheetActions.rollSpellAttack}
         onRollSpellDamage={sheetActions.rollSpellDamage}
         onRollBoundWeaponSpell={sheetActions.rollBoundWeaponSpell}

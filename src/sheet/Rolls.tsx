@@ -186,9 +186,13 @@ function rollMathText(roll: RollPayload) {
 }
 
 function rollAdvantageText(roll: RollPayload) {
+  const disadvantageReasons = [
+    ...(roll.disadvantageConditionsLabel ?? []),
+    ...(roll.disadvantageSourcesLabel ?? []),
+  ];
   const parts = [
     roll.advantageConditionsLabel?.length ? `Advantage: ${roll.advantageConditionsLabel.join(", ")}` : "",
-    roll.disadvantageConditionsLabel?.length ? `Disadvantage: ${roll.disadvantageConditionsLabel.join(", ")}` : "",
+    disadvantageReasons.length ? `Disadvantage: ${disadvantageReasons.join(", ")}` : "",
   ].filter(Boolean);
   return parts.length ? ` (${parts.join("; ")})` : "";
 }

@@ -32,6 +32,7 @@ from dnd_board.character_sheet import (
     TimeEconomy,
     active_roll_modifier_breakdown,
     ability_modifier,
+    armor_training_disadvantage_sources,
     condition_saving_throw_advantage_conditions,
     condition_saving_throw_disadvantage_conditions,
     condition_saving_throw_forced_failure_conditions,
@@ -54,6 +55,7 @@ from dnd_board.character_sheet import (
     roll_resolution_to_dict,
     resolution_interceptor_prompt_to_dict,
     sanitize_identifier,
+    untrained_worn_armor,
     weapon_attack_is_wielded,
 )
 from dnd_board.rules.shared.weapon_effects import (
@@ -139,8 +141,9 @@ def response_ability_roll(
             sheet,
             ability,
         )
-    has_advantage = (advantage or bool(advantage_conditions)) and not (disadvantage or disadvantage_conditions)
-    has_disadvantage = (disadvantage or bool(disadvantage_conditions)) and not (advantage or advantage_conditions)
+    disadvantage_sources = armor_training_disadvantage_sources(sheet, ability)
+    has_advantage = (advantage or bool(advantage_conditions)) and not (disadvantage or disadvantage_conditions or disadvantage_sources)
+    has_disadvantage = (disadvantage or bool(disadvantage_conditions) or bool(disadvantage_sources)) and not (advantage or advantage_conditions)
     dice = [random.randint(1, 20)]
     if has_advantage or has_disadvantage:
         dice.append(random.randint(1, 20))
@@ -172,6 +175,7 @@ def response_ability_roll(
         createdAt=created_at,
         advantageConditions=advantage_conditions or None,
         disadvantageConditions=disadvantage_conditions or None,
+        disadvantageSources=disadvantage_sources or None,
     )
 
 
@@ -569,7 +573,7 @@ async def create_spell_attack_action(
         ActionCategory.MAGIC,
         turn_id,
     )
-    await assert_somatic_spell_cast_allowed(room, sheet, player, spell, operations)
+    await assert_spell_cast_allowed(room, sheet, player, spell, operations)
     payload = build_spell_attack_roll_payload(sheet, player.player_key, spell)
     await consume_action_resources(
         room,
@@ -609,7 +613,7 @@ async def create_bound_weapon_spell_action(
         ActionCategory.MAGIC,
         turn_id,
     )
-    await assert_somatic_spell_cast_allowed(room, sheet, player, spell, operations)
+    await assert_spell_cast_allowed(room, sheet, player, spell, operations)
     try:
         payload = build_bound_weapon_spell_attack_payload(
             sheet,
@@ -667,7 +671,7 @@ async def create_spell_damage_action(
         part_id=instance_index,
     )
     if spell.mechanics is not None and activation_authorization.activeAction is None:
-        await assert_somatic_spell_cast_allowed(room, sheet, player, spell, operations)
+        await assert_spell_cast_allowed(room, sheet, player, spell, operations)
     try:
         payload = build_spell_damage_roll_payload(
             sheet,
@@ -729,7 +733,7 @@ async def create_spell_simple_action(
         ActionCategory.MAGIC,
         turn_id,
     )
-    await assert_somatic_spell_cast_allowed(room, sheet, player, spell, operations)
+    await assert_spell_cast_allowed(room, sheet, player, spell, operations)
     try:
         if action_type == SpellRollType.HEALING:
             payload = build_spell_healing_roll_payload(
@@ -807,6 +811,26 @@ async def create_ability_score_action(
         if saving_throw
         else build_ability_check_roll_payload(sheet, player.player_key, ability)
     )
+    prompt = resolution_prompt_for_d20_test(payload, sheet)
+    if prompt is not None:
+        room.pending_resolution_prompts[prompt.id] = prompt
+        prompt_data = resolution_interceptor_prompt_to_dict(prompt)
+        await operations.broadcast(room, {"type": "resolution_prompt_created", "prompt": prompt_data})
+        return {"roomId": room.id, "prompt": prompt_data}
+    return await store_roll(room, payload, operations)
+
+
+async def create_death_saving_throw_action(
+    room: Room,
+    player: Player,
+    sheet: CharacterSheet,
+    operations: ActionOperations,
+) -> dict[str, Any]:
+    from dnd_board.character_sheet import build_death_saving_throw_roll_payload
+
+    if sheet.hp.current > 0 or ConditionType.DEAD in sheet.conditions:
+        raise ActionServiceError(409, "Death saves are only available at 0 Hit Points")
+    payload = build_death_saving_throw_roll_payload(sheet, player.player_key)
     prompt = resolution_prompt_for_d20_test(payload, sheet)
     if prompt is not None:
         room.pending_resolution_prompts[prompt.id] = prompt
@@ -1158,13 +1182,17 @@ async def assert_activation_allowed(
     raise ActionServiceError(400, detail)
 
 
-async def assert_somatic_spell_cast_allowed(
+async def assert_spell_cast_allowed(
     room: Room,
     sheet: CharacterSheet,
     player: Player,
     spell: SpellEntry,
     operations: ActionOperations,
 ) -> None:
+    if untrained_worn_armor(sheet) is not None:
+        reason = "Untrained armor prevents spellcasting"
+        await log_blocked_roll(room, sheet, player, enum_label(spell.name), "Spell Cast", reason, operations)
+        raise ActionServiceError(409, reason)
     failure = action_failure_chance(sheet.conditions, spell.castingTime, spell.components)
     if failure is None:
         return

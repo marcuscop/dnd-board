@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
+from pydantic import BaseModel, StrictInt
 
 from dnd_board.application.room_state import (
     ActiveMaxHitPointIncrease,
@@ -42,6 +43,7 @@ from dnd_board.application.action_service import (
     ActionServiceError,
     SpellRollType,
     create_ability_score_action,
+    create_death_saving_throw_action,
     create_ad_hoc_dice_action,
     create_attack_action,
     create_sheet_entry_action,
@@ -175,6 +177,7 @@ from dnd_board.rules.shared.resources import (
     ResourceState,
     adjust_resource,
 )
+from dnd_board.rules.rest import HitDieSpend, roll_hit_dice_for_rest, validate_hit_die_spends
 from dnd_board.rules.encounter import EncounterParticipant, EncounterStatus
 
 BOARD_WIDTH = 1200
@@ -226,6 +229,9 @@ def character_state_persistence() -> CharacterStatePersistence:
         save_room=save_room_to_disk,
         load_conditions=sheet_conditions,
         persist_conditions=persist_sheet_conditions,
+        rebuild_sheet=lambda room, token_id: token_to_sheet(
+            room.tokens[token_id], room.id, room.hit_points.get(token_id)
+        ) if token_id in room.tokens else None,
     )
 
 
@@ -613,6 +619,14 @@ async def roll_sheet_saving_throw(room_id: str, sheet_id: str, playerKey: str, a
     return await create_saving_throw_roll(room_id, sheet_id, playerKey, ability)
 
 
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/death-saving-throw")
+async def roll_sheet_death_saving_throw(room_id: str, sheet_id: str, playerKey: str) -> dict[str, Any]:
+    room, player, sheet = roll_context(room_id, sheet_id, playerKey)
+    return await action_service_response(
+        create_death_saving_throw_action(room, player, sheet, action_operations())
+    )
+
+
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/resources/{resource_id}/rolls/{action_id}")
 async def roll_sheet_resource_action(room_id: str, sheet_id: str, resource_id: str, action_id: str, playerKey: str, turnId: str | None = None) -> dict[str, Any]:
     return await create_resource_roll(room_id, sheet_id, playerKey, resource_id, action_id, turnId)
@@ -742,8 +756,19 @@ async def update_sheet_progression_choice(room_id: str, sheet_id: str, choice_id
     return {"roomId": room.id, "sheet": project_sheet(updated_sheet) if updated_sheet else None}
 
 
+class RestHitDieRequest(BaseModel):
+    sheetId: str
+    resourceId: str
+    count: StrictInt
+
+
 @app.post("/api/rooms/{room_id}/sheet/rest")
-async def rest_room_sheets(room_id: str, playerKey: str, rest: str) -> dict[str, Any]:
+async def rest_room_sheets(
+    room_id: str,
+    playerKey: str,
+    rest: str,
+    hitDice: list[RestHitDieRequest] = Body(default_factory=list),
+) -> dict[str, Any]:
     sanitized_room_id = sanitize_room_id(room_id)
     room = get_or_create_room(sanitized_room_id)
     player = Player(id="http-sheet-rest", name="DM", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
@@ -753,30 +778,58 @@ async def rest_room_sheets(room_id: str, playerKey: str, rest: str) -> dict[str,
     rest_type = parse_rest_type(rest)
     if rest_type is None:
         raise HTTPException(status_code=400, detail="Invalid rest type")
+    if room.encounter is not None:
+        raise HTTPException(status_code=409, detail="End the encounter before resting")
+    if rest_type == RestType.LONG_REST and hitDice:
+        raise HTTPException(status_code=400, detail="Hit Dice can only be spent during a Short Rest")
 
-    for sheet in visible_sheets(room, player):
-        if sheet.kind == TokenKind.CHARACTER:
-            recovered_resources = reset_character_for_rest(
-                room,
-                sheet,
-                rest_type,
-                character_state_persistence(),
+    sheets = [sheet for sheet in visible_sheets(room, player) if sheet.kind == TokenKind.CHARACTER]
+    sheets_by_id = {sheet.id: sheet for sheet in sheets}
+    spends_by_sheet: dict[str, list[HitDieSpend]] = {}
+    for requested in hitDice:
+        sheet = sheets_by_id.get(requested.sheetId)
+        resource_id = enum_value(ResourceId, requested.resourceId)
+        if sheet is None or resource_id is None:
+            raise HTTPException(status_code=400, detail="Invalid Short Rest Hit Die selection")
+        spends_by_sheet.setdefault(sheet.id, []).append(HitDieSpend(resource_id, requested.count))
+    try:
+        for sheet in sheets:
+            validate_hit_die_spends(sheet, spends_by_sheet.get(sheet.id, []))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    for sheet in sheets:
+        if sheet.hp.current < 1:
+            continue
+        recovered_resources = reset_character_for_rest(room, sheet, rest_type, character_state_persistence())
+        if recovered_resources:
+            recovery_summary = ", ".join(
+                f"{resource.label} {resource.current}/{resource.maximum}"
+                for resource in recovered_resources
             )
-            if recovered_resources:
-                recovery_summary = ", ".join(
-                    f"{resource.label} {resource.current}/{resource.maximum}"
-                    for resource in recovered_resources
-                )
-                await log_action_note(
-                    room,
-                    sheet,
-                    player,
-                    enum_label(rest_type),
-                    f"Resources recovered: {recovery_summary}",
-                    DiceType.D20,
-                    [],
-                    action_operations(),
-                )
+            await log_action_note(
+                room, sheet, player, enum_label(rest_type),
+                f"Resources recovered: {recovery_summary}", DiceType.D20, [], action_operations(),
+            )
+        if rest_type == RestType.LONG_REST:
+            restored_hp = room.hit_points.get(sheet.tokenId, sheet.hp.current)
+            await log_action_note(
+                room, sheet, player, enum_label(rest_type),
+                f"Hit Points restored: {sheet.hp.current} to {restored_hp}",
+                DiceType.D20, [], action_operations(),
+            )
+            continue
+        next_hp, die_results = roll_hit_dice_for_rest(sheet, spends_by_sheet.get(sheet.id, []))
+        if die_results:
+            room.hit_points[sheet.tokenId] = next_hp
+        for result in die_results:
+            resource = next(resource for resource in sheet.resources if resource.resource == result.resource)
+            room.resource_uses.setdefault(sheet.tokenId, {})[resource.id] = result.remaining
+            await log_action_note(
+                room, sheet, player, enum_label(rest_type),
+                f"{resource.name}: {result.healing} healing, {result.hitPointsRestored} HP restored; {result.remaining} remaining",
+                result.die, list(result.rolls), action_operations(),
+            )
     save_room_to_disk(room)
     await broadcast_room_state(room)
     return sheet_state_message(room, player)

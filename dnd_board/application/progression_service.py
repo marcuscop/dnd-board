@@ -47,6 +47,7 @@ from dnd_board.rules.progression import (
     SubclassGrant,
     SkillSelectionIssue,
     apply_progression_grants,
+    progression_feat_grants,
     apply_class_option_progression_grants,
     apply_fighting_style_progression_grants,
     apply_ability_score_progression_grants,
@@ -238,6 +239,7 @@ def apply_member_progression_rule(
             hit_die_result=hit_die_result,
             ability_scores=member.abilityScores,
             selected_feats=tuple(selected_general_feat_types(member.sheet.feats)),
+            selected_feat_grants=tuple(progression_feat_grants(member.sheet.progressionGrants or [])),
             selected_fighting_styles=tuple(selected_fighting_styles(classes)),
             feat_eligibility_sheet=member_feat_eligibility_sheet(member),
         )
@@ -396,15 +398,21 @@ def apply_member_feat_grants(
     ]
     granted = [
         feature
-        for grant in progression_feat_grants(records)
-        if (feature := general_feat_feature(enum_key(grant.feat))) is not None
+        for feat_type in dict.fromkeys(grant.feat for grant in progression_feat_grants(records))
+        if (feature := general_feat_feature(enum_key(feat_type))) is not None
     ]
     member.sheet.feats = [*retained, *granted] or None
 
 
 def member_feat_eligibility_sheet(member: PartyMemberConfig):
     sheet = member.sheet or PartyMemberSheet()
+    from dnd_board.character_sheet import default_save_proficiencies
+    from dnd_board.rules.progression import saving_throw_proficiencies_from_grants
+
+    save_proficiencies = set(sheet.savingThrowProficiencies if sheet.savingThrowProficiencies else default_save_proficiencies(sheet.classes or []))
+    save_proficiencies.update(saving_throw_proficiencies_from_grants(sheet.progressionGrants))
     return SimpleNamespace(
+        savingThrowProficiencies=save_proficiencies,
         abilityScores=member.abilityScores,
         race=sheet.race or "",
         background=sheet.background or "",

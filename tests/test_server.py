@@ -22,7 +22,7 @@ from dnd_board.application.progression_service import (
     set_member_class_levels,
 )
 from dnd_board.application.persistence import load_room as load_room_save
-from dnd_board.application.room_state import ActiveMaxHitPointIncrease, ActiveMaxHitPointReduction
+from dnd_board.application.room_state import ActiveConcentration, ActiveMaxHitPointIncrease, ActiveMaxHitPointReduction
 from dnd_board.application.resource_service import reset_sheet_resources
 from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
@@ -1296,6 +1296,44 @@ def test_sheet_endpoint_returns_party_sheets_for_player(tmp_path, monkeypatch) -
     assert body["rollHistory"] == []
 
 
+def test_durable_hit_die_action_and_death_save_endpoint(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "durable-action-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Fighter",
+            maxHp=40,
+            abilityScores=AbilityScores(14, 10, 14, 10, 10, 10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(ClassType.FIGHTER, 4)],
+                feats=[general_feat_feature(enum_key(GeneralFeatType.DURABLE))],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("durable-action-test")
+    room.hit_points["player-1"] = 20
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda _minimum, _maximum: 5)
+
+    used = client.post(
+        "/api/rooms/durable-action-test/sheet/player-1/abilities/durable/rolls/hitDieD10?playerKey=player-1"
+    )
+    assert used.status_code == 200
+    sheet = client.get("/api/rooms/durable-action-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    assert sheet["hp"]["current"] == 25
+    assert next(resource for resource in sheet["resources"] if resource["id"] == "hitDieD10")["currentUses"] == 3
+
+    living = client.post("/api/rooms/durable-action-test/sheet/player-1/rolls/death-saving-throw?playerKey=player-1")
+    assert living.status_code == 409
+    room.hit_points["player-1"] = 0
+    death_save = client.post("/api/rooms/durable-action-test/sheet/player-1/rolls/death-saving-throw?playerKey=player-1")
+    assert death_save.status_code == 200
+    assert death_save.json()["roll"]["die"] == "2d20kh1"
+    assert death_save.json()["roll"]["dice"] == [5, 5]
+
+
 def test_dm_sheet_endpoint_includes_loaded_asset_sheets() -> None:
     client = TestClient(server.app)
     room = server.get_or_create_room("sheet-dm-test")
@@ -1473,6 +1511,45 @@ def test_ad_hoc_dice_roll_is_logged_for_everyone(monkeypatch) -> None:
     assert dm_state["pendingRolls"] == []
     assert player_state["rollHistory"] == dm_state["rollHistory"]
     assert response.json()["roll"]["id"] in [entry["roll"]["id"] for entry in dm_state["rollHistory"]]
+
+
+def test_untrained_armor_blocks_spells_without_spending_a_slot(tmp_path, monkeypatch) -> None:
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    assert burning_hands is not None
+    write_party_campaign(
+        tmp_path,
+        "untrained-armor-spell-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Wizard",
+            maxHp=20,
+            abilityScores=AbilityScores(8, 14, 12, 16, 10, 10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(ClassType.WIZARD, 4)],
+                equipment=[EquipmentItem(
+                    id="leather", name="Leather Armor", itemType=EquipmentType.ARMOR,
+                    slot=EquipmentSlot.ARMOR, armorCategory=ArmorCategory.LIGHT, armorClass=11,
+                )],
+                spells=[burning_hands],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+    url = "/api/rooms/untrained-armor-spell-test/sheet/player-1"
+    before = client.get(f"{url}?playerKey=player-1").json()["sheet"]
+
+    blocked = client.post(f"{url}/spells/burningHands/rolls/damage?playerKey=player-1")
+    after = client.get(f"{url}?playerKey=player-1").json()["sheet"]
+    blocked_entry = server.rooms["untrained-armor-spell-test"].roll_history[-1]
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "Untrained armor prevents spellcasting"
+    assert blocked_entry.entryType == RollLogEntryType.ROLL_BLOCKED
+    assert blocked_entry.roll.label == "Spell Cast blocked: Untrained armor prevents spellcasting"
+    assert {resource["resource"]: resource["currentUses"] for resource in before["resources"]} == {
+        resource["resource"]: resource["currentUses"] for resource in after["resources"]
+    }
 
 
 def test_player_can_roll_fire_bolt_spell_attack_and_scaled_damage(tmp_path, monkeypatch) -> None:
@@ -5095,7 +5172,7 @@ def test_aid_increases_current_and_max_hit_points_until_long_rest(tmp_path, monk
         "sourceName": "Aid",
     }]
     assert rest_response.status_code == 200
-    assert rested_target["hp"] == {"current": 28, "max": 40, "temporary": 0}
+    assert rested_target["hp"] == {"current": 40, "max": 40, "temporary": 0}
 
 
 def test_heroism_applies_temp_hp_and_blocks_frightened_condition(tmp_path, monkeypatch) -> None:
@@ -5246,7 +5323,7 @@ def test_harm_failed_save_reduces_max_hit_points_until_long_rest(tmp_path, monke
         }
     ]
     assert rest_response.status_code == 200
-    assert rested_target["hp"] == {"current": 32, "max": 60, "temporary": 0}
+    assert rested_target["hp"] == {"current": 60, "max": 60, "temporary": 0}
     assert saved_after_rest["maxHitPointReductions"] == {}
     assert reloaded_target["hp"] == {"current": 60, "max": 60, "temporary": 0}
 
@@ -5667,6 +5744,7 @@ def test_attack_resource_costs_are_validated_and_consumed_atomically(tmp_path, m
     assert {resource["id"]: resource["currentUses"] for resource in blocked_sheet["resources"]} == {
         "arrows": 1,
         "bolts": 0,
+        "hitDieD10": 1,
     }
 
     client.post(
@@ -6763,6 +6841,66 @@ def test_short_rest_resets_only_short_rest_resources(tmp_path, monkeypatch) -> N
         entry.roll.label.startswith("Resources recovered: Second Wind 1/3")
         for entry in room.roll_history
     )
+
+
+def test_short_rest_spends_multiclass_hit_dice_and_long_rest_restores_hp(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "hit-die-rest-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Multiclass",
+            maxHp=40,
+            abilityScores=AbilityScores(10, 10, 14, 10, 10, 10),
+            sheet=PartyMemberSheet(classes=[
+                CharacterClassLevel(ClassType.FIGHTER, 4),
+                CharacterClassLevel(ClassType.ROGUE, 2),
+            ]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("hit-die-rest-test")
+    room.hit_points["player-1"] = 5
+    room.resource_uses["player-1"] = {"hitDieD10": 2, "hitDieD8": 1}
+    room.active_concentrations["player-1"] = ActiveConcentration("player-1", SpellId.BLESS, "Bless", [])
+    rolls = iter([2, 4])
+    monkeypatch.setattr("dnd_board.rules.rest.random.randint", lambda _minimum, _maximum: next(rolls))
+    request = [
+        {"sheetId": "player-1", "resourceId": "hitDieD10", "count": 1},
+        {"sheetId": "player-1", "resourceId": "hitDieD8", "count": 1},
+    ]
+
+    invalid = client.post(
+        "/api/rooms/hit-die-rest-test/sheet/rest?playerKey=dm&rest=short",
+        json=[{"sheetId": "player-1", "resourceId": "hitDieD8", "count": 2}],
+    )
+    assert invalid.status_code == 400
+    assert room.hit_points["player-1"] == 5
+    assert room.resource_uses["player-1"] == {"hitDieD10": 2, "hitDieD8": 1}
+
+    short = client.post("/api/rooms/hit-die-rest-test/sheet/rest?playerKey=dm&rest=short", json=request)
+    assert short.status_code == 200
+    sheet = short.json()["sheets"][0]
+    resources = {resource["id"]: resource for resource in sheet["resources"]}
+    assert sheet["hp"] == {"current": 15, "max": 40, "temporary": 0}
+    assert resources["hitDieD10"]["currentUses"] == 1
+    assert resources["hitDieD8"]["currentUses"] == 0
+    assert "player-1" in room.active_concentrations
+    assert any("4 healing" in entry.roll.label and entry.roll.dice == [2] for entry in room.roll_history)
+    assert any("6 healing" in entry.roll.label and entry.roll.dice == [4] for entry in room.roll_history)
+
+    long = client.post("/api/rooms/hit-die-rest-test/sheet/rest?playerKey=dm&rest=long")
+    assert long.status_code == 200
+    sheet = long.json()["sheets"][0]
+    resources = {resource["id"]: resource for resource in sheet["resources"]}
+    assert sheet["hp"] == {"current": 40, "max": 40, "temporary": 0}
+    assert resources["hitDieD10"]["currentUses"] == 4
+    assert resources["hitDieD8"]["currentUses"] == 2
+    assert "player-1" not in room.active_concentrations
+    server.rooms.clear()
+    reloaded = client.get("/api/rooms/hit-die-rest-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    assert reloaded["hp"]["current"] == 40
 
 
 def test_serialized_tracker_recovery_rules_override_definition_defaults() -> None:

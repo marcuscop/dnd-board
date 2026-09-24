@@ -8,6 +8,7 @@ from typing import Mapping, Sequence
 
 class ResourceKind(Enum):
     SPELL_SLOT = "Spell Slot"
+    HIT_DIE = "Hit Die"
     FEATURE_USE = "Feature Use"
     ITEM_CHARGE = "Item Charge"
     AMMUNITION = "Ammunition"
@@ -18,6 +19,10 @@ class ResourceKind(Enum):
 
 class ResourceId(Enum):
     SPELL_SLOT = "Selected Spell Slot"
+    HIT_DIE_D6 = "Hit Die d6"
+    HIT_DIE_D8 = "Hit Die d8"
+    HIT_DIE_D10 = "Hit Die d10"
+    HIT_DIE_D12 = "Hit Die d12"
     FIRST_LEVEL_SPELL_SLOTS = "First Level Spell Slots"
     SECOND_LEVEL_SPELL_SLOTS = "Second Level Spell Slots"
     THIRD_LEVEL_SPELL_SLOTS = "Third Level Spell Slots"
@@ -183,6 +188,19 @@ def full_recovery(trigger: ResourceRecoveryTrigger) -> ResourceRecovery:
 
 
 RESOURCE_DEFINITIONS: Mapping[ResourceId, ResourceDefinition] = {
+    **{
+        resource: ResourceDefinition(
+            ResourceKey(resource, ResourceKind.HIT_DIE),
+            resource.value,
+            (full_recovery(ResourceRecoveryTrigger.LONG_REST),),
+        )
+        for resource in (
+            ResourceId.HIT_DIE_D6,
+            ResourceId.HIT_DIE_D8,
+            ResourceId.HIT_DIE_D10,
+            ResourceId.HIT_DIE_D12,
+        )
+    },
     **{
         resource: ResourceDefinition(
             ResourceKey(resource, ResourceKind.SPELL_SLOT),

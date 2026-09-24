@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from dnd_board.character_sheet import (
     ArmorCategory,
     AttackRangeType,
+    ClassType,
     CurrencyUnit,
     DamageType,
     DiceType,
@@ -24,6 +25,27 @@ from dnd_board.character_sheet import (
 
 if TYPE_CHECKING:
     from dnd_board.rules.backgrounds import ToolType
+
+
+CLASS_ARMOR_TRAINING: dict[ClassType, tuple[tuple[ArmorCategory, ...], bool]] = {
+    ClassType.ARTIFICER: ((ArmorCategory.LIGHT, ArmorCategory.MEDIUM), True),
+    ClassType.BARD: ((ArmorCategory.LIGHT,), False),
+    ClassType.CLERIC: ((ArmorCategory.LIGHT, ArmorCategory.MEDIUM), True),
+    ClassType.DRUID: ((ArmorCategory.LIGHT,), True),
+    ClassType.FIGHTER: ((ArmorCategory.LIGHT, ArmorCategory.MEDIUM, ArmorCategory.HEAVY), True),
+    ClassType.PALADIN: ((ArmorCategory.LIGHT, ArmorCategory.MEDIUM, ArmorCategory.HEAVY), True),
+    ClassType.RANGER: ((ArmorCategory.LIGHT, ArmorCategory.MEDIUM), True),
+    ClassType.ROGUE: ((ArmorCategory.LIGHT,), False),
+    ClassType.SORCERER: ((), False),
+    ClassType.WARLOCK: ((ArmorCategory.LIGHT,), False),
+    ClassType.WIZARD: ((), False),
+}
+
+MULTICLASS_ARMOR_TRAINING: dict[ClassType, tuple[tuple[ArmorCategory, ...], bool]] = {
+    **CLASS_ARMOR_TRAINING,
+    ClassType.FIGHTER: ((ArmorCategory.LIGHT, ArmorCategory.MEDIUM), True),
+    ClassType.PALADIN: ((ArmorCategory.LIGHT, ArmorCategory.MEDIUM), True),
+}
 
 
 class EquipmentId(Enum):

@@ -66,6 +66,8 @@ test("DM can rest all character sheets from the sheet overview", async ({ page }
   await expect(page.getByRole("button", { name: "Long Rest" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Level up Marina" })).toBeVisible();
   await page.getByRole("button", { name: "Short Rest" }).click();
+  await expect(page.getByRole("dialog", { name: "Short Rest" }).getByRole("spinbutton").first()).toBeVisible();
+  await page.getByRole("button", { name: "Complete Rest" }).click();
 
   await page.getByRole("button", { name: "Open Marina" }).click();
   await expect(page.getByRole("button", { name: "Level up Marina" })).toBeVisible();
@@ -87,6 +89,7 @@ test("DM can rest all character sheets from the sheet overview", async ({ page }
 
   await page.getByRole("button", { name: "Back to sheets" }).click();
   await page.getByRole("button", { name: "Short Rest" }).click();
+  await page.getByRole("button", { name: "Complete Rest" }).click();
   await page.getByRole("button", { name: "Open Marina" }).click();
   await expect(page.getByRole("heading", { name: "Abilities" }).locator("..").locator(".stepper").first().locator("strong")).toHaveText(`${maxUses}/${maxUses}`);
 });
@@ -137,6 +140,7 @@ test("sheet view shows Monster Hunter spells and restores long-rest spell uses",
 
   await page.getByRole("button", { name: "Back to sheets" }).click();
   await page.getByRole("button", { name: "Long Rest" }).click();
+  await page.getByRole("button", { name: "Complete Rest" }).click();
   await page.getByRole("button", { name: "Open Voss" }).click();
   await expect(page.locator(".spell-row", { hasText: "Protection from Evil and Good" }).getByText("1/1")).toBeVisible();
 });

@@ -50,6 +50,7 @@ from dnd_board.rules.feats import (
     FIGHTING_STYLE_FEATS,
     GENERAL_FEATS,
     FeatCategory,
+    FeatOptionId,
     GeneralFeatType,
     general_feat_category,
     general_feat_prerequisites_met,
@@ -71,6 +72,7 @@ from dnd_board.rules.shared.effects import (
     AbilityScoreAdjustmentChoice,
     CalculationType,
     Modifier,
+    SpellDamageTrait,
 )
 
 
@@ -270,6 +272,18 @@ class FeatGrant:
     characterClass: ClassType
     minimumClassLevel: int
     feat: GeneralFeatType
+    option: FeatOptionId | None = None
+
+    def __post_init__(self) -> None:
+        if self.minimumClassLevel < 1:
+            raise ValueError("Grant minimum class level must be positive")
+
+
+@dataclass(frozen=True)
+class SavingThrowProficiencyGrant:
+    characterClass: ClassType
+    minimumClassLevel: int
+    ability: AbilityType
 
     def __post_init__(self) -> None:
         if self.minimumClassLevel < 1:
@@ -310,7 +324,7 @@ class SubclassGrant:
             raise ValueError("Grant minimum class level must be positive")
 
 
-CharacterGrant = AbilityScoreGrant | ClassOptionGrant | FeatGrant | FightingStyleGrant | HitPointGrant | SkillProficiencyGrant | SpellGrant | SubclassGrant
+CharacterGrant = AbilityScoreGrant | ClassOptionGrant | FeatGrant | FightingStyleGrant | HitPointGrant | SavingThrowProficiencyGrant | SkillProficiencyGrant | SpellGrant | SubclassGrant
 
 
 @dataclass(frozen=True)
@@ -377,6 +391,7 @@ class ProgressionRule:
     requirements: tuple[ClassLevelRequirement, ...]
     choices: tuple[CharacterChoiceDefinition, ...]
     sourceFeat: GeneralFeatType | None = None
+    sourceFeatLevel: int | None = None
 
 
 @dataclass(frozen=True)
@@ -385,6 +400,7 @@ class ProgressionGrantSource:
     characterClass: ClassType
     requiredSubclass: SubclassType | None = None
     requiredFeat: GeneralFeatType | None = None
+    requiredFeatLevel: int | None = None
 
 
 @dataclass(frozen=True)
@@ -397,6 +413,45 @@ class ProgressionGrantRecord:
 class ProgressionEvaluation:
     source: ProgressionGrantSource
     grants: tuple[CharacterGrant, ...]
+
+
+def saving_throw_proficiencies_from_grants(
+    records: list[ProgressionGrantRecord] | None,
+) -> set[AbilityType]:
+    return {
+        grant.ability
+        for record in records or []
+        for grant in record.grants
+        if isinstance(grant, SavingThrowProficiencyGrant)
+    }
+
+
+def spell_damage_traits_from_grants(
+    records: list[ProgressionGrantRecord] | None,
+    classes: list[CharacterClassLevel],
+) -> list[SpellDamageTrait]:
+    levels = {character_class.name: character_class.level for character_class in classes}
+    traits: list[SpellDamageTrait] = []
+    for record in records or []:
+        if record.source.requiredSubclass is not None and not any(
+            character_class.name == record.source.characterClass
+            and character_class.subclass == record.source.requiredSubclass
+            for character_class in classes
+        ):
+            continue
+        for grant in record.grants:
+            if not isinstance(grant, FeatGrant) or grant.option is None:
+                continue
+            if levels.get(grant.characterClass, 0) < grant.minimumClassLevel:
+                continue
+            definition = GENERAL_FEATS[grant.feat]
+            option = next((candidate for candidate in definition.selectionOptions if candidate.id == grant.option), None)
+            if option is None or definition.spellDamageTraitChoice is None:
+                continue
+            trait = definition.spellDamageTraitChoice.bind(option.damageType, enum_label(grant.feat))
+            if trait not in traits:
+                traits.append(trait)
+    return traits
 
 
 class ProgressionRuleViolation(ValueError):
@@ -507,10 +562,17 @@ def progression_rule(
     if choice_id == ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE:
         records = progression_grants or []
         required_feat = grant_source.requiredFeat if grant_source is not None else None
+        required_feat_level = grant_source.requiredFeatLevel if grant_source is not None else None
         completed_feats = {
-            record.source.requiredFeat
+            (
+                record.source.requiredFeat,
+                record.source.characterClass,
+                record.source.requiredFeatLevel or grant.minimumClassLevel,
+            )
             for record in records
             if record.source.rule == choice_id and record.source.requiredFeat is not None
+            for grant in record.grants
+            if isinstance(grant, (AbilityScoreGrant, SavingThrowProficiencyGrant))
         }
         feat_entry = next(
             (
@@ -520,7 +582,9 @@ def progression_rule(
                 if isinstance(grant, FeatGrant)
                 and GENERAL_FEATS[grant.feat].abilityScoreAdjustmentChoice is not None
                 and (required_feat is None or grant.feat == required_feat)
-                and (required_feat is not None or grant.feat not in completed_feats)
+                and (grant_source is None or grant.characterClass == grant_source.characterClass)
+                and (required_feat_level is None or grant.minimumClassLevel == required_feat_level)
+                and (required_feat is not None or (grant.feat, grant.characterClass, grant.minimumClassLevel) not in completed_feats)
             ),
             None,
         )
@@ -548,6 +612,7 @@ def progression_rule(
                 adjustment=adjustment,
             ),),
             sourceFeat=feat_grant.feat,
+            sourceFeatLevel=feat_grant.minimumClassLevel,
         )
     ability_score_definition = next(
         (
@@ -847,6 +912,7 @@ def progression_grant_source(rule: ProgressionRule) -> ProgressionGrantSource:
         requirement.characterClass,
         requirement.subclass,
         rule.sourceFeat,
+        rule.sourceFeatLevel,
     )
 
 
@@ -958,6 +1024,7 @@ def evaluate_progression_rule(
     hit_die_result: int | None = None,
     ability_scores: AbilityScores | None = None,
     selected_feats: tuple[GeneralFeatType, ...] = (),
+    selected_feat_grants: tuple[FeatGrant, ...] = (),
     selected_fighting_styles: tuple[FightingStyleType, ...] = (),
     feat_eligibility_sheet=None,
 ) -> ProgressionEvaluation:
@@ -978,6 +1045,7 @@ def evaluate_progression_rule(
             values,
             ability_scores or AbilityScores(10, 10, 10, 10, 10, 10),
             selected_feats=selected_feats,
+            selected_feat_grants=selected_feat_grants,
             selected_fighting_styles=selected_fighting_styles,
             feat_eligibility_sheet=feat_eligibility_sheet,
         )
@@ -987,6 +1055,7 @@ def evaluate_progression_rule(
             rule.choices[0],
             values,
             selected_feats=selected_feats,
+            selected_feat_grants=selected_feat_grants,
             selected_fighting_styles=selected_fighting_styles,
             feat_eligibility_sheet=feat_eligibility_sheet,
         )
@@ -1048,6 +1117,7 @@ def evaluate_ability_score_progression_choice(
     ability_scores: AbilityScores,
     *,
     selected_feats: tuple[GeneralFeatType, ...] = (),
+    selected_feat_grants: tuple[FeatGrant, ...] = (),
     selected_fighting_styles: tuple[FightingStyleType, ...] = (),
     feat_eligibility_sheet=None,
 ) -> ProgressionEvaluation:
@@ -1062,6 +1132,7 @@ def evaluate_ability_score_progression_choice(
             choice.featChoice,
             [clean_values[0][len(ProgressionSelectionPrefix.FEAT.value):]],
             selected_feats=selected_feats,
+            selected_feat_grants=selected_feat_grants,
             selected_fighting_styles=selected_fighting_styles,
             feat_eligibility_sheet=feat_eligibility_sheet,
         )
@@ -1072,7 +1143,11 @@ def evaluate_ability_score_progression_choice(
     selected = [enum_value(AbilityType, value) for value in clean_values]
     if any(ability is None or ability not in choice.adjustment.candidates for ability in selected):
         raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_OPTION)
-    grants: list[AbilityScoreGrant] = []
+    if choice.adjustment.requiresUnproficientSave and feat_eligibility_sheet is not None:
+        proficient = set(feat_eligibility_sheet.savingThrowProficiencies)
+        if any(ability in proficient for ability in selected):
+            raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_OPTION)
+    grants: list[AbilityScoreGrant | SavingThrowProficiencyGrant] = []
     for ability in choice.adjustment.candidates:
         requested = selected.count(ability)
         if requested <= 0:
@@ -1090,6 +1165,12 @@ def evaluate_ability_score_progression_choice(
                     maximum=choice.adjustment.maximum,
                 ),
             ))
+        if choice.adjustment.grantsSavingThrowProficiency:
+            grants.append(SavingThrowProficiencyGrant(
+                choice.characterClass,
+                choice.classLevel,
+                ability,
+            ))
     if not grants:
         raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_OPTION)
     return ProgressionEvaluation(
@@ -1104,6 +1185,7 @@ def evaluate_feat_progression_choice(
     values: list[str],
     *,
     selected_feats: tuple[GeneralFeatType, ...] = (),
+    selected_feat_grants: tuple[FeatGrant, ...] = (),
     selected_fighting_styles: tuple[FightingStyleType, ...] = (),
     feat_eligibility_sheet=None,
 ) -> ProgressionEvaluation:
@@ -1114,10 +1196,35 @@ def evaluate_feat_progression_choice(
     for value in clean_values:
         general_feat = enum_value(GeneralFeatType, value)
         fighting_style = enum_value(FightingStyleType, value)
+        feat_option = enum_value(FeatOptionId, value)
+        if feat_option is not None:
+            matching = next(
+                (
+                    (feat_type, option)
+                    for feat_type, definition in GENERAL_FEATS.items()
+                    for option in definition.selectionOptions
+                    if option.id == feat_option
+                ),
+                None,
+            )
+            if matching is None:
+                raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_OPTION)
+            general_feat, option = matching
+            definition = GENERAL_FEATS[general_feat]
+            if general_feat not in choice.candidates or definition.category not in choice.categories:
+                raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_FEAT_CATEGORY)
+            if any(grant.feat == general_feat and grant.option == option.id for grant in selected_feat_grants):
+                raise ProgressionRuleViolation(SkillSelectionIssue.FEAT_ALREADY_SELECTED)
+            if feat_eligibility_sheet is not None and not general_feat_prerequisites_met(general_feat, feat_eligibility_sheet):
+                raise ProgressionRuleViolation(SkillSelectionIssue.FEAT_PREREQUISITE_NOT_MET)
+            grants.append(FeatGrant(choice.characterClass, choice.classLevel, general_feat, option.id))
+            continue
         if general_feat is not None:
             if general_feat not in choice.candidates:
                 raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_FEAT_CATEGORY)
             definition = GENERAL_FEATS[general_feat]
+            if definition.selectionOptions:
+                raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_OPTION)
             if general_feat_category(general_feat) not in choice.categories:
                 raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_FEAT_CATEGORY)
             if not definition.repeatable and general_feat in selected_feats:
@@ -1542,7 +1649,7 @@ def replace_progression_grant_record(
         None,
     )
     grants = evaluation.grants
-    if grants and isinstance(
+    if evaluation.source.requiredFeat is None and grants and isinstance(
         grants[0],
         (AbilityScoreGrant, ClassOptionGrant, FeatGrant, FightingStyleGrant, HitPointGrant),
     ):
@@ -1667,7 +1774,7 @@ def reconcile_progression_grant_records(
         for character_class in classes
     }
     active_feat_grants = {
-        grant.feat
+        (grant.feat, grant.characterClass, grant.minimumClassLevel)
         for record in records
         for grant in record.grants
         if isinstance(grant, FeatGrant)
@@ -1704,7 +1811,15 @@ def reconcile_progression_grant_records(
         )
         feat_requirement_met = (
             record.source.requiredFeat is None
-            or record.source.requiredFeat in active_feat_grants
+            or any(
+                feat == record.source.requiredFeat
+                and character_class == record.source.characterClass
+                and (
+                    record.source.requiredFeatLevel is None
+                    or level == record.source.requiredFeatLevel
+                )
+                for feat, character_class, level in active_feat_grants
+            )
         )
         grants: tuple[CharacterGrant, ...] = tuple(
             grant
@@ -1765,6 +1880,7 @@ def progression_model_types() -> list[type[object]]:
         ClassOptionKind,
         ClassLevelRequirement,
         FeatCategory,
+        FeatOptionId,
         FeatChoiceDefinition,
         FeatGrant,
         FightingStyleGrant,
@@ -1782,6 +1898,7 @@ def progression_model_types() -> list[type[object]]:
         ProgressionSelectionPrefix,
         SelectionReplacementPolicy,
         SkillChoiceDefinition,
+        SavingThrowProficiencyGrant,
         SkillProficiencyGrant,
         SpellChoiceDefinition,
         SpellCollection,
@@ -1888,6 +2005,7 @@ def progression_choice_for_rule(
             rule.choices[0],
             feats,
             feat_eligibility_sheet,
+            tuple(progression_feat_grants(records or [])),
         )
     if len(rule.choices) == 1 and isinstance(rule.choices[0], FeatChoiceDefinition):
         return feat_progression_choice(
@@ -1896,6 +2014,7 @@ def progression_choice_for_rule(
             feats,
             feat_eligibility_sheet,
             classes or [],
+            tuple(progression_feat_grants(records or [])),
         )
     if len(rule.choices) == 1 and isinstance(rule.choices[0], ClassOptionChoiceDefinition):
         return class_option_progression_choice(
@@ -1979,8 +2098,14 @@ def ability_score_progression_choice(
     choice: AbilityScoreChoiceDefinition,
     feats: list[SheetFeature] | None,
     feat_eligibility_sheet,
+    selected_feat_grants: tuple[FeatGrant, ...] = (),
 ) -> ProgressionChoice:
     if choice.featChoice is None:
+        proficient = (
+            set(feat_eligibility_sheet.savingThrowProficiencies)
+            if choice.adjustment.requiresUnproficientSave and feat_eligibility_sheet is not None
+            else set()
+        )
         return multi_choice(
             choice_id=rule.id,
             choice_type=rule.presentation.choiceType,
@@ -1995,6 +2120,7 @@ def ability_score_progression_choice(
                     label=enum_label(ability),
                 )
                 for ability in choice.adjustment.candidates
+                if ability not in proficient
             ],
         )
     return single_choice(
@@ -2008,6 +2134,7 @@ def ability_score_progression_choice(
             feats,
             feat_eligibility_sheet,
             [],
+            selected_feat_grants,
         ) if choice.featChoice is not None else [],
     )
 
@@ -2018,6 +2145,7 @@ def feat_progression_choice(
     feats: list[SheetFeature] | None,
     feat_eligibility_sheet,
     classes: list[CharacterClassLevel],
+    selected_feat_grants: tuple[FeatGrant, ...] = (),
 ) -> ProgressionChoice:
     return single_choice(
         choice_id=rule.id,
@@ -2030,6 +2158,7 @@ def feat_progression_choice(
             feats,
             feat_eligibility_sheet,
             selected_fighting_style_values(classes),
+            selected_feat_grants,
         ),
     )
 
@@ -2088,6 +2217,7 @@ def feat_choice_options(
     feats: list[SheetFeature] | None,
     feat_eligibility_sheet,
     selected_styles: list[FightingStyleType],
+    selected_feat_grants: tuple[FeatGrant, ...] = (),
 ) -> list[ProgressionChoiceOption]:
     from dnd_board.rules.feats import selected_general_feat_types
 
@@ -2099,6 +2229,19 @@ def feat_choice_options(
             if not definition.repeatable and candidate in selected_feats:
                 continue
             if feat_eligibility_sheet is not None and not general_feat_prerequisites_met(candidate, feat_eligibility_sheet):
+                continue
+            if definition.selectionOptions:
+                options.extend(
+                    ProgressionChoiceOption(
+                        value=enum_key(option.id),
+                        label=f"{enum_label(candidate)} ({enum_label(option.damageType)})",
+                    )
+                    for option in definition.selectionOptions
+                    if not any(
+                        grant.feat == candidate and grant.option == option.id
+                        for grant in selected_feat_grants
+                    )
+                )
                 continue
             options.append(ProgressionChoiceOption(
                 value=enum_key(candidate),

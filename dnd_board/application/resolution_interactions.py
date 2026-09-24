@@ -19,6 +19,7 @@ from dnd_board.character_sheet import (
     enum_key,
     enum_label,
     sanitize_identifier,
+    untrained_worn_armor,
 )
 from dnd_board.rules.shared.character_effects import (
     CharacterEffectExecutionContext,
@@ -538,12 +539,13 @@ def sheet_interaction_sources(sheet: CharacterSheet) -> list[SheetInteractionSou
 
     add_mechanics("Light Weapon Property", light_weapon_property_mechanics())
 
-    seen_spells: set[SpellId] = set()
-    for spell in [*sheet.spells, *sheet.spellbook]:
-        if spell.id in seen_spells:
-            continue
-        seen_spells.add(spell.id)
-        add_mechanics(enum_label(spell.name), spell.mechanics)
+    if untrained_worn_armor(sheet) is None:
+        seen_spells: set[SpellId] = set()
+        for spell in [*sheet.spells, *sheet.spellbook]:
+            if spell.id in seen_spells:
+                continue
+            seen_spells.add(spell.id)
+            add_mechanics(enum_label(spell.name), spell.mechanics)
     for feature in sheet.features:
         add_mechanics(feature.name, feature.mechanics)
         for action in feature.rollActions or []:

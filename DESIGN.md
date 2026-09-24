@@ -1,8 +1,13 @@
 # Design Notes
 
-- Build depth before breadth: implement one class from levels 1-20, then support its table interactions, then support creation and level-up flows.
+- Develop breadth through complete representative features. Pick a class, species, background, feat, spell, or item; implement its real behavior, use the gaps it exposes to extend shared mechanics, test the interaction end to end, then move to the next feature. Do not fill the catalog with description-only entries when existing primitives can model their rules.
 - Add new classes to the sheet editor only after their rule model is implemented enough to play.
-- Rules live in Python code: enums, dataclasses, progression tables, and helper functions are the source of truth.
+- Rules live in Python code: typed content definitions, progression tables, and shared mechanics are the source of truth.
+- Keep a feature's mechanical contract together in its definition: activation and timing, resource costs and recovery, choices, passive modifiers, effects, interactions, and limitations. A definition can compose reusable primitives; it should not require a named branch elsewhere to make its rules work.
+- Shared engines interpret those primitives. Sheet projection, action resolution, turn authorization, and persistence must not identify a feat, spell, class, or item to decide what it does. When a feature does not fit, extend a reusable primitive and prove it with another definition or a focused generic test; remove the named workaround.
+- Distinguish content from runtime state. Definitions describe rules; characters and encounters hold selections, bound targets/items, resources, ongoing effects, and provenance. Loading or recomputing a sheet must not refill spent uses, reroll stored results, or duplicate grants.
+- One activation pays its activation costs once; independently resolved parts pay their own per-part costs. Prompts and nested effects must resume the same resolution, preserving the chosen bindings, rolls, and pending event values.
+- Keep unsupported geometry, timing, or adjudication explicit as manual rules. Do not imply automation that the engine cannot enforce, and do not silently discard a mechanical consequence.
 - Avoid stringly rule implementation. Rule identifiers and categories should be enums or typed dataclass fields.
 - Strings are acceptable for free-form content and boundaries: names, descriptions, filenames, URLs, external message types, and raw JSON field names.
 - Convert rule-bearing strings at the boundary. Once data is loaded, gameplay code should work with dataclasses, enums, and typed collections.
@@ -33,6 +38,6 @@ UIStringFormatter.clean_name(AbilityType.STRENGTH.name)
 ```
 
 - The DM has full control. Players control their own sheets and tokens.
-- The system helps track resources and math, but it does not strictly enforce tabletop rules.
+- Enforce rules the model can determine, including resource costs, encounter timing, and resolution order; leave unmodeled geometry and table judgment to the DM. Keep explicit DM correction controls and log overrides.
 - The board remains independent from character movement rules; sheets are tools for play, not a rules cage.
 - Add or update focused backend and frontend tests for every gameplay or UI feature change.

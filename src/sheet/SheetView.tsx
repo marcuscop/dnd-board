@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
-import { RollResolutionMode, SheetSectionType, TokenKind } from "../types";
+import { AbilityRollType, RollResolutionMode, SheetSectionType, TokenKind } from "../types";
 import type {
   AbilityType,
   CharacterBuilderDraft,
@@ -22,6 +22,8 @@ import { CharacterBuilderPanel, shouldShowCharacterBuilder } from "../builder/Ch
 import { AdHocDiceRoller } from "./AdHocDiceRoller";
 import { EncounterControls } from "./EncounterControls";
 import { ResolutionPromptPanel } from "./ResolutionPromptPanel";
+import { RestControls } from "./RestControls";
+import type { RestHitDieSelection } from "./RestControls";
 import { InlineRolls, isTargetableRoll, RollCard, RollLogRow } from "./Rolls";
 import {
   canRollSheet,
@@ -164,6 +166,7 @@ export type SheetViewProps = {
   onRollDamage: (sheet: CharacterSheet, attackId: string, weaponOption?: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, abilityId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
+  onRollDeathSavingThrow: (sheet: CharacterSheet) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string, spellSlotLevel?: number) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number, choiceIndex?: number) => void;
   onRollBoundWeaponSpell: (sheet: CharacterSheet, spellId: string, effectIndex: number, equipmentInstanceId: string, choiceIndex?: number) => void;
@@ -171,7 +174,7 @@ export type SheetViewProps = {
   onRollSpellTemporaryHitPoints: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number) => void;
   onRollSpellEffect: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, choiceIndex?: number, equipmentInstanceId?: string) => void;
   onRollAdHocDice: (dice: DiceType, count: number) => Promise<RollPayload | null>;
-  onRestSheets: (rest: "short" | "long") => void;
+  onRestSheets: (rest: "short" | "long", hitDice?: RestHitDieSelection[]) => Promise<boolean>;
   onUpdateProgressionChoice: (sheet: CharacterSheet, choiceId: string, values: string[]) => void;
   onUpdateCondition: (sheet: CharacterSheet, condition: ConditionType, active: boolean) => void;
   onRemoveOngoingEffect: (sheet: CharacterSheet, resolutionSeed: number, effectNodePath: number[]) => void;
@@ -191,7 +194,7 @@ export type SheetViewProps = {
   tokens: Token[];
 };
 
-export function SheetView({ connection, encounter, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onEncounterChange, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollBoundWeaponSpell, onRollSpellHealing, onRollSpellTemporaryHitPoints, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onRemoveOngoingEffect, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, onRespondToResolutionPrompt, playerKey, roomId, resolutionPrompts, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+export function SheetView({ connection, encounter, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onEncounterChange, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollDeathSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollBoundWeaponSpell, onRollSpellHealing, onRollSpellTemporaryHitPoints, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onRemoveOngoingEffect, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, onRespondToResolutionPrompt, playerKey, roomId, resolutionPrompts, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -260,10 +263,7 @@ export function SheetView({ connection, encounter, expandedSheetId, isDm, onRelo
           </p>
         </div>
         {!expandedSheet && isDm && (
-          <div className="rest-actions">
-            <button onClick={() => onRestSheets("short")}>Short Rest</button>
-            <button onClick={() => onRestSheets("long")}>Long Rest</button>
-          </div>
+          <RestControls sheets={partySheets} disabled={encounter !== null} onRest={onRestSheets} />
         )}
         {!expandedSheet && (
           <EncounterControls
@@ -308,6 +308,7 @@ export function SheetView({ connection, encounter, expandedSheetId, isDm, onRelo
           onRollDamage={onRollDamage}
           onRollResourceAction={onRollResourceAction}
           onRollSavingThrow={onRollSavingThrow}
+          onRollDeathSavingThrow={onRollDeathSavingThrow}
           onRollSpellAttack={onRollSpellAttack}
           onRollSpellDamage={onRollSpellDamage}
           onRollBoundWeaponSpell={onRollBoundWeaponSpell}
@@ -1127,6 +1128,7 @@ function FullSheet({
   onRollDamage,
   onRollResourceAction,
   onRollSavingThrow,
+  onRollDeathSavingThrow,
   onRollSpellAttack,
   onRollSpellDamage,
   onRollBoundWeaponSpell,
@@ -1159,6 +1161,7 @@ function FullSheet({
   onRollDamage: (sheet: CharacterSheet, attackId: string, weaponOption?: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
   onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
+  onRollDeathSavingThrow: (sheet: CharacterSheet) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string, spellSlotLevel?: number) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number, choiceIndex?: number) => void;
   onRollBoundWeaponSpell: (sheet: CharacterSheet, spellId: string, effectIndex: number, equipmentInstanceId: string, choiceIndex?: number) => void;
@@ -1268,6 +1271,19 @@ function FullSheet({
                 />
               </div>
             ))}
+            <div className="saving-throw-row">
+              <span>Death Save</span>
+              <button disabled={!canRoll || sheet.hp.current > 0 || sheet.conditions.includes("dead")} onClick={() => onRollDeathSavingThrow(sheet)}>
+                Roll Save
+              </button>
+              <InlineRolls
+                pendingRolls={pendingRolls.filter((roll) => rollMatchesSourceAction(roll, SheetSectionType.ABILITY_SCORES, AbilityRollType.DEATH_SAVE, AbilityRollType.DEATH_SAVE))}
+                roller={sheet}
+                rollDraggable={rollDraggable}
+                onDragRollEnd={onDragRollEnd}
+                onDragRollStart={onDragRollStart}
+              />
+            </div>
           </div>
         </section>
 

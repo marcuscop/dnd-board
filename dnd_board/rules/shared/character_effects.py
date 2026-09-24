@@ -9,6 +9,7 @@ from dnd_board.character_sheet import (
     AbilityType,
     CharacterSheet,
     ConditionType,
+    DamageType,
     HitPoints,
     RollModifierBreakdown,
     RollDamageComponent,
@@ -323,13 +324,13 @@ class CharacterEffectExecutionContext:
         elif isinstance(damage.amount, DerivedAmount):
             return effect
         else:
-            amount = self.resolve_runtime_amount(node_id, damage.amount, damage.scaling)
+            amount = self.resolve_runtime_amount(node_id, damage.amount, damage.scaling, damage.damageType)
             self.amountInputs[node_id] = amount
         if (
             owning_attack_node_id in self.criticalAttackNodes
             and node_id not in self.criticalDamagePreparedNodes
         ):
-            amount += self.resolve_critical_dice(damage.amount, damage.scaling)
+            amount += self.resolve_critical_dice(damage.amount, damage.scaling, damage.damageType)
             self.amountInputs[node_id] = amount
         prepared = replace(damage, amount=FixedAmount(amount), scaling=[])
         self.pendingDamages[node_id] = PendingDamage(
@@ -370,10 +371,13 @@ class CharacterEffectExecutionContext:
         self,
         amount: FixedAmount | DiceAmount | CalculatedAmount | CombinedAmount | DerivedAmount,
         scaling: list[AmountScaling],
+        damage_type: DamageType | None,
     ) -> int:
         parts = amount.amounts if isinstance(amount, CombinedAmount) else [amount]
+        trait = character_sheet.spell_damage_trait(self.source, damage_type) if self.source_spell() is not None else None
+        minimum_die_result = trait.minimumDieResult if trait is not None else 1
         total = sum(
-            sum(character_sheet.random.randint(1, part.diceType.value) for _ in range(part.diceCount))
+            sum(max(minimum_die_result, character_sheet.random.randint(1, part.diceType.value)) for _ in range(part.diceCount))
             for part in parts
             if isinstance(part, DiceAmount)
         )
@@ -383,7 +387,7 @@ class CharacterEffectExecutionContext:
             increments = effect_scaling_increments(scale, source, source_spell.level if source_spell else 1, None)
             if scale.additionalDice is not None:
                 total += sum(
-                    character_sheet.random.randint(1, scale.additionalDice.diceType.value)
+                    max(minimum_die_result, character_sheet.random.randint(1, scale.additionalDice.diceType.value))
                     for _ in range(increments * scale.additionalDice.diceCount)
                 )
         return total
@@ -477,7 +481,7 @@ class CharacterEffectExecutionContext:
             effect.amount,
             (FixedAmount, DerivedAmount),
         ):
-            amount = self.resolve_runtime_amount(node_id, effect.amount, effect.scaling)
+            amount = self.resolve_runtime_amount(node_id, effect.amount, effect.scaling, effect.damageType if isinstance(effect, DamageEffect) else None)
             self.amountInputs[node_id] = amount
             effect = replace(effect, amount=FixedAmount(amount), scaling=[])
         if isinstance(effect, DamageEffect) and isinstance(effect.amount, FixedAmount):
@@ -501,7 +505,9 @@ class CharacterEffectExecutionContext:
                 self.resolve_runtime_amount(node_id, modifier.amount, [])
                 for _label, modifier in reduction_entries
             )
-            adjusted_damage = damage_after_defenses(raw_damage, effect.damageType, current_target, reduction)
+            trait = character_sheet.spell_damage_trait(self.source, effect.damageType) if self.source_spell() is not None else None
+            ignores_resistance = trait.ignoresResistance if trait is not None else False
+            adjusted_damage = damage_after_defenses(raw_damage, effect.damageType, current_target, reduction, ignores_resistance=ignores_resistance)
             adjusted_damage = max(0, adjusted_damage * effect.multiplierNumerator // effect.multiplierDenominator)
             remaining_damage = adjusted_damage
             next_temporary = max(0, self.hitPoints.temporary - remaining_damage)
@@ -520,6 +526,7 @@ class CharacterEffectExecutionContext:
                     reduction,
                     effect.multiplierDenominator > effect.multiplierNumerator,
                     ", ".join(label for label, _modifier in reduction_entries) or None,
+                    ignores_resistance=ignores_resistance,
                 )
             )
             return AppliedEffectResult(effect=effect, amount=adjusted_damage, effectNodeId=node_id)
@@ -630,14 +637,17 @@ class CharacterEffectExecutionContext:
         node_id: EffectNodeId,
         amount: DiceAmount | CalculatedAmount | CombinedAmount,
         scaling: list[AmountScaling],
+        damage_type: DamageType | None = None,
     ) -> int:
         source = self.source or self.target
+        trait = character_sheet.spell_damage_trait(source, damage_type) if self.source_spell() is not None else None
+        minimum_die_result = trait.minimumDieResult if trait is not None else 1
         parts = amount.amounts if isinstance(amount, CombinedAmount) else [amount]
-        total = sum(self.resolve_runtime_amount_part(part, source) for part in parts)
+        total = sum(self.resolve_runtime_amount_part(part, source, minimum_die_result) for part in parts)
         for scale in scaling:
             increments = effect_scaling_increments(scale, source, self.source_spell().level if self.source_spell() else 1, None)
             if scale.additionalDice is not None:
-                total += increments * self.resolve_runtime_amount_part(scale.additionalDice, source)
+                total += increments * self.resolve_runtime_amount_part(scale.additionalDice, source, minimum_die_result)
             total += increments * scale.additionalFixedAmount
         return total
 
@@ -645,11 +655,12 @@ class CharacterEffectExecutionContext:
         self,
         amount: FixedAmount | DiceAmount | CalculatedAmount | DerivedAmount,
         source: CharacterSheet,
+        minimum_die_result: int = 1,
     ) -> int:
         if isinstance(amount, FixedAmount):
             return amount.value
         if isinstance(amount, DiceAmount):
-            return sum(character_sheet.random.randint(1, amount.diceType.value) for _ in range(amount.diceCount)) + amount.staticBonus
+            return sum(max(minimum_die_result, character_sheet.random.randint(1, amount.diceType.value)) for _ in range(amount.diceCount)) + amount.staticBonus
         if isinstance(amount, DerivedAmount):
             raise TypeError("Derived runtime amounts require a preceding applied result")
         if amount.calculation in {
@@ -678,7 +689,12 @@ class CharacterEffectExecutionContext:
         elif amount.calculation == AmountCalculation.SOURCE_PROFICIENCY_BONUS:
             value = source.proficiencyBonus
         elif amount.calculation == AmountCalculation.SOURCE_EQUIPPED_SHIELD_ARMOR_CLASS:
-            value = max((item.armorClass or 0 for item in source.equipment if item.slot == character_sheet.EquipmentSlot.OFF_HAND), default=0)
+            from dnd_board.rules.feats import has_shield_training
+
+            value = character_sheet.equipped_shield_bonus(
+                source.equipment,
+                shield_trained=has_shield_training(source),
+            )
         else:
             raise ValueError(f"Incomplete calculated amount: {amount.calculation.name}")
         value *= amount.multiplier
@@ -2057,6 +2073,7 @@ def build_direct_spell_damage_roll_payload(
             sheet,
             spell,
             spell_slot_level,
+            damage.damageType,
         )
         active_modifiers = active_spell_damage_roll_modifier_breakdown(sheet)
         modifier_breakdown.extend(active_modifiers)
@@ -2293,11 +2310,13 @@ def roll_effect_amount(
     sheet: CharacterSheet,
     spell: SpellEntry | None,
     spell_slot_level: int | None,
+    damage_type: DamageType | None = None,
 ) -> tuple[list[int], character_sheet.DiceType, list[RollModifierBreakdown], int]:
     amounts = amount.amounts if isinstance(amount, CombinedAmount) else [amount]
     dice: list[int] = []
     dice_type = character_sheet.DiceType.D4
     modifier_breakdown: list[RollModifierBreakdown] = []
+    trait = character_sheet.spell_damage_trait(sheet, damage_type) if spell is not None else None
     scaling_increments = [
         (scale, effect_scaling_increments(scale, sheet, spell.level if spell is not None else 0, spell_slot_level))
         for scale in scaling
@@ -2357,6 +2376,14 @@ def roll_effect_amount(
         scaled_fixed_amount = increments * scale.additionalFixedAmount
         if scaled_fixed_amount:
             modifier_breakdown.append(RollModifierBreakdown(source="Effect", value=scaled_fixed_amount))
+    if trait is not None and trait.minimumDieResult > 1:
+        die_adjustment = sum(max(0, trait.minimumDieResult - die) for die in dice)
+        if die_adjustment:
+            modifier_breakdown.append(RollModifierBreakdown(
+                source=trait.sourceLabel,
+                value=die_adjustment,
+                description=f"Treat damage dice below {trait.minimumDieResult} as {trait.minimumDieResult}.",
+            ))
     modifier = sum(part.value for part in modifier_breakdown)
     return dice, dice_type, modifier_breakdown, sum(dice) + modifier
 

@@ -2,8 +2,8 @@ from dataclasses import replace
 
 import pytest
 
-from dnd_board.application.progression_service import ProgressionServiceError, apply_member_progression_rule, set_member_class_levels
-from dnd_board.character_sheet import AbilityScores, AbilityType, ArcaneShotType, BattleMasterManeuverType, CharacterClassLevel, ClassOptionKind, ClassOptionSelection, ClassType, FightingStyleType, PartyMemberConfig, PartyMemberSheet, ProficiencyLevel, ProgressionChoice, ProgressionChoiceType, RuneType, SkillType, SpellId, SpellSource, SpellStatus, enum_key, typed_json_from_value, typed_json_to_value
+from dnd_board.application.progression_service import ProgressionServiceError, apply_member_progression_rule, member_feat_eligibility_sheet, set_member_class_levels
+from dnd_board.character_sheet import AbilityScores, AbilityType, ArcaneShotType, BattleMasterManeuverType, CharacterClassLevel, ClassOptionKind, ClassOptionSelection, ClassType, FightingStyleType, PartyMember, PartyMemberConfig, PartyMemberSheet, ProficiencyLevel, ProgressionChoice, ProgressionChoiceType, RuneType, SkillType, SpellId, SpellSource, SpellStatus, TokenKind, build_character_sheet, enum_key, typed_json_from_value, typed_json_to_value
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.rogue.base import RogueSubclassType
 from dnd_board.rules.classes.fighter.archetypes import normalized_eldritch_knight_spell
@@ -39,6 +39,8 @@ from dnd_board.rules.progression import (
     skill_proficiency_selection_issue,
     unique_values,
     update_class_level,
+    saving_throw_proficiencies_from_grants,
+    SavingThrowProficiencyGrant,
 )
 from dnd_board.rules.feats import FeatCategory, GeneralFeatType
 from dnd_board.rules.feats import (
@@ -150,6 +152,85 @@ def test_defensive_duelist_grants_a_definition_backed_dexterity_choice() -> None
     assert result.grants == (
         AbilityScoreGrant(ClassType.FIGHTER, 4, AbilityScoreAdjustment(AbilityType.DEXTERITY, 1, maximum=20)),
     )
+
+
+def test_resilient_choices_grant_only_a_new_saving_throw_proficiency() -> None:
+    feat_record = ProgressionGrantRecord(
+        ProgressionGrantSource(
+            ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT,
+            ClassType.FIGHTER,
+        ),
+        (FeatGrant(ClassType.FIGHTER, 4, GeneralFeatType.RESILIENT),),
+    )
+    member = PartyMemberConfig(
+        id="fighter",
+        name="Fighter",
+        maxHp=36,
+        abilityScores=AbilityScores(16, 14, 14, 10, 10, 10),
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+            progressionGrants=[feat_record],
+        ),
+    )
+    eligibility = member_feat_eligibility_sheet(member)
+    choices = progression_choices(
+        member.sheet.classes,
+        [],
+        {},
+        [general_feat_feature(enum_key(GeneralFeatType.RESILIENT))],
+        eligibility,
+        progression_grants=[feat_record],
+    )
+    resilient_choice = next(choice for choice in choices if choice.id == ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE.value)
+    assert {option.value for option in resilient_choice.options} == {
+        "dexterity", "intelligence", "wisdom", "charisma",
+    }
+    with pytest.raises(ProgressionServiceError):
+        apply_member_progression_rule(member, ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE, ["constitution"])
+
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE, ["wisdom"])
+    assert member.abilityScores.wisdom == 11
+    assert AbilityType.WISDOM in saving_throw_proficiencies_from_grants(member.sheet.progressionGrants)
+    sheet = build_character_sheet(
+        token_id=member.id,
+        kind=TokenKind.CHARACTER,
+        name=member.name,
+        owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(member.id, member.name, "player-1", None, member.abilityScores, member.maxHp, member.sheet),
+        current_hp=None,
+        resource_overrides={},
+    )
+    assert next(save for save in sheet.savingThrows if save.ability == AbilityType.WISDOM).proficient
+    assert any(
+        isinstance(grant, SavingThrowProficiencyGrant) and grant.ability == AbilityType.WISDOM
+        for record in member.sheet.progressionGrants
+        for grant in record.grants
+    )
+
+    set_member_class_levels(member, [CharacterClassLevel(name=ClassType.FIGHTER, level=3)])
+    assert member.abilityScores.wisdom == 10
+    assert AbilityType.WISDOM not in saving_throw_proficiencies_from_grants(member.sheet.progressionGrants)
+
+
+def test_resilient_still_grants_save_proficiency_at_ability_score_cap() -> None:
+    feat_record = ProgressionGrantRecord(
+        ProgressionGrantSource(ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT, ClassType.FIGHTER),
+        (FeatGrant(ClassType.FIGHTER, 4, GeneralFeatType.RESILIENT),),
+    )
+    member = PartyMemberConfig(
+        id="fighter",
+        name="Fighter",
+        maxHp=36,
+        abilityScores=AbilityScores(16, 14, 14, 10, 20, 10),
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(ClassType.FIGHTER, 4)],
+            progressionGrants=[feat_record],
+        ),
+    )
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE, ["wisdom"])
+    assert member.abilityScores.wisdom == 20
+    assert AbilityType.WISDOM in saving_throw_proficiencies_from_grants(member.sheet.progressionGrants)
 
 
 def test_war_caster_ability_choice_enforces_candidates_and_score_cap() -> None:

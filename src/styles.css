@@ -394,6 +394,67 @@ canvas.is-dragging,
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  position: relative;
+}
+
+.rest-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(420px, calc(100vw - 24px));
+  padding: 12px;
+  border: 1px solid rgba(216, 156, 70, 0.78);
+  border-radius: 6px;
+  background: #21160d;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
+}
+
+.rest-panel-heading,
+.rest-panel-character-heading,
+.rest-panel-actions,
+.rest-hit-die-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rest-panel-heading button {
+  min-height: 32px;
+  width: 32px;
+  padding: 0;
+}
+
+.rest-panel-characters {
+  max-height: min(48vh, 400px);
+  overflow-y: auto;
+  margin: 10px 0;
+}
+
+.rest-panel-character {
+  padding: 8px 0;
+  border-top: 1px solid rgba(216, 156, 70, 0.28);
+}
+
+.rest-panel-character-heading span:last-child {
+  white-space: nowrap;
+  color: #d8b778;
+}
+
+.rest-hit-die-row {
+  margin-top: 6px;
+  font-size: 16px;
+}
+
+.rest-hit-die-row input {
+  width: 64px;
+  min-height: 32px;
+  text-align: center;
+}
+
+.rest-panel-actions {
+  justify-content: flex-end;
 }
 
 .encounter-controls,

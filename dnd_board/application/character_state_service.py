@@ -77,6 +77,7 @@ class CharacterStatePersistence:
     save_room: Callable[[Room], None]
     load_conditions: Callable[[str, str], list[ConditionType]]
     persist_conditions: Callable[[str, str, list[ConditionType]], None]
+    rebuild_sheet: Callable[[Room, str], CharacterSheet | None]
 
 
 def apply_roll_result(
@@ -330,16 +331,19 @@ def _apply_effect_sheet_updates(
                 effect_sheet = sheets_by_id.get(update.sheetId)
                 if effect_sheet is None:
                     continue
-                reset_sheet_resources(room, effect_sheet, effect.rest)
-                reset_sheet_conditions(room, effect_sheet, effect.rest, persistence)
-                if effect.rest == RestType.LONG_REST:
-                    room.temporary_hit_points.pop(effect_sheet.tokenId, None)
+                reset_character_for_rest(room, effect_sheet, effect.rest, persistence)
                 rested_conditions = list(
                     room.condition_overrides.get(update.tokenId, effect_sheet.conditions)
                 )
                 update.conditions = rested_conditions
                 if resolution.targetSheetId == update.sheetId:
                     resolution.targetConditions = rested_conditions
+                if effect.rest == RestType.LONG_REST:
+                    rested_sheet = persistence.rebuild_sheet(room, effect_sheet.tokenId)
+                    if rested_sheet is not None:
+                        update.hp = rested_sheet.hp
+                        if resolution.targetSheetId == update.sheetId:
+                            resolution.targetHp = rested_sheet.hp
                 persistent_effect_changed = True
                 continue
             if not isinstance(effect, MaximumHitPointsEffect):
@@ -387,7 +391,8 @@ def reset_sheet_conditions(
         if condition_clears_on_rest(duration, rest_type)
     }
     if expired:
-        next_conditions = [condition for condition in sheet.conditions if condition not in expired]
+        current_conditions = room.condition_overrides.get(sheet.tokenId, sheet.conditions)
+        next_conditions = [condition for condition in current_conditions if condition not in expired]
         room.condition_overrides[sheet.tokenId] = next_conditions
         for condition in expired:
             durations.pop(condition, None)
@@ -433,6 +438,8 @@ def reset_character_for_rest(
     persistence: CharacterStatePersistence,
 ) -> list[ResourceUpdate]:
     recovered = reset_sheet_resources(room, sheet, rest_type)
+    if rest_type == RestType.LONG_REST:
+        clear_active_concentration(room, sheet.id, persistence)
     remaining_ongoing = ongoing_effects_after_ending(
         room.ongoing_effects.get(sheet.tokenId, []),
         EndingConditionType.REST_COMPLETED,
@@ -452,6 +459,10 @@ def reset_character_for_rest(
         room.max_hit_point_reductions[sheet.tokenId] = remaining
     else:
         room.max_hit_point_reductions.pop(sheet.tokenId, None)
+    if rest_type == RestType.LONG_REST:
+        refreshed = persistence.rebuild_sheet(room, sheet.tokenId)
+        if refreshed is not None:
+            room.hit_points[sheet.tokenId] = refreshed.hp.max
     return recovered
 
 

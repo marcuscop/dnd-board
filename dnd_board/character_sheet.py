@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Union, get_args, get_origin, ge
 from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId, ResourceKey, ResourceKind, ResourceRecovery, ResourceState, ResourceUpdate
 
 if TYPE_CHECKING:
-    from dnd_board.rules.shared.effects import AbilityScoreAdjustment, ActiveOngoingEffect, ActiveScheduledEffect, AppliedEffectResult, CalculationType, DiceAmount, EffectNode, EffectNodeId, EffectResolutionInputs, FeatureMechanics, Interaction, ModifierOperation, WeaponAttackOption
+    from dnd_board.rules.shared.effects import AbilityScoreAdjustment, ActiveOngoingEffect, ActiveScheduledEffect, AppliedEffectResult, CalculationType, DiceAmount, EffectNode, EffectNodeId, EffectResolutionInputs, FeatureMechanics, Interaction, ModifierOperation, SpellDamageTrait, WeaponAttackOption
     from dnd_board.rules.shared.character_effects import ResolvedCharacterEffect
     from dnd_board.rules.equipment import EquipmentId
     from dnd_board.rules.progression import ProgressionGrantRecord
@@ -99,12 +99,17 @@ class ProgressionChoiceType(Enum):
 class AbilityRollType(Enum):
     CHECK = auto()
     SAVE = auto()
+    DEATH_SAVE = auto()
 
 
 class D20TestType(Enum):
     ATTACK_ROLL = auto()
     ABILITY_CHECK = auto()
     SAVING_THROW = auto()
+
+
+class D20DisadvantageSource(Enum):
+    UNTRAINED_ARMOR = "Untrained armor"
 
 
 class UIStringFormatter:
@@ -1585,6 +1590,7 @@ class CharacterSheet:
     activeConcentration: ActiveConcentrationStatus | None = None
     ongoingEffects: list[ActiveOngoingEffect] = field(default_factory=list)
     suppressedConditions: list[ConditionType] = field(default_factory=list)
+    spellDamageTraits: list[SpellDamageTrait] = field(default_factory=list)
 
 
 @dataclass
@@ -1607,6 +1613,7 @@ class RollPayload:
     createdAt: int
     advantageConditions: list[ConditionType] | None = None
     disadvantageConditions: list[ConditionType] | None = None
+    disadvantageSources: list[D20DisadvantageSource] | None = None
     sourceConditions: list[ConditionType] | None = None
     damageType: DamageType | None = None
     damageComponents: list[RollDamageComponent] | None = None
@@ -1761,19 +1768,30 @@ def build_character_sheet(
     ability_modifiers = ability_modifier_map(ability_scores)
     skill_proficiencies = sheet_config.skills if sheet_config and sheet_config.skills else {}
     save_proficiencies = set(sheet_config.savingThrowProficiencies if sheet_config and sheet_config.savingThrowProficiencies else default_save_proficiencies(classes))
+    from dnd_board.rules.progression import saving_throw_proficiencies_from_grants, spell_damage_traits_from_grants
+
+    save_proficiencies.update(saving_throw_proficiencies_from_grants(sheet_config.progressionGrants if sheet_config else None))
     configured_spells = hydrated_spell_entries(sheet_config.spells if sheet_config and sheet_config.spells else [])
     configured_spellbook = hydrated_spell_entries(sheet_config.spellbook if sheet_config and sheet_config.spellbook else [])
     configured_feats = sheet_config.feats if sheet_config and sheet_config.feats else []
-    resources = apply_resource_overrides(sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes, ability_scores, configured_feats, proficiency_bonus), resource_overrides)
+    from dnd_board.rules.feats import effective_armor_training, effective_equipment_proficiencies
+
+    proficiencies = effective_equipment_proficiencies(
+        classes, configured_feats, sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else []
+    )
+    _, shield_trained = effective_armor_training(classes, configured_feats, proficiencies)
+    configured_resources = sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes, ability_scores, configured_feats, proficiency_bonus)
+    resources = apply_resource_overrides(with_hit_die_resources(configured_resources, classes), resource_overrides)
     subclass_abilities = default_subclass_abilities(classes)
     abilities = [*resource_roll_abilities(resources), *subclass_abilities]
     features = default_features(classes)
     feat_eligibility_sheet = SimpleNamespace(
+        savingThrowProficiencies=save_proficiencies,
         race=sheet_config.race if sheet_config and sheet_config.race else "",
         background=sheet_config.background if sheet_config and sheet_config.background else "",
         abilityScores=ability_scores,
         classes=classes,
-        proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
+        proficiencies=proficiencies,
         feats=configured_feats,
         features=[*features, *(sheet_config.features if sheet_config and sheet_config.features else [])],
         abilities=abilities,
@@ -1793,7 +1811,7 @@ def build_character_sheet(
         features = [*(sheet_config.traits or []), *features, *(sheet_config.features or []), *(sheet_config.feats or [])]
     equipment = apply_equipment_slot_overrides(sheet_config.equipment if sheet_config and sheet_config.equipment else [], equipment_slot_overrides or {})
     purse = sheet_config.purse if sheet_config and sheet_config.purse else Purse()
-    armor_class = base_armor_class(sheet_config, equipment, dexterity_modifier)
+    armor_class = base_armor_class(sheet_config, equipment, dexterity_modifier, shield_trained=shield_trained)
     armor_class += default_armor_class_bonus(classes, equipment)
     armor_class += default_feat_armor_class_bonus(configured_feats, equipment, ability_scores)
     attacks = sheet_config.attacks if sheet_config and sheet_config.attacks else default_attacks(kind)
@@ -1830,7 +1848,7 @@ def build_character_sheet(
         features=features,
         spells=spells,
         spellbook=configured_spellbook,
-        proficiencies=sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else [],
+        proficiencies=proficiencies,
         conditions=sheet_config.conditions if sheet_config and sheet_config.conditions else [],
         exhaustionLevel=1 if sheet_config and sheet_config.conditions and ConditionType.EXHAUSTION in sheet_config.conditions else 0,
         creatureTypes=sheet_config.creatureTypes if sheet_config and sheet_config.creatureTypes else [CreatureType.HUMANOID] if kind == TokenKind.CHARACTER else [],
@@ -1839,6 +1857,7 @@ def build_character_sheet(
         damageImmunities=sheet_config.damageImmunities if sheet_config and sheet_config.damageImmunities else [],
         attacks=attacks,
         equipment=equipment,
+        spellDamageTraits=spell_damage_traits_from_grants(sheet_config.progressionGrants if sheet_config else None, classes),
         purse=purse,
     )
     from dnd_board.rules.shared.character_effects import character_allocation_value
@@ -1870,7 +1889,8 @@ def build_attack_roll_payload(
     modifier = sum(part.value for part in modifier_breakdown)
     advantage_conditions = condition_outgoing_attack_advantage_conditions(sheet)
     disadvantage_conditions = condition_outgoing_attack_disadvantage_conditions(sheet)
-    dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions)
+    disadvantage_sources = armor_training_disadvantage_sources(sheet, action.ability)
+    dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions, disadvantage_sources)
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -1891,6 +1911,7 @@ def build_attack_roll_payload(
         createdAt=created_at,
         advantageConditions=advantage_conditions or None,
         disadvantageConditions=disadvantage_conditions or None,
+        disadvantageSources=disadvantage_sources or None,
         sourceConditions=sheet.conditions or None,
         damageType=action.damageType,
         d20TestType=D20TestType.ATTACK_ROLL,
@@ -2108,7 +2129,8 @@ def build_spell_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: S
     modifier = sum(part.value for part in modifier_breakdown)
     advantage_conditions = condition_outgoing_attack_advantage_conditions(sheet)
     disadvantage_conditions = condition_outgoing_attack_disadvantage_conditions(sheet)
-    dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions)
+    disadvantage_sources = armor_training_disadvantage_sources(sheet, casting_ability)
+    dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions, disadvantage_sources)
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -2129,6 +2151,7 @@ def build_spell_attack_roll_payload(sheet: CharacterSheet, roller: str, spell: S
         createdAt=created_at,
         advantageConditions=advantage_conditions or None,
         disadvantageConditions=disadvantage_conditions or None,
+        disadvantageSources=disadvantage_sources or None,
         sourceConditions=sheet.conditions or None,
         damageType=first_spell_damage_type(spell),
     )
@@ -2314,6 +2337,7 @@ def build_ability_check_roll_payload(sheet: CharacterSheet, roller: str, ability
         modifier_breakdown=modifier_breakdown,
         advantage_conditions=advantage_conditions,
         disadvantage_conditions=disadvantage_conditions,
+        ability=ability,
         d20_test_type=D20TestType.ABILITY_CHECK,
     )
 
@@ -2345,8 +2369,51 @@ def build_saving_throw_roll_payload(sheet: CharacterSheet, roller: str, ability:
         modifier_breakdown=modifier_breakdown,
         advantage_conditions=advantage_conditions,
         disadvantage_conditions=disadvantage_conditions,
+        ability=ability,
         d20_test_type=D20TestType.SAVING_THROW,
     )
+
+
+def build_death_saving_throw_roll_payload(sheet: CharacterSheet, roller: str) -> RollPayload:
+    from dnd_board.rules.shared.effects import CalculationType
+
+    breakdown = active_roll_modifier_breakdown(sheet, RollModifierEffectTarget.SAVING_THROW)
+    breakdown.extend(exhaustion_d20_modifier_breakdown(sheet))
+    roll = build_d20_roll_payload(
+        sheet=sheet,
+        roller=roller,
+        source=RollSource(
+            section=SheetSectionType.ABILITY_SCORES,
+            sourceId=enum_key(AbilityRollType.DEATH_SAVE),
+            actionId=enum_key(AbilityRollType.DEATH_SAVE),
+        ),
+        source_label="Death Save",
+        label="Death Saving Throw",
+        modifier_breakdown=breakdown,
+        d20_test_type=D20TestType.SAVING_THROW,
+    )
+    return apply_passive_d20_roll_modifiers(sheet, roll, CalculationType.DEATH_SAVING_THROW)
+
+
+def apply_passive_d20_roll_modifiers(
+    sheet: CharacterSheet,
+    roll: RollPayload,
+    calculation: CalculationType,
+) -> RollPayload:
+    from dnd_board.rules.shared.character_effects import applicable_character_modifiers
+    from dnd_board.rules.shared.effects import ModifierOperation, ModifierScope
+
+    modifiers = applicable_character_modifiers(sheet, calculation, ModifierScope.OWNER, roll, sheet, sheet)
+    advantage = [(label, modifier) for label, modifier in modifiers if modifier.operation == ModifierOperation.ADVANTAGE]
+    disadvantage = [(label, modifier) for label, modifier in modifiers if modifier.operation == ModifierOperation.DISADVANTAGE]
+    for label, modifier in (*advantage, *disadvantage):
+        roll.modifierBreakdown.append(RollModifierBreakdown(source=label, value=0, description=modifier.description))
+    if bool(advantage) == bool(disadvantage):
+        return roll
+    roll.dice.append(random.randint(1, 20))
+    roll.die = "2d20kh1" if advantage else "2d20kl1"
+    roll.total = (max(roll.dice) if advantage else min(roll.dice)) + roll.modifier
+    return roll
 
 
 DAMAGE_RESISTANCE_CONDITIONS: dict[ConditionType, DamageType] = {
@@ -2633,7 +2700,9 @@ def condition_modifier_amount(sheet: CharacterSheet, amount: object) -> int:
         if amount.calculation == AmountCalculation.SOURCE_ABILITY_MODIFIER and amount.ability is not None:
             return ability_modifier(getattr(sheet.abilityScores, enum_key(amount.ability))) * amount.multiplier
         if amount.calculation == AmountCalculation.SOURCE_EQUIPPED_SHIELD_ARMOR_CLASS:
-            return equipped_shield_bonus(sheet.equipment) * amount.multiplier
+            from dnd_board.rules.feats import has_shield_training
+
+            return equipped_shield_bonus(sheet.equipment, shield_trained=has_shield_training(sheet)) * amount.multiplier
     return 0
 
 
@@ -2680,16 +2749,36 @@ def worn_armor(equipment: list[EquipmentItem]) -> EquipmentItem | None:
     return next((item for item in equipment if item.itemType == EquipmentType.ARMOR and item.slot == EquipmentSlot.ARMOR), None)
 
 
-def equipped_shield_bonus(equipment: list[EquipmentItem]) -> int:
+def untrained_worn_armor(sheet: CharacterSheet) -> EquipmentItem | None:
+    from dnd_board.rules.feats import has_armor_proficiency
+
+    armor = worn_armor(sheet.equipment)
+    if armor is None or armor.armorCategory is None or has_armor_proficiency(sheet, armor.armorCategory):
+        return None
+    return armor
+
+
+def armor_training_disadvantage_sources(
+    sheet: CharacterSheet, ability: AbilityType | None
+) -> list[D20DisadvantageSource]:
+    if ability not in {AbilityType.STRENGTH, AbilityType.DEXTERITY} or untrained_worn_armor(sheet) is None:
+        return []
+    return [D20DisadvantageSource.UNTRAINED_ARMOR]
+
+
+def equipped_shield_bonus(equipment: list[EquipmentItem], *, shield_trained: bool = True) -> int:
+    if not shield_trained:
+        return 0
     return sum(item.armorClassBonus for item in equipment if item.itemType == EquipmentType.SHIELD and item.slot in {EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND})
 
 
 def condition_d20_roll(
     advantage_conditions: list[ConditionType] | None = None,
     disadvantage_conditions: list[ConditionType] | None = None,
+    disadvantage_sources: list[D20DisadvantageSource] | None = None,
 ) -> tuple[list[int], int, str]:
-    has_advantage = bool(advantage_conditions) and not disadvantage_conditions
-    has_disadvantage = bool(disadvantage_conditions) and not advantage_conditions
+    has_advantage = bool(advantage_conditions) and not disadvantage_conditions and not disadvantage_sources
+    has_disadvantage = bool(disadvantage_conditions or disadvantage_sources) and not advantage_conditions
     dice = [random.randint(1, 20)]
     if has_advantage or has_disadvantage:
         dice.append(random.randint(1, 20))
@@ -2709,9 +2798,11 @@ def build_d20_roll_payload(
     advantage_conditions: list[ConditionType] | None = None,
     disadvantage_conditions: list[ConditionType] | None = None,
     d20_test_type: D20TestType,
+    ability: AbilityType | None = None,
 ) -> RollPayload:
     modifier = sum(part.value for part in modifier_breakdown)
-    dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions)
+    disadvantage_sources = armor_training_disadvantage_sources(sheet, ability)
+    dice, die_roll, die = condition_d20_roll(advantage_conditions, disadvantage_conditions, disadvantage_sources)
     created_at = time_ns()
     return RollPayload(
         id=f"roll-{created_at}",
@@ -2730,6 +2821,7 @@ def build_d20_roll_payload(
         modifierBreakdown=modifier_breakdown,
         advantageConditions=advantage_conditions or None,
         disadvantageConditions=disadvantage_conditions or None,
+        disadvantageSources=disadvantage_sources or None,
         total=die_roll + modifier,
         createdAt=created_at,
         d20TestType=d20_test_type,
@@ -2894,7 +2986,7 @@ def resolve_roll_against_target(
             target_hp = target.hp
             outcome = f"has no effect; target is not {creature_type_list_label(roll.targetCreatureTypes or [])}"
         else:
-            adjusted_damage, outcome = resolved_damage_total_and_outcome(roll, target)
+            adjusted_damage, outcome = resolved_damage_total_and_outcome(roll, target, source)
             remaining_damage = adjusted_damage
             next_temporary = max(0, target.hp.temporary - remaining_damage)
             remaining_damage = max(0, remaining_damage - target.hp.temporary)
@@ -3114,9 +3206,9 @@ def attack_roll_with_target_condition_modifiers(
         return roll
     dice = list(roll.dice[:1] or [random.randint(1, 20)])
     has_advantage = (bool(advantage_conditions) or ongoing_advantage or passive_advantage) and not (
-        disadvantage_conditions or ongoing_disadvantage or passive_disadvantage
+        disadvantage_conditions or roll.disadvantageSources or ongoing_disadvantage or passive_disadvantage
     )
-    has_disadvantage = (bool(disadvantage_conditions) or ongoing_disadvantage or passive_disadvantage) and not (
+    has_disadvantage = (bool(disadvantage_conditions) or bool(roll.disadvantageSources) or ongoing_disadvantage or passive_disadvantage) and not (
         advantage_conditions or ongoing_advantage or passive_advantage
     )
     if has_advantage or has_disadvantage:
@@ -3230,25 +3322,29 @@ def unique_conditions(conditions: list[ConditionType]) -> list[ConditionType]:
     return list(dict.fromkeys(conditions))
 
 
-def resolved_damage_total_and_outcome(roll: RollPayload, target: CharacterSheet) -> tuple[int, str]:
+def resolved_damage_total_and_outcome(roll: RollPayload, target: CharacterSheet, source: CharacterSheet | None = None) -> tuple[int, str]:
     save_halved = bool(roll.damageSaveSucceeded and roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE)
     if roll.damageComponents:
         outcomes = []
         total = 0
         for component in roll.damageComponents:
             damage_reduction = active_damage_reduction_roll(component.damageType, target)
-            adjusted_damage = damage_after_defenses(max(0, component.total), component.damageType, target, damage_reduction)
+            trait = spell_damage_trait(source, component.damageType) if roll.source.section == SheetSectionType.SPELLS else None
+            ignores_resistance = trait.ignoresResistance if trait is not None else False
+            adjusted_damage = damage_after_defenses(max(0, component.total), component.damageType, target, damage_reduction, ignores_resistance=ignores_resistance)
             if save_halved:
                 adjusted_damage //= 2
             total += adjusted_damage
-            outcomes.append(damage_component_outcome(component.total, adjusted_damage, component.damageType, target, damage_reduction, save_halved))
+            outcomes.append(damage_component_outcome(component.total, adjusted_damage, component.damageType, target, damage_reduction, save_halved, ignores_resistance))
         return total, f"deals {total} damage ({'; '.join(outcomes)})"
 
     damage_reduction = active_damage_reduction_roll(roll.damageType, target)
-    adjusted_damage = damage_after_defenses(max(0, roll.total), roll.damageType, target, damage_reduction)
+    trait = spell_damage_trait(source, roll.damageType) if roll.source.section == SheetSectionType.SPELLS else None
+    ignores_resistance = trait.ignoresResistance if trait is not None else False
+    adjusted_damage = damage_after_defenses(max(0, roll.total), roll.damageType, target, damage_reduction, ignores_resistance=ignores_resistance)
     if save_halved:
         adjusted_damage //= 2
-    return adjusted_damage, damage_outcome(roll.total, adjusted_damage, roll.damageType, target, damage_reduction, save_halved)
+    return adjusted_damage, damage_outcome(roll.total, adjusted_damage, roll.damageType, target, damage_reduction, save_halved, ignores_resistance=ignores_resistance)
 
 
 def target_creature_type_matches(roll: RollPayload, target: CharacterSheet) -> bool:
@@ -3272,13 +3368,17 @@ def condition_immunity_blocks(target: CharacterSheet, condition: ConditionType) 
     return condition in prevented_conditions(target.conditions, target.suppressedConditions)
 
 
-def damage_after_defenses(damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0) -> int:
+def spell_damage_trait(source: CharacterSheet | None, damage_type: DamageType | None) -> SpellDamageTrait | None:
+    return next((trait for trait in source.spellDamageTraits if trait.damageType == damage_type), None) if source is not None else None
+
+
+def damage_after_defenses(damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0, *, ignores_resistance: bool = False) -> int:
     if damage_type is None:
         return damage
     if damage_type in target.damageImmunities:
         return 0
     adjusted = max(0, damage - damage_reduction)
-    if damage_type in effective_damage_resistances(target):
+    if not ignores_resistance and damage_type in effective_damage_resistances(target):
         adjusted //= 2
     if damage_type in target.damageVulnerabilities:
         adjusted *= 2
@@ -3311,8 +3411,9 @@ def active_damage_reduction_types(target: CharacterSheet) -> set[DamageType]:
     return {DAMAGE_RESISTANCE_CONDITIONS[condition] for condition in target.conditions if condition in DAMAGE_RESISTANCE_CONDITIONS}
 
 
-def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0, save_halved: bool = False, damage_reduction_label: str | None = None) -> str:
-    if (adjusted_damage == raw_damage and not save_halved) or damage_type is None:
+def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageType | None, target: CharacterSheet, damage_reduction: int = 0, save_halved: bool = False, damage_reduction_label: str | None = None, *, ignores_resistance: bool = False) -> str:
+    ignored_resistance = ignores_resistance and damage_type in effective_damage_resistances(target) if damage_type is not None else False
+    if (adjusted_damage == raw_damage and not save_halved and not ignored_resistance) or damage_type is None:
         return f"deals {adjusted_damage} damage"
     damage_label = enum_label(damage_type)
     if damage_type in target.damageImmunities:
@@ -3324,7 +3425,9 @@ def damage_outcome(raw_damage: int, adjusted_damage: int, damage_type: DamageTyp
         adjustments.append(
             f"{damage_reduction_label or f'Resistance {damage_label}'} reduces damage by {damage_reduction}"
         )
-    if damage_type in effective_damage_resistances(target):
+    if ignored_resistance:
+        adjustments.append(f"ignoring {damage_label} resistance")
+    if not ignores_resistance and damage_type in effective_damage_resistances(target):
         adjustments.append(f"{damage_label} resistance")
     if damage_type in target.damageVulnerabilities:
         adjustments.append(f"{damage_label} vulnerability")
@@ -3338,9 +3441,11 @@ def damage_component_outcome(
     target: CharacterSheet,
     damage_reduction: int = 0,
     save_halved: bool = False,
+    ignores_resistance: bool = False,
 ) -> str:
     damage_label = enum_label(damage_type)
-    if adjusted_damage == raw_damage and not save_halved:
+    ignored_resistance = ignores_resistance and damage_type in effective_damage_resistances(target)
+    if adjusted_damage == raw_damage and not save_halved and not ignored_resistance:
         return f"{damage_label} {adjusted_damage}"
     if damage_type in target.damageImmunities:
         return f"{damage_label} 0 after immunity"
@@ -3349,7 +3454,9 @@ def damage_component_outcome(
         adjustments.append("successful save")
     if damage_reduction:
         adjustments.append(f"Resistance {damage_label} reduces damage by {damage_reduction}")
-    if damage_type in effective_damage_resistances(target):
+    if ignored_resistance:
+        adjustments.append("ignoring resistance")
+    if not ignores_resistance and damage_type in effective_damage_resistances(target):
         adjustments.append("resistance")
     if damage_type in target.damageVulnerabilities:
         adjustments.append("vulnerability")
@@ -3400,16 +3507,24 @@ def proficiency_bonus_for_level(level: int) -> int:
     return 2 + max(0, min(19, level - 1)) // 4
 
 
-def base_armor_class(sheet_config: PartyMemberSheet | None, equipment: list[EquipmentItem], dexterity_modifier: int) -> int:
+def base_armor_class(
+    sheet_config: PartyMemberSheet | None,
+    equipment: list[EquipmentItem],
+    dexterity_modifier: int,
+    *,
+    shield_trained: bool = True,
+) -> int:
+    shield_bonus = equipped_shield_bonus(equipment, shield_trained=shield_trained)
     if sheet_config and sheet_config.armorClass is not None:
-        return sheet_config.armorClass
+        return sheet_config.armorClass - (
+            equipped_shield_bonus(equipment) if not shield_trained else 0
+        )
 
     worn_armor = next((item for item in equipment if item.itemType == EquipmentType.ARMOR and item.slot == EquipmentSlot.ARMOR), None)
-    wielded_shields = [item for item in equipment if item.itemType == EquipmentType.SHIELD and item.slot in {EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND}]
     if worn_armor is not None and worn_armor.armorClass > 0:
         armor_class = armor_item_class(worn_armor, dexterity_modifier)
-        return armor_class + sum(shield.armorClassBonus for shield in wielded_shields)
-    return 12 + min(3, dexterity_modifier) + sum(shield.armorClassBonus for shield in wielded_shields)
+        return armor_class + shield_bonus
+    return 12 + min(3, dexterity_modifier) + shield_bonus
 
 
 def armor_item_class(item: EquipmentItem, dexterity_modifier: int) -> int:
@@ -3589,11 +3704,58 @@ def default_resources(classes: list[CharacterClassLevel], ability_scores: Abilit
         *wizard_resources(classes),
         *wizard_subclass_resources(classes),
         *feat_resources(classes, feats, proficiency_bonus),
+        *hit_die_resources(classes),
     ]
     superiority_dice = combat_superiority_resource(classes)
     if superiority_dice is not None:
         resources.append(superiority_dice)
     return resources
+
+
+HIT_DIE_RESOURCES: dict[int, ResourceId] = {
+    6: ResourceId.HIT_DIE_D6,
+    8: ResourceId.HIT_DIE_D8,
+    10: ResourceId.HIT_DIE_D10,
+    12: ResourceId.HIT_DIE_D12,
+}
+
+
+def hit_die_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracker]:
+    counts: dict[ResourceId, int] = {}
+    for character_class in classes:
+        resource_id = HIT_DIE_RESOURCES.get(CLASS_HIT_DICE[character_class.name])
+        if resource_id is not None:
+            counts[resource_id] = counts.get(resource_id, 0) + character_class.level
+    return [
+        ResourceTracker(
+            id=enum_key(resource_id),
+            name=resource_id.value,
+            currentUses=count,
+            maxUses=count,
+            activation=TimeEconomy.SPECIAL,
+            description="Spend during a Short Rest to regain Hit Points, or as required by a feature.",
+            resource=resource_id,
+        )
+        for resource_id, count in counts.items()
+    ]
+
+
+def with_hit_die_resources(resources: list[ResourceTracker], classes: list[CharacterClassLevel]) -> list[ResourceTracker]:
+    expected = {resource.resource: resource for resource in hit_die_resources(classes)}
+    result: list[ResourceTracker] = []
+    seen: set[ResourceId] = set()
+    for resource in resources:
+        if resource.kind != ResourceKind.HIT_DIE:
+            result.append(resource)
+            continue
+        replacement = expected.get(resource.resource)
+        if replacement is None:
+            continue
+        seen.add(resource.resource)
+        spent = max(0, resource.maxUses - resource.currentUses)
+        result.append(replace(replacement, currentUses=max(0, replacement.maxUses - spent)))
+    result.extend(resource for resource_id, resource in expected.items() if resource_id not in seen)
+    return result
 
 
 def resource_roll_abilities(resources: list[ResourceTracker]) -> list[SheetAbility]:
@@ -3913,7 +4075,7 @@ def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> An
     if not isinstance(raw_fields, dict):
         return None
 
-    from dnd_board.rules.shared.effects import AppliedEffectResult, EffectNode, FeatureMechanics, Interaction, WeaponAttackOption
+    from dnd_board.rules.shared.effects import AppliedEffectResult, EffectNode, FeatureMechanics, Interaction, SpellDamageTrait, WeaponAttackOption
     from dnd_board.rules.equipment import EquipmentId
     from dnd_board.rules.progression import ProgressionGrantRecord
 
@@ -3924,6 +4086,7 @@ def typed_dataclass_from_json(model_type: type[Any], node: dict[str, Any]) -> An
             "EffectNode": EffectNode,
             "FeatureMechanics": FeatureMechanics,
             "Interaction": Interaction,
+            "SpellDamageTrait": SpellDamageTrait,
             "EquipmentId": EquipmentId,
             "ProgressionGrantRecord": ProgressionGrantRecord,
             "WeaponAttackOption": WeaponAttackOption,
@@ -3989,6 +4152,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             AbilityScores,
             AbilityRollType,
             D20TestType,
+            D20DisadvantageSource,
             AbilityType,
             ArcaneShotType,
             ArmorCategory,

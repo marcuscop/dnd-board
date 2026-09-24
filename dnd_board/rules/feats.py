@@ -13,6 +13,7 @@ from dnd_board.character_sheet import (
     AttackKind,
     AttackRangeType,
     CharacterClassLevel,
+    CLASS_HIT_DICE,
     ConditionType,
     DamageType,
     DiceType,
@@ -20,6 +21,7 @@ from dnd_board.character_sheet import (
     EquipmentSlot,
     EquipmentType,
     FightingStyleType,
+    HIT_DIE_RESOURCES,
     ResourceTracker,
     RollAction,
     RollModifierBreakdown,
@@ -33,7 +35,7 @@ from dnd_board.character_sheet import (
     enum_label,
 )
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
-from dnd_board.rules.equipment import EquipmentId
+from dnd_board.rules.equipment import CLASS_ARMOR_TRAINING, MULTICLASS_ARMOR_TRAINING, EquipmentId
 from dnd_board.rules.species import SpeciesType
 from dnd_board.rules.shared.effects import (
     AbilityScoreAdjustmentChoice,
@@ -53,6 +55,7 @@ from dnd_board.rules.shared.effects import (
     DamageEffect,
     DiceAmount,
     FeatureMechanics,
+    HitDieAction,
     EffectDuration,
     EffectDurationType,
     EffectSelectionExclusion,
@@ -95,6 +98,7 @@ from dnd_board.rules.shared.effects import (
     SavingThrowAbilityPredicate,
     SelectionId,
     SelectWeaponEffect,
+    SpellDamageTraitChoice,
     SourceAttackKindPredicate,
     SourceAttackCriticalPredicate,
     SourceAttackRangePredicate,
@@ -168,6 +172,20 @@ class FeatAbilityId(Enum):
     BOON_OF_DIMENSIONAL_TRAVEL = "boonOfDimensionalTravel"
     BOON_OF_FATE = "boonOfFate"
     BOON_OF_RECOVERY = "boonOfRecovery"
+
+
+class FeatOptionId(Enum):
+    ELEMENTAL_ADEPT_ACID = auto()
+    ELEMENTAL_ADEPT_COLD = auto()
+    ELEMENTAL_ADEPT_FIRE = auto()
+    ELEMENTAL_ADEPT_LIGHTNING = auto()
+    ELEMENTAL_ADEPT_THUNDER = auto()
+
+
+@dataclass(frozen=True)
+class FeatSelectionOption:
+    id: FeatOptionId
+    damageType: DamageType
 
 
 class FeatCharacterClassField(Enum):
@@ -487,6 +505,10 @@ class GeneralFeatDefinition:
     mechanics: FeatureMechanics = field(default_factory=FeatureMechanics)
     resources: tuple[FeatResourceDefinition, ...] = ()
     abilityScoreAdjustmentChoice: AbilityScoreAdjustmentChoice | None = None
+    selectionOptions: tuple[FeatSelectionOption, ...] = ()
+    spellDamageTraitChoice: SpellDamageTraitChoice | None = None
+    armorTraining: tuple[ArmorCategory, ...] = ()
+    shieldTraining: bool = False
 
 
 def general_feat(
@@ -499,6 +521,10 @@ def general_feat(
     mechanics: FeatureMechanics | None = None,
     resources: tuple[FeatResourceDefinition, ...] = (),
     ability_score_adjustment_choice: AbilityScoreAdjustmentChoice | None = None,
+    selection_options: tuple[FeatSelectionOption, ...] = (),
+    spell_damage_trait_choice: SpellDamageTraitChoice | None = None,
+    armor_training: tuple[ArmorCategory, ...] = (),
+    shield_training: bool = False,
 ) -> GeneralFeatDefinition:
     return GeneralFeatDefinition(
         featType=feat_type,
@@ -510,6 +536,10 @@ def general_feat(
         mechanics=mechanics or FeatureMechanics(),
         resources=resources,
         abilityScoreAdjustmentChoice=ability_score_adjustment_choice,
+        selectionOptions=selection_options,
+        spellDamageTraitChoice=spell_damage_trait_choice,
+        armorTraining=armor_training,
+        shieldTraining=shield_training,
     )
 
 
@@ -1259,10 +1289,47 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
     ),
     GeneralFeatType.DUNGEON_DELVER: general_feat(GeneralFeatType.DUNGEON_DELVER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve trap detection, trap saves, and dungeon exploration."),
-    GeneralFeatType.DURABLE: general_feat(GeneralFeatType.DURABLE, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Constitution; improve healing from Hit Dice."),
+    GeneralFeatType.DURABLE: general_feat(
+        GeneralFeatType.DURABLE,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Constitution. Advantage on Death Saving Throws. As a Bonus Action, spend one Hit Die and regain Hit Points equal to the die rolled.",
+        (level_prerequisite(4),),
+        mechanics=FeatureMechanics(
+            passiveModifiers=[Modifier(
+                CalculationType.DEATH_SAVING_THROW,
+                ModifierOperation.ADVANTAGE,
+                description="Advantage on Death Saving Throws.",
+            )],
+            hitDieActions=[HitDieAction(
+                actionId=GrantedActionId.DURABLE,
+                activation=TimeEconomy.BONUS_ACTION,
+                description="Spend one Hit Die to regain Hit Points equal to the die rolled.",
+            )],
+        ),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.CONSTITUTION,)),
+    ),
     GeneralFeatType.DWARF_FORTITUDE: general_feat(GeneralFeatType.DWARF_FORTITUDE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Constitution; spend a Hit Die when taking the Dodge action.", (species_prerequisite(SpeciesType.DWARF),)),
     GeneralFeatType.ELDRITCH_ADEPT: general_feat(GeneralFeatType.ELDRITCH_ADEPT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn one Eldritch Invocation.", (spellcasting_prerequisite(),)),
-    GeneralFeatType.ELEMENTAL_ADEPT: general_feat(GeneralFeatType.ELEMENTAL_ADEPT, RuleSource.PLAYERS_HANDBOOK_2024, "Choose a damage type for spells to ignore resistance and improve low damage dice.", (spellcasting_prerequisite(),)),
+    GeneralFeatType.ELEMENTAL_ADEPT: general_feat(
+        GeneralFeatType.ELEMENTAL_ADEPT,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Intelligence, Wisdom, or Charisma. Choose Acid, Cold, Fire, Lightning, or Thunder; your spells ignore resistance to that type and may treat 1s on its damage dice as 2s.",
+        (level_prerequisite(4), spellcasting_prerequisite()),
+        repeatable=True,
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.INTELLIGENCE, AbilityType.WISDOM, AbilityType.CHARISMA)),
+        selection_options=(
+            FeatSelectionOption(FeatOptionId.ELEMENTAL_ADEPT_ACID, DamageType.ACID),
+            FeatSelectionOption(FeatOptionId.ELEMENTAL_ADEPT_COLD, DamageType.COLD),
+            FeatSelectionOption(FeatOptionId.ELEMENTAL_ADEPT_FIRE, DamageType.FIRE),
+            FeatSelectionOption(FeatOptionId.ELEMENTAL_ADEPT_LIGHTNING, DamageType.LIGHTNING),
+            FeatSelectionOption(FeatOptionId.ELEMENTAL_ADEPT_THUNDER, DamageType.THUNDER),
+        ),
+        spell_damage_trait_choice=SpellDamageTraitChoice(
+            (DamageType.ACID, DamageType.COLD, DamageType.FIRE, DamageType.LIGHTNING, DamageType.THUNDER),
+            minimumDieResult=2,
+            ignoresResistance=True,
+        ),
+    ),
     GeneralFeatType.ELVEN_ACCURACY: general_feat(GeneralFeatType.ELVEN_ACCURACY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Dexterity, Intelligence, Wisdom, or Charisma; improve advantaged attack rolls.", (species_prerequisite(SpeciesType.ELF),)),
     GeneralFeatType.EMBER_OF_THE_FIRE_GIANT: general_feat(GeneralFeatType.EMBER_OF_THE_FIRE_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; fire resistance and fire-blind burst.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.FIRE_STRIKE))),
     GeneralFeatType.FADE_AWAY: general_feat(GeneralFeatType.FADE_AWAY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Dexterity or Intelligence; turn invisible after taking damage.", (species_prerequisite(SpeciesType.GNOME),)),
@@ -1286,7 +1353,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT: general_feat(GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; reduce damage and teleport.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.CLOUD_STRIKE))),
     GeneralFeatType.GUNNER: general_feat(GeneralFeatType.GUNNER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Dexterity; firearm proficiency and improved firearm attacks."),
     GeneralFeatType.HEALER: general_feat(GeneralFeatType.HEALER, RuleSource.PLAYERS_HANDBOOK_2024, "Use a healer's kit to stabilize or restore hit points."),
-    GeneralFeatType.HEAVILY_ARMORED: general_feat(GeneralFeatType.HEAVILY_ARMORED, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength; gain heavy armor proficiency.", (armor_prerequisite(ArmorCategory.MEDIUM),)),
+    GeneralFeatType.HEAVILY_ARMORED: general_feat(
+        GeneralFeatType.HEAVILY_ARMORED,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Constitution or Strength; gain Heavy armor training.",
+        (level_prerequisite(4), armor_prerequisite(ArmorCategory.MEDIUM)),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.CONSTITUTION, AbilityType.STRENGTH)),
+        armor_training=(ArmorCategory.HEAVY,),
+    ),
     GeneralFeatType.HEAVY_ARMOR_MASTER: general_feat(
         GeneralFeatType.HEAVY_ARMOR_MASTER,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1299,7 +1373,15 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.INSPIRING_LEADER: general_feat(GeneralFeatType.INSPIRING_LEADER, RuleSource.PLAYERS_HANDBOOK_2024, "Give temporary hit points to a small group after a speech.", (ability_prerequisite(13, AbilityType.CHARISMA),)),
     GeneralFeatType.KEEN_MIND: general_feat(GeneralFeatType.KEEN_MIND, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence; improve recall and orientation."),
     GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT: general_feat(GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; darkvision and stone strike.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.STONE_STRIKE))),
-    GeneralFeatType.LIGHTLY_ARMORED: general_feat(GeneralFeatType.LIGHTLY_ARMORED, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain light armor proficiency."),
+    GeneralFeatType.LIGHTLY_ARMORED: general_feat(
+        GeneralFeatType.LIGHTLY_ARMORED,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity; gain Light armor and Shield training.",
+        (level_prerequisite(4),),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+        armor_training=(ArmorCategory.LIGHT,),
+        shield_training=True,
+    ),
     GeneralFeatType.LINGUIST: general_feat(GeneralFeatType.LINGUIST, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence; learn languages and make ciphers."),
     GeneralFeatType.LUCKY: general_feat(
         GeneralFeatType.LUCKY,
@@ -1337,7 +1419,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     ),
     GeneralFeatType.METAMAGIC_ADEPT: general_feat(GeneralFeatType.METAMAGIC_ADEPT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn metamagic and gain sorcery points.", (spellcasting_prerequisite(),)),
     GeneralFeatType.MOBILE: general_feat(GeneralFeatType.MOBILE, RuleSource.PLAYERS_HANDBOOK_2024, "Increase speed and improve difficult-terrain dashes and skirmishing."),
-    GeneralFeatType.MODERATELY_ARMORED: general_feat(GeneralFeatType.MODERATELY_ARMORED, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Dexterity; gain medium armor and shield proficiency.", (armor_prerequisite(ArmorCategory.LIGHT),)),
+    GeneralFeatType.MODERATELY_ARMORED: general_feat(
+        GeneralFeatType.MODERATELY_ARMORED,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity; gain Medium armor training.",
+        (level_prerequisite(4), armor_prerequisite(ArmorCategory.LIGHT)),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+        armor_training=(ArmorCategory.MEDIUM,),
+    ),
     GeneralFeatType.MOUNTED_COMBATANT: general_feat(GeneralFeatType.MOUNTED_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, "Improve mounted attacks and protect your mount."),
     GeneralFeatType.MUSICIAN: general_feat(GeneralFeatType.MUSICIAN, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Musical Instruments and grant Heroic Inspiration after a Short or Long Rest."),
     GeneralFeatType.OBSERVANT: general_feat(GeneralFeatType.OBSERVANT, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence or Wisdom; read lips and improve passive Investigation/Perception."),
@@ -1360,7 +1449,17 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
     ),
     GeneralFeatType.PRODIGY: general_feat(GeneralFeatType.PRODIGY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "Gain a skill, tool, language, and expertise.", (species_prerequisite(SpeciesType.HUMAN, SpeciesType.ORC, SpeciesType.ELF),)),
-    GeneralFeatType.RESILIENT: general_feat(GeneralFeatType.RESILIENT, RuleSource.PLAYERS_HANDBOOK_2024, "+1 in one ability and proficiency in that ability's saving throws."),
+    GeneralFeatType.RESILIENT: general_feat(
+        GeneralFeatType.RESILIENT,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 in an ability without saving throw proficiency; gain proficiency in that ability's saves.",
+        (level_prerequisite(4),),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice(
+            tuple(AbilityType),
+            requiresUnproficientSave=True,
+            grantsSavingThrowProficiency=True,
+        ),
+    ),
     GeneralFeatType.RITUAL_CASTER: general_feat(GeneralFeatType.RITUAL_CASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain a ritual book and cast ritual spells.", (ability_prerequisite(13, AbilityType.INTELLIGENCE, AbilityType.WISDOM),)),
     GeneralFeatType.RUNE_SHAPER: general_feat(GeneralFeatType.RUNE_SHAPER, RuleSource.GLORY_OF_THE_GIANTS, "Learn rune magic spells.", (feature_prerequisite(FeatCharacterFeatureType.SPELLCASTING, FeatCharacterFeatureType.RUNE_CARVER),)),
     GeneralFeatType.SAVAGE_ATTACKER: general_feat(
@@ -1977,8 +2076,54 @@ def character_size(sheet) -> FeatSpeciesSize | None:
 
 
 def has_armor_proficiency(sheet, category: ArmorCategory) -> bool:
-    label = f"{enum_label(category)} armor".lower()
-    return any(label in proficiency.lower() for proficiency in sheet_proficiencies(sheet))
+    armor, _ = effective_armor_training(
+        sheet_value(sheet, FeatSheetField.CLASSES, []) or [],
+        sheet_value(sheet, FeatSheetField.FEATS, []) or [],
+        sheet_proficiencies(sheet),
+    )
+    return category in armor
+
+
+def has_shield_training(sheet) -> bool:
+    _, shields = effective_armor_training(
+        sheet_value(sheet, FeatSheetField.CLASSES, []) or [],
+        sheet_value(sheet, FeatSheetField.FEATS, []) or [],
+        sheet_proficiencies(sheet),
+    )
+    return shields
+
+
+def effective_armor_training(
+    classes: list[CharacterClassLevel],
+    feats,
+    proficiencies: list[str],
+) -> tuple[set[ArmorCategory], bool]:
+    armor = {
+        category for category in ArmorCategory
+        if any(proficiency.casefold() == f"{enum_label(category)} armor".casefold() for proficiency in proficiencies)
+    }
+    shields = any(proficiency.casefold() in {"shield", "shields"} for proficiency in proficiencies)
+    for index, character_class in enumerate(classes):
+        class_armor, class_shields = (CLASS_ARMOR_TRAINING if index == 0 else MULTICLASS_ARMOR_TRAINING).get(
+            character_class.name, ((), False)
+        )
+        armor.update(class_armor)
+        shields |= class_shields
+    for feat_type in selected_general_feat_types(feats):
+        definition = GENERAL_FEATS[feat_type]
+        armor.update(definition.armorTraining)
+        shields |= definition.shieldTraining
+    return armor, shields
+
+
+def effective_equipment_proficiencies(
+    classes: list[CharacterClassLevel], feats, proficiencies: list[str]
+) -> list[str]:
+    armor, shields = effective_armor_training(classes, feats, proficiencies)
+    derived = [f"{enum_label(category)} armor" for category in ArmorCategory if category in armor]
+    if shields:
+        derived.append("Shields")
+    return list(dict.fromkeys([*proficiencies, *derived]))
 
 
 def has_weapon_proficiency(sheet, proficiency: WeaponProficiencyType) -> bool:
@@ -2090,6 +2235,32 @@ def feat_abilities(
 ) -> list[SheetAbility]:
     abilities: list[SheetAbility] = []
     selected_feats = selected_general_feat_types(feats)
+    available_hit_dice = {CLASS_HIT_DICE[character_class.name] for character_class in classes}
+    for feat_type in selected_feats:
+        definition = GENERAL_FEATS[feat_type]
+        for action in definition.mechanics.hitDieActions:
+            abilities.append(SheetAbility(
+                id=enum_key(action.actionId),
+                name=enum_label(feat_type),
+                source=enum_label(definition.category),
+                activation=action.activation,
+                description=action.description,
+                rollActions=[
+                    RollAction(
+                        id=resource_id,
+                        name=resource_id,
+                        diceCount=1,
+                        diceType=DiceType(die_size),
+                        modifier=action.modifier,
+                        resolution=action.resolution,
+                        activation=action.activation,
+                        activationTiming=action.activationTiming,
+                        resourceCosts=(ResourceCost(resource_id),),
+                    )
+                    for die_size, resource_id in HIT_DIE_RESOURCES.items()
+                    if die_size in available_hit_dice
+                ],
+            ))
     feat_ability_specs = [
         (GeneralFeatType.HEALER, FeatAbilityId.HEALER, TimeEconomy.ACTION, None, "Use a Healer's Kit to restore hit points or stabilize a creature."),
         (GeneralFeatType.LUCKY, FeatAbilityId.LUCKY_ADVANTAGE, TimeEconomy.SPECIAL, ResourceId.LUCK_POINTS, "Spend 1 Luck Point to gain Advantage on a D20 Test."),

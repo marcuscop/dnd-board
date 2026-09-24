@@ -24,6 +24,10 @@ export enum D20TestType {
   SAVING_THROW = "savingThrow"
 }
 
+export enum D20DisadvantageSource {
+  UNTRAINED_ARMOR = "untrainedArmor"
+}
+
 export enum RollModifierType {
   NONE = "none",
   CLASS_LEVEL = "classLevel",
@@ -39,6 +43,12 @@ export enum SheetSectionType {
   ABILITY_SCORES = "abilityScores",
   SPELLS = "spells",
   DICE_ROLLER = "diceRoller"
+}
+
+export enum AbilityRollType {
+  CHECK = "check",
+  SAVE = "save",
+  DEATH_SAVE = "deathSave"
 }
 
 export type Token = {
@@ -407,9 +417,13 @@ export type SpellControlProjection = {
   actions: EffectActionControl[];
   castOptions: { slotLevel: number; actions: EffectActionControl[] }[];
 };
-export type ResourceKind = "spellSlot" | "featureUse" | "itemCharge" | "ammunition" | "action" | "bonusAction" | "reaction";
+export type ResourceKind = "spellSlot" | "hitDie" | "featureUse" | "itemCharge" | "ammunition" | "action" | "bonusAction" | "reaction";
 export type ResourceId =
   | "spellSlot"
+  | "hitDieD6"
+  | "hitDieD8"
+  | "hitDieD10"
+  | "hitDieD12"
   | "firstLevelSpellSlots"
   | "secondLevelSpellSlots"
   | "thirdLevelSpellSlots"
@@ -719,6 +733,12 @@ export type CharacterSheet = {
   }[];
   passiveChecks: Record<string, number>;
   pendingChoices: ProgressionChoice[];
+  spellDamageTraits: {
+    damageType: DamageType;
+    minimumDieResult: number;
+    ignoresResistance: boolean;
+    sourceLabel: string;
+  }[];
   abilities: {
     id: string;
     name: string;
@@ -920,6 +940,8 @@ export type RollPayload = {
   advantageConditionsLabel?: string[];
   disadvantageConditions?: ConditionType[];
   disadvantageConditionsLabel?: string[];
+  disadvantageSources?: D20DisadvantageSource[];
+  disadvantageSourcesLabel?: string[];
   sourceConditions?: ConditionType[];
   sourceConditionsLabel?: string[];
   damageType?: DamageType;

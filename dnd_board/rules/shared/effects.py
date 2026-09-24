@@ -18,6 +18,8 @@ from dnd_board.character_sheet import (
     DamageType,
     DiceType,
     RestType,
+    RollModifierType,
+    RollResolutionMode,
     SkillType,
     SpellId,
     SpellComponent,
@@ -62,6 +64,8 @@ class AbilityScoreAdjustmentChoice:
     points: int = 1
     minimum: int = 1
     maximum: int = 20
+    requiresUnproficientSave: bool = False
+    grantsSavingThrowProficiency: bool = False
 
     def __post_init__(self) -> None:
         if not self.candidates or len(set(self.candidates)) != len(self.candidates):
@@ -645,6 +649,7 @@ class CalculationType(Enum):
     DAMAGE_ROLL = auto()
     DAMAGE_TAKEN = auto()
     SAVING_THROW = auto()
+    DEATH_SAVING_THROW = auto()
     ABILITY_CHECK = auto()
     ARMOR_CLASS = auto()
     SPEED = auto()
@@ -690,6 +695,32 @@ class Modifier:
     def __post_init__(self) -> None:
         if self.denominator == 0:
             raise ValueError("Modifier denominator cannot be zero")
+
+
+@dataclass(frozen=True)
+class SpellDamageTrait:
+    damageType: DamageType
+    minimumDieResult: int = 1
+    ignoresResistance: bool = False
+    sourceLabel: str = "Spell Damage Trait"
+
+
+@dataclass(frozen=True)
+class SpellDamageTraitChoice:
+    damageTypes: tuple[DamageType, ...]
+    minimumDieResult: int = 1
+    ignoresResistance: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.damageTypes or len(set(self.damageTypes)) != len(self.damageTypes):
+            raise ValueError("Spell damage trait choices require unique damage types")
+        if self.minimumDieResult < 1:
+            raise ValueError("A spell damage die minimum must be positive")
+
+    def bind(self, damage_type: DamageType, source_label: str = "Spell Damage Trait") -> SpellDamageTrait:
+        if damage_type not in self.damageTypes:
+            raise ValueError("Damage type is not an option for this trait")
+        return SpellDamageTrait(damage_type, self.minimumDieResult, self.ignoresResistance, source_label)
 
 
 class EffectDurationType(Enum):
@@ -1415,13 +1446,25 @@ EffectNode: TypeAlias = (
 
 
 @dataclass(frozen=True)
+class HitDieAction:
+    actionId: Enum
+    activation: TimeEconomy
+    description: str
+    resolution: RollResolutionMode = RollResolutionMode.HEAL_SELF
+    modifier: RollModifierType = RollModifierType.NONE
+    activationTiming: ActivationTiming = ActivationTiming.OWN_TURN
+
+
+@dataclass(frozen=True)
 class FeatureMechanics:
     activatedEffects: list[EffectNode] = field(default_factory=list)
     passiveModifiers: list[Modifier] = field(default_factory=list)
     interactions: list[Interaction] = field(default_factory=list)
+    hitDieActions: list[HitDieAction] = field(default_factory=list)
 
 
 class GrantedActionId(Enum):
+    DURABLE = "durable"
     DUAL_WIELDER = "dualWielder"
     HEW = "hew"
     LIGHT_WEAPON_ATTACK = "lightWeaponAttack"
@@ -2173,6 +2216,8 @@ def effect_without_conditions(effect: EffectNode | None, conditions: set[Conditi
 def effect_model_types() -> list[type[object]]:
     return [
         AbilityScoreAdjustment,
+        SpellDamageTrait,
+        SpellDamageTraitChoice,
         AbilityScoreAdjustmentChoice,
         AbilityScoreAdjustmentOperation,
         AllPredicate,
@@ -2235,6 +2280,7 @@ def effect_model_types() -> list[type[object]]:
         GrantedAction,
         GrantedActionId,
         HealingEffect,
+        HitDieAction,
         InstallOngoingEffect,
         InstanceScaling,
         Interaction,

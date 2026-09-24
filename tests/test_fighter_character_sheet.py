@@ -208,7 +208,10 @@ def test_fighter_progression_resources_level_1_to_20() -> None:
     for level, expected_resources in cases.items():
         sheet = fighter_sheet(level)
 
-        assert {resource.id: resource.maxUses for resource in sheet.resources} == expected_resources
+        assert {resource.id: resource.maxUses for resource in sheet.resources} == {
+            **expected_resources,
+            "hitDieD10": level,
+        }
 
 
 def test_fighter_progression_features_level_1_to_20() -> None:
@@ -336,13 +339,13 @@ def test_general_feat_prerequisites_are_structured_and_evaluable() -> None:
     )
 
     assert "Prerequisite: Dragonborn." in general_feat_feature("dragonFear").description
-    assert "Prerequisite: Proficiency with Light armor." in general_feat_feature("moderatelyArmored").description
+    assert "Prerequisite: Level 4+, Proficiency with Light armor." in general_feat_feature("moderatelyArmored").description
     assert "Prerequisite: Level 4+, Dexterity 13+." in general_feat_feature("defensiveDuelist").description
     assert "Prerequisite: Dwarf or Small." in general_feat_feature("squatNimbleness").description
     assert "Prerequisite: Level 4+, Strike Of The Giants Hill Strike." in general_feat_feature("vigorOfTheHillGiant").description
     assert general_feat_prerequisites_met(GeneralFeatType.SQUAT_NIMBLENESS, dwarf_sheet)
     assert general_feat_prerequisites_met(GeneralFeatType.MODERATELY_ARMORED, dwarf_sheet)
-    assert not general_feat_prerequisites_met(GeneralFeatType.HEAVILY_ARMORED, dwarf_sheet)
+    assert general_feat_prerequisites_met(GeneralFeatType.HEAVILY_ARMORED, dwarf_sheet)
     assert general_feat_prerequisites_met(GeneralFeatType.DEFENSIVE_DUELIST, dragonborn_sheet)
     assert general_feat_prerequisites_met(GeneralFeatType.DRAGON_FEAR, dragonborn_sheet)
 
