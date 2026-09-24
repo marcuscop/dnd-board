@@ -13,6 +13,7 @@ from dnd_board.character_sheet import (
     AttackKind,
     AttackRangeType,
     CharacterClassLevel,
+    ConditionType,
     DamageType,
     DiceType,
     EquipmentItem,
@@ -36,6 +37,7 @@ from dnd_board.rules.equipment import EquipmentId
 from dnd_board.rules.species import SpeciesType
 from dnd_board.rules.shared.effects import (
     AbilityScoreAdjustmentChoice,
+    AddPendingWeaponDamageDice,
     AmountCalculation,
     AllPredicate,
     AnyPredicate,
@@ -81,6 +83,7 @@ from dnd_board.rules.shared.effects import (
     PendingDamageIsWeaponDicePredicate,
     PendingDamageTypePredicate,
     PendingDamageRerollSelection,
+    Predicate,
     PromptResponder,
     RerollPendingDamage,
     ReplaceRollOutcome,
@@ -97,12 +100,14 @@ from dnd_board.rules.shared.effects import (
     SourceAttackRangePredicate,
     SourceDamageAbilityModifierPredicate,
     SourceIsAttackPredicate,
+    SourceIsSpellPredicate,
     SourceIsOwnerPredicate,
     SourceUsesTimeEconomyPredicate,
     SourceWeaponCategoryPredicate,
     SourceWeaponEquipmentPredicate,
     TargetIsOwnerPredicate,
     TargetHitPointsAtMostPredicate,
+    TargetHasConditionPredicate,
     WeaponHasAnyPropertyPredicate,
     WeaponHasPropertyPredicate,
     WithinDistancePredicate,
@@ -643,6 +648,173 @@ def savage_attacker_mechanics() -> FeatureMechanics:
     )])
 
 
+def until_owner_next_turn_effect(
+    label: str,
+    *modifiers: Modifier,
+) -> InstallOngoingEffect:
+    return InstallOngoingEffect(OngoingEffect(
+        duration=EffectDuration(
+            EffectDurationType.UNTIL_START_OF_TURN,
+            timing=TurnTiming(
+                TurnParticipantReference.OWNER,
+                TurnBoundary.START,
+                TurnOccurrence.NEXT,
+            ),
+        ),
+        label=label,
+        modifiers=list(modifiers),
+    ))
+
+
+def crusher_mechanics() -> FeatureMechanics:
+    enhanced_critical = until_owner_next_turn_effect(
+        "Crusher: Enhanced Critical",
+        Modifier(
+            CalculationType.ATTACK_ROLL,
+            ModifierOperation.ADVANTAGE,
+            scope=ModifierScope.AGAINST_OWNER,
+            description="Attacks against this target have Advantage until the start of the Crusher's next turn.",
+        ),
+    )
+    return FeatureMechanics(interactions=[Interaction(
+        trigger=ResolutionEventType.DAMAGE_APPLIED,
+        timing=InteractionTiming.AFTER_EVENT,
+        decision=InteractionDecision(InteractionDecisionType.AUTOMATIC),
+        predicates=[
+            SourceIsOwnerPredicate(),
+            SourceIsAttackPredicate(),
+            SourceAttackCriticalPredicate(),
+            PendingDamageTypePredicate([DamageType.BLUDGEONING]),
+        ],
+        operations=[ApplyEffectOperation(enhanced_critical)],
+        activation=TimeEconomy.SPECIAL,
+    )])
+
+
+def piercer_mechanics() -> FeatureMechanics:
+    prompted = InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM)
+    piercing_weapon_damage = [
+        SourceIsOwnerPredicate(),
+        SourceIsAttackPredicate(),
+        PendingDamageIsWeaponDicePredicate(),
+        PendingDamageTypePredicate([DamageType.PIERCING]),
+    ]
+    return FeatureMechanics(interactions=[
+        Interaction(
+            trigger=ResolutionEventType.DAMAGE_PENDING,
+            timing=InteractionTiming.BEFORE_EVENT,
+            decision=prompted,
+            predicates=piercing_weapon_damage,
+            operations=[RerollPendingDamage(PendingDamageRerollSelection.NEW, count=1)],
+            activation=TimeEconomy.SPECIAL,
+            usageScope=UsageScope.ONCE_ON_ANY_TURN,
+            usageResource=ResourceId.PIERCER_PUNCTURE,
+        ),
+        Interaction(
+            trigger=ResolutionEventType.DAMAGE_PENDING,
+            timing=InteractionTiming.BEFORE_EVENT,
+            decision=prompted,
+            predicates=[*piercing_weapon_damage, SourceAttackCriticalPredicate()],
+            operations=[AddPendingWeaponDamageDice()],
+            activation=TimeEconomy.SPECIAL,
+        ),
+    ])
+
+
+def slasher_mechanics() -> FeatureMechanics:
+    prompted = InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM)
+    slashing_attack = [
+        SourceIsOwnerPredicate(),
+        SourceIsAttackPredicate(),
+        PendingDamageTypePredicate([DamageType.SLASHING]),
+    ]
+    hamstring = until_owner_next_turn_effect(
+        "Slasher: Hamstring",
+        Modifier(
+            CalculationType.SPEED,
+            ModifierOperation.SUBTRACT,
+            amount=FixedAmount(10),
+            description="Reduce Speed by 10 feet until the start of the Slasher's next turn.",
+        ),
+    )
+    enhanced_critical = until_owner_next_turn_effect(
+        "Slasher: Enhanced Critical",
+        Modifier(
+            CalculationType.ATTACK_ROLL,
+            ModifierOperation.DISADVANTAGE,
+            description="Attack rolls have Disadvantage until the start of the Slasher's next turn.",
+        ),
+    )
+    return FeatureMechanics(interactions=[
+        Interaction(
+            trigger=ResolutionEventType.DAMAGE_PENDING,
+            timing=InteractionTiming.BEFORE_EVENT,
+            decision=prompted,
+            predicates=slashing_attack,
+            operations=[ApplyEffectOperation(hamstring)],
+            activation=TimeEconomy.SPECIAL,
+            usageScope=UsageScope.ONCE_ON_ANY_TURN,
+            usageResource=ResourceId.SLASHER_HAMSTRING,
+        ),
+        Interaction(
+            trigger=ResolutionEventType.DAMAGE_APPLIED,
+            timing=InteractionTiming.AFTER_EVENT,
+            decision=InteractionDecision(InteractionDecisionType.AUTOMATIC),
+            predicates=[*slashing_attack, SourceAttackCriticalPredicate()],
+            operations=[ApplyEffectOperation(enhanced_critical)],
+            activation=TimeEconomy.SPECIAL,
+        ),
+    ])
+
+
+def cover_bypass_modifiers(*source_predicates: Predicate) -> list[Modifier]:
+    return [
+        Modifier(
+            CalculationType.ATTACK_ROLL,
+            ModifierOperation.ADD,
+            predicates=[*source_predicates, TargetHasConditionPredicate(condition)],
+            amount=FixedAmount(bonus),
+            description=f"Ignore the {bonus} AC bonus from {enum_label(condition)}.",
+        )
+        for condition, bonus in (
+            (ConditionType.HALF_COVER, 2),
+            (ConditionType.THREE_QUARTERS_COVER, 5),
+        )
+    ]
+
+
+def speedy_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(passiveModifiers=[
+        Modifier(
+            CalculationType.SPEED,
+            ModifierOperation.ADD,
+            amount=FixedAmount(10),
+            description="Increase Speed by 10 feet.",
+        ),
+        Modifier(
+            CalculationType.ATTACK_ROLL,
+            ModifierOperation.DISADVANTAGE,
+            predicates=[
+                SourceIsAttackPredicate(),
+                SourceAttackKindPredicate(AttackKind.OPPORTUNITY),
+            ],
+            scope=ModifierScope.AGAINST_OWNER,
+            description="Opportunity Attacks against this character have Disadvantage.",
+        ),
+    ])
+
+
+def sharpshooter_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(passiveModifiers=cover_bypass_modifiers(
+        SourceIsAttackPredicate(),
+        SourceAttackRangePredicate(AttackRangeType.RANGED),
+    ))
+
+
+def spell_sniper_mechanics() -> FeatureMechanics:
+    return FeatureMechanics(passiveModifiers=cover_bypass_modifiers(SourceIsSpellPredicate()))
+
+
 def defensive_duelist_mechanics() -> FeatureMechanics:
     proficiency_bonus = CalculatedAmount(AmountCalculation.SOURCE_PROFICIENCY_BONUS)
     melee_attack = SourceAttackRangePredicate(AttackRangeType.MELEE)
@@ -1059,7 +1231,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.DEXTERITY,)),
     ),
     GeneralFeatType.CRAFTER: general_feat(GeneralFeatType.CRAFTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Artisan's Tools and craft mundane items faster."),
-    GeneralFeatType.CRUSHER: general_feat(GeneralFeatType.CRUSHER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Strength or Constitution; add control and critical riders to bludgeoning hits."),
+    GeneralFeatType.CRUSHER: general_feat(
+        GeneralFeatType.CRUSHER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Constitution. Once per turn, move a qualifying creature hit by Bludgeoning damage 5 feet; Bludgeoning Critical Hits grant Advantage on attacks against it until your next turn.",
+        (level_prerequisite(4),),
+        mechanics=crusher_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.CONSTITUTION)),
+    ),
     GeneralFeatType.DEFENSIVE_DUELIST: general_feat(
         GeneralFeatType.DEFENSIVE_DUELIST,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1163,7 +1342,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.MUSICIAN: general_feat(GeneralFeatType.MUSICIAN, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Musical Instruments and grant Heroic Inspiration after a Short or Long Rest."),
     GeneralFeatType.OBSERVANT: general_feat(GeneralFeatType.OBSERVANT, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence or Wisdom; read lips and improve passive Investigation/Perception."),
     GeneralFeatType.ORCISH_FURY: general_feat(GeneralFeatType.ORCISH_FURY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength or Constitution; add weapon damage and retaliate after endurance.", (species_prerequisite(SpeciesType.ORC),)),
-    GeneralFeatType.PIERCER: general_feat(GeneralFeatType.PIERCER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Strength or Dexterity; improve piercing damage dice and criticals."),
+    GeneralFeatType.PIERCER: general_feat(
+        GeneralFeatType.PIERCER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity. Once per turn, reroll one Piercing attack damage die and use the new roll; on a Piercing Critical Hit, roll one additional damage die.",
+        (level_prerequisite(4),),
+        mechanics=piercer_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+    ),
     GeneralFeatType.POISONER: general_feat(GeneralFeatType.POISONER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Gain poisoner tools, faster poison application, and better poison attacks."),
     GeneralFeatType.POLEARM_MASTER: general_feat(
         GeneralFeatType.POLEARM_MASTER,
@@ -1193,14 +1379,39 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
     ),
     GeneralFeatType.SHADOW_TOUCHED: general_feat(GeneralFeatType.SHADOW_TOUCHED, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; learn invisibility and another spell."),
-    GeneralFeatType.SHARPSHOOTER: general_feat(GeneralFeatType.SHARPSHOOTER, RuleSource.PLAYERS_HANDBOOK_2024, "Ignore common ranged penalties and trade accuracy for damage."),
+    GeneralFeatType.SHARPSHOOTER: general_feat(
+        GeneralFeatType.SHARPSHOOTER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Dexterity. Ranged weapon attacks ignore Half and Three-Quarters Cover, and Ranged weapons avoid Disadvantage from nearby enemies and long range.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.DEXTERITY)),
+        mechanics=sharpshooter_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.DEXTERITY,)),
+    ),
     GeneralFeatType.SHIELD_MASTER: general_feat(GeneralFeatType.SHIELD_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Add shield tactics to attacks and Dexterity saves."),
     GeneralFeatType.SKILL_EXPERT: general_feat(GeneralFeatType.SKILL_EXPERT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 in one ability; gain one skill proficiency and one expertise."),
     GeneralFeatType.SKILLED: general_feat(GeneralFeatType.SKILLED, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three skills or tools."),
     GeneralFeatType.SKULKER: general_feat(GeneralFeatType.SKULKER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve hiding and ranged stealth.", (ability_prerequisite(13, AbilityType.DEXTERITY),)),
-    GeneralFeatType.SLASHER: general_feat(GeneralFeatType.SLASHER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Strength or Dexterity; add control and critical riders to slashing hits."),
+    GeneralFeatType.SLASHER: general_feat(
+        GeneralFeatType.SLASHER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity. Once per turn, reduce the Speed of a creature hit by Slashing damage by 10 feet; Slashing Critical Hits impose Disadvantage on its attacks until your next turn.",
+        (level_prerequisite(4),),
+        mechanics=slasher_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+    ),
     GeneralFeatType.SOUL_OF_THE_STORM_GIANT: general_feat(GeneralFeatType.SOUL_OF_THE_STORM_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; lightning/thunder resilience and storm aura.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.STORM_STRIKE))),
-    GeneralFeatType.SPELL_SNIPER: general_feat(GeneralFeatType.SPELL_SNIPER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve ranged spell attacks and learn an attack cantrip.", (spellcasting_prerequisite(),)),
+    GeneralFeatType.SPELL_SNIPER: general_feat(
+        GeneralFeatType.SPELL_SNIPER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Intelligence, Wisdom, or Charisma. Spell attacks ignore Half and Three-Quarters Cover, avoid nearby-enemy Disadvantage, and gain 60 feet of range when their normal range is at least 10 feet.",
+        (level_prerequisite(4), spellcasting_prerequisite()),
+        mechanics=spell_sniper_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((
+            AbilityType.INTELLIGENCE,
+            AbilityType.WISDOM,
+            AbilityType.CHARISMA,
+        )),
+    ),
     GeneralFeatType.SQUAT_NIMBLENESS: general_feat(GeneralFeatType.SQUAT_NIMBLENESS, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength or Dexterity; improve speed and escape checks.", (species_or_size_prerequisite(SpeciesType.DWARF, sizes=(FeatSpeciesSize.SMALL,)),)),
     GeneralFeatType.STRIKE_OF_THE_GIANTS: general_feat(GeneralFeatType.STRIKE_OF_THE_GIANTS, RuleSource.GLORY_OF_THE_GIANTS, "Choose a giant strike option for extra weapon damage and riders.", (weapon_or_background_prerequisite(WeaponProficiencyType.MARTIAL, BackgroundPrerequisiteType.GIANT_FOUNDLING),)),
     GeneralFeatType.TAVERN_BRAWLER: general_feat(GeneralFeatType.TAVERN_BRAWLER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Constitution; improve improvised weapons, unarmed strikes, and grapples."),
@@ -1259,15 +1470,11 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.SPEEDY: general_feat(
         GeneralFeatType.SPEEDY,
         RuleSource.PLAYERS_HANDBOOK_2024,
-        'Speedy 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.',
-        (level_prerequisite(4),),
+        "+1 Dexterity or Constitution. Increase Speed by 10 feet, ignore Difficult Terrain after Dashing, and impose Disadvantage on Opportunity Attacks against you.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.DEXTERITY, AbilityType.CONSTITUTION)),
         category=FeatCategory.GENERAL,
-        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
-            CalculationType.SPEED,
-            ModifierOperation.ADD,
-            amount=FixedAmount(10),
-            description="Increase Speed by 10 feet.",
-        )]),
+        mechanics=speedy_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.DEXTERITY, AbilityType.CONSTITUTION)),
     ),
     GeneralFeatType.TACTICAL_COMBATANT: general_feat(GeneralFeatType.TACTICAL_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, 'Tactical Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.COLD_CASTER: general_feat(GeneralFeatType.COLD_CASTER, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Cold Caster 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),

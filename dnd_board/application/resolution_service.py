@@ -78,6 +78,7 @@ from dnd_board.rules.shared.effects import (
     AmountCalculation,
     ApplyEffect,
     ApplyEffectOperation,
+    AddPendingWeaponDamageDice,
     AttackRoll,
     AttackRollEffect,
     AttackRollType,
@@ -842,11 +843,16 @@ async def _respond_to_effect_prompt(
         isinstance(operation, RerollPendingDamage)
         for operation in prompt.interaction.operations
     )
+    adds_weapon_damage_dice = any(
+        isinstance(operation, AddPendingWeaponDamageDice)
+        for operation in prompt.interaction.operations
+    )
     used_roll, used_outcomes, used_response_rolls, canceled_resolution = apply_resolution_interceptor(
         prompt,
         target,
         owner,
-        modify_damage_roll=live_pending_damage is None or rerolls_pending_damage,
+        modify_damage_roll=live_pending_damage is None or rerolls_pending_damage or adds_weapon_damage_dice,
+        append_applied_effects=False,
     )
     pending.outcomePrefixes.extend(used_outcomes)
     replaced_response_roll_ids = {roll.id for roll in used_response_rolls}
@@ -860,25 +866,33 @@ async def _respond_to_effect_prompt(
         room.pending_effect_executions.pop(execution_id, None)
         return attach_resolution_context(canceled_resolution, pending.outcomePrefixes, pending.responseRolls)
 
-    owner_effects = [
-        operation.effect
+    applied_effects = [
+        operation
         for operation in prompt.interaction.operations
         if isinstance(operation, ApplyEffectOperation)
-        and operation.recipient == InteractionEffectRecipient.OWNER
     ]
-    if owner_effects:
-        pending.active.context.register_participant(owner)
-        pending.participantSnapshots.setdefault(owner.id, character_runtime_snapshot(owner))
+    if applied_effects:
+        recipients = {
+            owner.id: owner,
+            target.id: target,
+        }
+        for recipient in recipients.values():
+            pending.active.context.register_participant(recipient)
+            pending.participantSnapshots.setdefault(recipient.id, character_runtime_snapshot(recipient))
         pending.pendingBoundEffects.extend(
             BoundEffect(
-                effect=effect,
+                effect=operation.effect,
                 bindings=EffectParticipantBindings(
                     sourceSheetId=owner.id,
-                    targetSheetId=owner.id,
+                    targetSheetId=(
+                        owner.id
+                        if operation.recipient == InteractionEffectRecipient.OWNER
+                        else target.id
+                    ),
                     ownerSheetId=owner.id,
                 ),
             )
-            for effect in owner_effects
+            for operation in applied_effects
         )
 
     pending_damage_modifications = [
@@ -920,16 +934,17 @@ async def _respond_to_effect_prompt(
             used_roll.pendingEffect,
             updated_amounts.get(effect_event.effectNodeId),
         )
-        if rerolls_pending_damage and used_roll.damageComponents:
-            rerolled_component = used_roll.damageComponents[0]
+        if (rerolls_pending_damage or adds_weapon_damage_dice) and used_roll.damageComponents:
+            modified_component = used_roll.damageComponents[0]
             pending.roll = replace(
                 pending.roll,
                 damageComponents=[
                     replace(
                         component,
-                        dice=rerolled_component.dice,
-                        total=rerolled_component.total,
-                        modifierBreakdown=rerolled_component.modifierBreakdown,
+                        dice=modified_component.dice,
+                        die=modified_component.die,
+                        total=modified_component.total,
+                        modifierBreakdown=modified_component.modifierBreakdown,
                     )
                     if effect_event.effectNodeId in component.effectNodeIds
                     else component
@@ -1202,6 +1217,7 @@ def apply_resolution_interceptor(
     target: CharacterSheet,
     owner: CharacterSheet,
     modify_damage_roll: bool = True,
+    append_applied_effects: bool = True,
 ) -> AppliedInterceptorResult:
     roll_outcome = RollOutcome.FAILURE if _failed_save_ability(prompt.pendingRoll) is not None else None
     operation_result = apply_interaction_operations(
@@ -1219,6 +1235,7 @@ def apply_resolution_interceptor(
         owner,
         prompt.label,
         modify_damage=modify_damage_roll,
+        append_applied_effects=append_applied_effects,
     )
     if operation_result.rollModifications and _failed_save_ability(prompt.pendingRoll) is not None:
         save_dc = _failed_save_dc(prompt.pendingRoll)
@@ -1284,6 +1301,8 @@ def apply_resolution_interceptor(
         return modified_roll, [f"{prompt.ownerName} {action} the incoming damage"], [], None
     if operation_result.pendingDamageRerolls:
         return modified_roll, [f"{prompt.ownerName} rerolls the weapon damage"], [], None
+    if operation_result.pendingWeaponDamageDice:
+        return modified_roll, [f"{prompt.ownerName} adds a weapon damage die"], [], None
     return modified_roll, [], [], None
 
 
@@ -1319,9 +1338,13 @@ def _roll_after_interaction_operations(
     owner: CharacterSheet,
     source_label: str,
     modify_damage: bool = True,
+    append_applied_effects: bool = True,
 ) -> RollPayload:
     pending_effect = operation_result.pendingEffect
-    appended_effects = [*operation_result.additionalEffects, *operation_result.scheduledEffects]
+    appended_effects = [
+        *(operation_result.additionalEffects if append_applied_effects else []),
+        *operation_result.scheduledEffects,
+    ]
     if appended_effects:
         pending_effect = SequenceEffect(
             [*([pending_effect] if pending_effect is not None else []), *appended_effects]
@@ -1343,6 +1366,8 @@ def _roll_after_interaction_operations(
                 updated = _reduced_damage_roll(updated, _interaction_amount(owner, modification.amount))
         for reroll in operation_result.pendingDamageRerolls:
             updated = _rerolled_pending_damage_roll(updated, reroll, source_label)
+        for addition in operation_result.pendingWeaponDamageDice:
+            updated = _added_weapon_damage_dice_roll(updated, addition.count, source_label)
     for modification in operation_result.rollModifications:
         updated = _modified_d20_roll(updated, modification, owner, source_label)
     return updated
@@ -1412,7 +1437,15 @@ def _rerolled_pending_damage_roll(
         if component.kind != DamageComponentKind.WEAPON_DICE or not component.dice:
             updated_components.append(component)
             continue
-        rerolled_dice = [random.randint(1, component.diceType.value) for _ in component.dice]
+        reroll_count = min(reroll.count or len(component.dice), len(component.dice))
+        rerolled_indexes = sorted(
+            range(len(component.dice)),
+            key=lambda index: component.dice[index],
+        )[:reroll_count]
+        rerolled_values = [random.randint(1, component.diceType.value) for _ in rerolled_indexes]
+        rerolled_dice = list(component.dice)
+        for index, value in zip(rerolled_indexes, rerolled_values, strict=True):
+            rerolled_dice[index] = value
         rerolled_total = sum(rerolled_dice) + component.modifier
         if reroll.selection == PendingDamageRerollSelection.HIGHER:
             keep_reroll = rerolled_total > component.total
@@ -1423,7 +1456,7 @@ def _rerolled_pending_damage_roll(
         kept_dice = rerolled_dice if keep_reroll else component.dice
         kept_total = rerolled_total if keep_reroll else component.total
         description = (
-            f"Original {component.dice}; rerolled {rerolled_dice}; "
+            f"Original {component.dice}; rerolled {rerolled_values}; "
             f"kept {'reroll' if keep_reroll else 'original'}"
         )
         updated = replace(
@@ -1453,6 +1486,65 @@ def _rerolled_pending_damage_roll(
             else sum(component.total for component in updated_components)
         ),
         damageComponents=updated_components,
+        effectInputs=(
+            replace(roll.effectInputs, amounts=amount_inputs)
+            if roll.effectInputs is not None
+            else None
+        ),
+    )
+
+
+def _added_weapon_damage_dice_roll(
+    roll: RollPayload,
+    count: int,
+    source_label: str,
+) -> RollPayload:
+    components = list(roll.damageComponents or [])
+    amount_inputs = list(roll.effectInputs.amounts) if roll.effectInputs is not None else []
+    pending_effect = roll.pendingEffect
+    added_total = 0
+    updated_components = []
+    added = False
+    for component in components:
+        if added or component.kind != DamageComponentKind.WEAPON_DICE:
+            updated_components.append(component)
+            continue
+        added_dice = [random.randint(1, component.diceType.value) for _ in range(count)]
+        added_total = sum(added_dice)
+        updated_total = component.total + added_total
+        updated_dice = [*component.dice, *added_dice]
+        updated = replace(
+            component,
+            dice=updated_dice,
+            die=f"{len(updated_dice)}d{component.diceType.value}",
+            total=updated_total,
+            modifierBreakdown=[
+                *component.modifierBreakdown,
+                RollModifierBreakdown(source_label, added_total, f"Additional weapon die {added_dice}"),
+            ],
+        )
+        updated_components.append(updated)
+        if component.effectNodeIds:
+            amount_inputs = [
+                entry for entry in amount_inputs
+                if entry.effectNodeId not in component.effectNodeIds
+            ]
+            amount_inputs.extend(
+                EffectAmountInput(node_id, updated_total)
+                for node_id in component.effectNodeIds
+            )
+        added = True
+    if added and pending_effect is not None:
+        pending_effect = increased_damage_effect_node(pending_effect, added_total)
+    return replace(
+        roll,
+        total=(
+            roll.total
+            if roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS
+            else roll.total + added_total
+        ),
+        damageComponents=updated_components or None,
+        pendingEffect=pending_effect,
         effectInputs=(
             replace(roll.effectInputs, amounts=amount_inputs)
             if roll.effectInputs is not None

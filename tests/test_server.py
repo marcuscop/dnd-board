@@ -89,6 +89,7 @@ from dnd_board.character_sheet import (
     ArcaneShotType,
     ArmorCategory,
     AttackAction,
+    AttackKind,
     AttackRangeType,
     BattleMasterManeuverType,
     CharacterClassLevel,
@@ -2095,6 +2096,392 @@ def test_savage_attacker_rerolls_only_weapon_damage_and_keeps_higher_result(tmp_
 
     assert "prompt" not in second_result
     assert "hits" in second_result["resolution"]["outcome"]
+
+
+def test_piercer_rerolls_damage_and_adds_a_matching_die_on_critical(tmp_path, monkeypatch) -> None:
+    piercer = general_feat_feature(enum_key(GeneralFeatType.PIERCER))
+    assert piercer is not None
+    spear = AttackAction(
+        id="spear",
+        name="Spear",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.PIERCING,
+    )
+    write_party_campaign(
+        tmp_path,
+        "piercer-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Piercer",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                attacks=[spear],
+                feats=[piercer],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d20s = iter([20])
+    d8s = iter([2, 3, 4])
+    monkeypatch.setattr(
+        random,
+        "randint",
+        lambda _minimum, maximum: next(d20s) if maximum == 20 else next(d8s),
+    )
+    client = TestClient(server.app)
+
+    attack = client.post(
+        "/api/rooms/piercer-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=spear"
+    ).json()["roll"]
+    first_prompt = client.post(
+        f"/api/rooms/piercer-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    second_response = client.post(
+        f"/api/rooms/piercer-test/resolution-prompts/{first_prompt['id']}/respond?playerKey=player-1&use=false"
+    ).json()
+    second_prompt = second_response["prompt"]
+    final = client.post(
+        f"/api/rooms/piercer-test/resolution-prompts/{second_prompt['id']}/respond?playerKey=player-1&use=true"
+    ).json()["resolution"]
+
+    assert first_prompt["label"] == "Piercer"
+    assert first_prompt["interceptorType"] == "rerollPendingDamage"
+    assert second_prompt["label"] == "Piercer"
+    assert second_prompt["interceptorType"] == "modifyPendingDamage"
+    assert final["roll"]["damageComponents"][0]["dice"] == [2, 3, 4]
+    assert final["roll"]["damageComponents"][0]["die"] == "3d8"
+    assert final["targetHp"]["current"] == 18
+
+
+def test_piercer_puncture_replaces_only_one_weapon_damage_die(tmp_path, monkeypatch) -> None:
+    piercer = general_feat_feature(enum_key(GeneralFeatType.PIERCER))
+    assert piercer is not None
+    piercing_attack = AttackAction(
+        id="piercing-attack",
+        name="Piercing Attack",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=2,
+        damageDiceType=DiceType.D6,
+        damageType=DamageType.PIERCING,
+    )
+    write_party_campaign(
+        tmp_path,
+        "piercer-puncture-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Piercer",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                attacks=[piercing_attack],
+                feats=[piercer],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d6s = iter([1, 6, 5])
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: 15 if maximum == 20 else next(d6s))
+    client = TestClient(server.app)
+
+    attack = client.post(
+        "/api/rooms/piercer-puncture-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=piercing-attack"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/piercer-puncture-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    final = client.post(
+        f"/api/rooms/piercer-puncture-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-1&use=true"
+    ).json()["resolution"]
+
+    assert final["roll"]["damageComponents"][0]["dice"] == [5, 6]
+    assert final["targetHp"]["current"] == 16
+
+
+def test_crusher_critical_grants_advantage_against_the_target(tmp_path, monkeypatch) -> None:
+    crusher = general_feat_feature(enum_key(GeneralFeatType.CRUSHER))
+    assert crusher is not None
+    hammer = AttackAction(
+        id="hammer",
+        name="Hammer",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D6,
+        damageType=DamageType.BLUDGEONING,
+    )
+    write_party_campaign(
+        tmp_path,
+        "crusher-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Crusher",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                attacks=[hammer],
+                feats=[crusher],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d20s = iter([20, 10, 18])
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: next(d20s) if maximum == 20 else 3)
+    client = TestClient(server.app)
+
+    critical = client.post(
+        "/api/rooms/crusher-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=hammer"
+    ).json()["roll"]
+    client.post(
+        f"/api/rooms/crusher-test/rolls/{critical['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+    target = client.get("/api/rooms/crusher-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert any(effect["sourceLabel"] == "Crusher: Enhanced Critical" for effect in target["ongoingEffects"])
+
+    followup = client.post(
+        "/api/rooms/crusher-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=hammer"
+    ).json()["roll"]
+    resolved = client.post(
+        f"/api/rooms/crusher-test/rolls/{followup['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["resolution"]
+
+    assert resolved["roll"]["dice"] == [10, 18]
+    assert resolved["roll"]["die"] == "2d20kh1"
+
+
+def test_slasher_hamstrings_target_and_critical_imposes_disadvantage(tmp_path, monkeypatch) -> None:
+    slasher = general_feat_feature(enum_key(GeneralFeatType.SLASHER))
+    assert slasher is not None
+    sword = AttackAction(
+        id="sword",
+        name="Sword",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+    )
+    write_party_campaign(
+        tmp_path,
+        "slasher-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Slasher",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                attacks=[sword],
+                feats=[slasher],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                attacks=[sword],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d20s = iter([20, 15, 5])
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: next(d20s) if maximum == 20 else 4)
+    client = TestClient(server.app)
+
+    attack = client.post(
+        "/api/rooms/slasher-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=sword"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/slasher-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    final = client.post(
+        f"/api/rooms/slasher-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-1&use=true"
+    ).json()["resolution"]
+    target = client.get("/api/rooms/slasher-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+
+    assert prompt["label"] == "Slasher"
+    assert final["targetHp"]["current"] == 19
+    assert target["speed"] == 20
+    assert {effect["sourceLabel"] for effect in target["ongoingEffects"]} >= {
+        "Slasher: Hamstring",
+        "Slasher: Enhanced Critical",
+    }
+
+    counterattack = client.post(
+        "/api/rooms/slasher-test/sheet/player-2/rolls/attack?playerKey=player-2&attackId=sword"
+    ).json()["roll"]
+    counter_resolution = client.post(
+        f"/api/rooms/slasher-test/rolls/{counterattack['id']}/resolve?playerKey=dm&targetSheetId=player-1"
+    ).json()["resolution"]
+
+    assert counter_resolution["roll"]["dice"] == [15, 5]
+    assert counter_resolution["roll"]["die"] == "2d20kl1"
+
+
+def test_speedy_increases_speed_and_hinders_opportunity_attacks(tmp_path, monkeypatch) -> None:
+    speedy = general_feat_feature(enum_key(GeneralFeatType.SPEEDY))
+    assert speedy is not None
+    opportunity_attack = AttackAction(
+        id="opportunity-attack",
+        name="Opportunity Attack",
+        ability=AbilityType.STRENGTH,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.SLASHING,
+        attackKind=AttackKind.OPPORTUNITY,
+    )
+    write_party_campaign(
+        tmp_path,
+        "speedy-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Attacker",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                attacks=[opportunity_attack],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Speedy Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=14, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.ROGUE, level=4)],
+                feats=[speedy],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d20s = iter([15, 5])
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: next(d20s) if maximum == 20 else 4)
+    client = TestClient(server.app)
+
+    target = client.get("/api/rooms/speedy-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    attack = client.post(
+        "/api/rooms/speedy-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=opportunity-attack"
+    ).json()["roll"]
+    resolution = client.post(
+        f"/api/rooms/speedy-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["resolution"]
+
+    assert target["speed"] == 40
+    assert resolution["roll"]["dice"] == [15, 5]
+    assert resolution["roll"]["die"] == "2d20kl1"
+    assert any(part["source"] == "Speedy" for part in resolution["roll"]["modifierBreakdown"])
+
+
+def test_sharpshooter_and_spell_sniper_bypass_cover(tmp_path, monkeypatch) -> None:
+    sharpshooter = general_feat_feature(enum_key(GeneralFeatType.SHARPSHOOTER))
+    spell_sniper = general_feat_feature(enum_key(GeneralFeatType.SPELL_SNIPER))
+    fire_bolt = spell_entry(SpellId.FIRE_BOLT)
+    assert sharpshooter is not None
+    assert spell_sniper is not None
+    assert fire_bolt is not None
+    bow = AttackAction(
+        id="bow",
+        name="Bow",
+        ability=AbilityType.DEXTERITY,
+        damageDiceCount=1,
+        damageDiceType=DiceType.D8,
+        damageType=DamageType.PIERCING,
+        attackRange=AttackRangeType.RANGED,
+    )
+    write_party_campaign(
+        tmp_path,
+        "sniper-cover-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Sharpshooter",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
+                attacks=[bow],
+                feats=[sharpshooter],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Spell Sniper",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=4)],
+                spells=[fire_bolt],
+                feats=[spell_sniper],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-3",
+            name="Covered Target",
+            maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=14, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                conditions=[ConditionType.THREE_QUARTERS_COVER],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: 10 if maximum == 20 else 4)
+    client = TestClient(server.app)
+
+    weapon_roll = client.post(
+        "/api/rooms/sniper-cover-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=bow"
+    ).json()["roll"]
+    weapon_resolution = client.post(
+        f"/api/rooms/sniper-cover-test/rolls/{weapon_roll['id']}/resolve?playerKey=dm&targetSheetId=player-3"
+    ).json()["resolution"]
+    spell_roll = client.post(
+        "/api/rooms/sniper-cover-test/sheet/player-2/spells/fireBolt/rolls/attack?playerKey=player-2"
+    ).json()["roll"]
+    spell_resolution = client.post(
+        f"/api/rooms/sniper-cover-test/rolls/{spell_roll['id']}/resolve?playerKey=dm&targetSheetId=player-3"
+    ).json()["resolution"]
+
+    sharpshooter_bonus = next(
+        part for part in weapon_resolution["roll"]["modifierBreakdown"]
+        if part["source"] == "Sharpshooter"
+    )
+    spell_sniper_bonus = next(
+        part for part in spell_resolution["roll"]["modifierBreakdown"]
+        if part["source"] == "Spell Sniper"
+    )
+    assert sharpshooter_bonus["value"] == 5
+    assert spell_sniper_bonus["value"] == 5
+    assert "Three Quarters Cover" in sharpshooter_bonus["description"]
+    assert "Three Quarters Cover" in spell_sniper_bonus["description"]
 
 
 def test_defensive_duelist_turns_hit_into_miss_and_installs_melee_defense(tmp_path, monkeypatch) -> None:

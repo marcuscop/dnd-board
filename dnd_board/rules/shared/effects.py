@@ -838,6 +838,20 @@ class PendingDamageRerollSelection(Enum):
 @dataclass(frozen=True)
 class RerollPendingDamage:
     selection: PendingDamageRerollSelection = PendingDamageRerollSelection.HIGHER
+    count: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.count is not None and self.count < 1:
+            raise ValueError("Pending damage reroll count must be positive")
+
+
+@dataclass(frozen=True)
+class AddPendingWeaponDamageDice:
+    count: int = 1
+
+    def __post_init__(self) -> None:
+        if self.count < 1:
+            raise ValueError("Additional weapon damage dice count must be positive")
 
 
 @dataclass(frozen=True)
@@ -879,6 +893,7 @@ ResolutionOperation: TypeAlias = (
     | RerollSavingThrow
     | ModifyPendingDamage
     | RerollPendingDamage
+    | AddPendingWeaponDamageDice
     | PreventCondition
     | ModifyAction
     | ApplyEffectOperation
@@ -1981,6 +1996,7 @@ class InteractionOperationResult:
     savingThrowRerolls: list[RerollSavingThrow] = field(default_factory=list)
     pendingDamageModifications: list[ModifyPendingDamage] = field(default_factory=list)
     pendingDamageRerolls: list[RerollPendingDamage] = field(default_factory=list)
+    pendingWeaponDamageDice: list[AddPendingWeaponDamageDice] = field(default_factory=list)
     actionModifications: list[ModifyAction] = field(default_factory=list)
 
     @property
@@ -2017,6 +2033,11 @@ def apply_interaction_operations(
             result = replace(
                 result,
                 pendingDamageRerolls=[*result.pendingDamageRerolls, operation],
+            )
+        elif isinstance(operation, AddPendingWeaponDamageDice):
+            result = replace(
+                result,
+                pendingWeaponDamageDice=[*result.pendingWeaponDamageDice, operation],
             )
         elif isinstance(operation, PreventCondition):
             result = replace(result, pendingEffect=effect_without_conditions(result.pendingEffect, set(operation.conditions)))
@@ -2260,6 +2281,7 @@ def effect_model_types() -> list[type[object]]:
         RepeatedEffect,
         RerollSavingThrow,
         RerollPendingDamage,
+        AddPendingWeaponDamageDice,
         ReplaceRollOutcome,
         ResolutionEventType,
         ResolutionEvent,

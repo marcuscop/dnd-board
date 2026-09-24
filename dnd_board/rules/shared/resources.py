@@ -38,6 +38,8 @@ class ResourceId(Enum):
     LUCK_POINTS = "Luck Points"
     MAGE_SLAYER = "Mage Slayer"
     SAVAGE_ATTACKER = "Savage Attacker"
+    PIERCER_PUNCTURE = "Piercer: Puncture"
+    SLASHER_HAMSTRING = "Slasher: Hamstring"
     CHARGER = "Charger"
     BOON_OF_COMBAT_PROWESS = "Boon of Combat Prowess"
     BOON_OF_DIMENSIONAL_TRAVEL = "Boon of Dimensional Travel"
@@ -205,6 +207,14 @@ RESOURCE_DEFINITIONS: Mapping[ResourceId, ResourceDefinition] = {
     ResourceId.SAVAGE_ATTACKER: ResourceDefinition(
         ResourceKey(ResourceId.SAVAGE_ATTACKER, ResourceKind.FEATURE_USE),
         ResourceId.SAVAGE_ATTACKER.value,
+    ),
+    ResourceId.PIERCER_PUNCTURE: ResourceDefinition(
+        ResourceKey(ResourceId.PIERCER_PUNCTURE, ResourceKind.FEATURE_USE),
+        ResourceId.PIERCER_PUNCTURE.value,
+    ),
+    ResourceId.SLASHER_HAMSTRING: ResourceDefinition(
+        ResourceKey(ResourceId.SLASHER_HAMSTRING, ResourceKind.FEATURE_USE),
+        ResourceId.SLASHER_HAMSTRING.value,
     ),
     ResourceId.CHARGER: ResourceDefinition(
         ResourceKey(ResourceId.CHARGER, ResourceKind.FEATURE_USE),

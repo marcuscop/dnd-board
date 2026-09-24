@@ -2663,8 +2663,12 @@ def condition_adjusted_speed_for_exhaustion(
         if entry.operation == ModifierOperation.MULTIPLY:
             adjusted = adjusted * entry.numerator // entry.denominator
     for _condition, entry in entries:
-        if isinstance(entry.amount, FixedAmount) and entry.operation == ModifierOperation.ADD:
+        if not isinstance(entry.amount, FixedAmount):
+            continue
+        if entry.operation == ModifierOperation.ADD:
             adjusted += entry.amount.value
+        elif entry.operation == ModifierOperation.SUBTRACT:
+            adjusted -= entry.amount.value
     if exhaustion_level > 0:
         adjusted = max(0, adjusted - 5 * min(exhaustion_level, 6))
     if any(entry.operation == ModifierOperation.SET and isinstance(entry.amount, FixedAmount) and entry.amount.value == 0 for _condition, entry in entries):
@@ -2993,10 +2997,72 @@ def attack_roll_with_target_condition_modifiers(
     target: CharacterSheet,
     source: CharacterSheet | None = None,
 ) -> RollPayload:
+    from dnd_board.rules.shared.character_effects import (
+        CharacterEffectExecutionContext,
+        active_ongoing_modifiers,
+        applicable_character_modifiers,
+    )
+    from dnd_board.rules.shared.effects import CalculationType, EffectNodeId, ModifierOperation, ModifierScope
+
     if roll.resolution != RollResolutionMode.ATTACK_VS_ARMOR_CLASS:
         return roll
     advantage_conditions = unique_conditions([*(roll.advantageConditions or []), *condition_incoming_attack_advantage_conditions(target)])
     disadvantage_conditions = unique_conditions([*(roll.disadvantageConditions or []), *condition_incoming_attack_disadvantage_conditions(target)])
+    ongoing_entries = [
+        (active.sourceLabel, modifier, target)
+        for active, modifier in active_ongoing_modifiers(
+            target,
+            CalculationType.ATTACK_ROLL,
+            scope=ModifierScope.AGAINST_OWNER,
+        )
+    ]
+    if source is not None:
+        ongoing_entries.extend(
+            (active.sourceLabel, modifier, source)
+            for active, modifier in active_ongoing_modifiers(
+                source,
+                CalculationType.ATTACK_ROLL,
+                scope=ModifierScope.OWNER,
+            )
+        )
+    applicable_ongoing_entries = [
+        (label, modifier)
+        for label, modifier, owner in ongoing_entries
+        if CharacterEffectExecutionContext(
+            roll,
+            target,
+            source,
+            owner=owner,
+        ).evaluate_predicates(EffectNodeId(()), modifier.predicates)
+    ]
+    target_passive_entries = applicable_character_modifiers(
+        target,
+        CalculationType.ATTACK_ROLL,
+        ModifierScope.AGAINST_OWNER,
+        roll,
+        target,
+        source,
+    )
+    passive_entries_with_owner = [
+        (target, label, modifier)
+        for label, modifier in target_passive_entries
+    ]
+    if source is not None:
+        passive_entries_with_owner.extend(
+            (source, label, modifier)
+            for label, modifier in applicable_character_modifiers(
+                source,
+                CalculationType.ATTACK_ROLL,
+                ModifierScope.OWNER,
+                roll,
+                target,
+                source,
+            )
+        )
+    passive_entries = [
+        (label, modifier)
+        for _owner, label, modifier in passive_entries_with_owner
+    ]
     if ConditionType.SEE_INVISIBILITY in target.conditions:
         advantage_conditions = [condition for condition in advantage_conditions if condition != ConditionType.INVISIBLE]
     if roll.sourceConditions and ConditionType.SEE_INVISIBILITY in roll.sourceConditions:
@@ -3004,13 +3070,55 @@ def attack_roll_with_target_condition_modifiers(
     modifier_breakdown = [
         *roll.modifierBreakdown,
         *target_incoming_attack_modifier_breakdown(target, roll, source),
+        *[
+            RollModifierBreakdown(label, 0, modifier.description)
+            for label, modifier in [*applicable_ongoing_entries, *passive_entries]
+            if modifier.operation in {ModifierOperation.ADVANTAGE, ModifierOperation.DISADVANTAGE}
+        ],
+        *[
+            RollModifierBreakdown(
+                label,
+                _attack_modifier_amount(owner, modifier),
+                modifier.description,
+            )
+            for owner, label, modifier in passive_entries_with_owner
+            if modifier.operation in {ModifierOperation.ADD, ModifierOperation.SUBTRACT}
+        ],
     ]
     modifier = sum(part.value for part in modifier_breakdown)
-    if advantage_conditions == (roll.advantageConditions or []) and disadvantage_conditions == (roll.disadvantageConditions or []) and modifier_breakdown == roll.modifierBreakdown:
+    ongoing_advantage = any(
+        modifier.operation == ModifierOperation.ADVANTAGE
+        for _label, modifier in applicable_ongoing_entries
+    )
+    ongoing_disadvantage = any(
+        modifier.operation == ModifierOperation.DISADVANTAGE
+        for _label, modifier in applicable_ongoing_entries
+    )
+    passive_advantage = any(
+        modifier.operation == ModifierOperation.ADVANTAGE
+        for _label, modifier in passive_entries
+    )
+    passive_disadvantage = any(
+        modifier.operation == ModifierOperation.DISADVANTAGE
+        for _label, modifier in passive_entries
+    )
+    if (
+        advantage_conditions == (roll.advantageConditions or [])
+        and disadvantage_conditions == (roll.disadvantageConditions or [])
+        and modifier_breakdown == roll.modifierBreakdown
+        and not ongoing_advantage
+        and not ongoing_disadvantage
+        and not passive_advantage
+        and not passive_disadvantage
+    ):
         return roll
     dice = list(roll.dice[:1] or [random.randint(1, 20)])
-    has_advantage = bool(advantage_conditions) and not disadvantage_conditions
-    has_disadvantage = bool(disadvantage_conditions) and not advantage_conditions
+    has_advantage = (bool(advantage_conditions) or ongoing_advantage or passive_advantage) and not (
+        disadvantage_conditions or ongoing_disadvantage or passive_disadvantage
+    )
+    has_disadvantage = (bool(disadvantage_conditions) or ongoing_disadvantage or passive_disadvantage) and not (
+        advantage_conditions or ongoing_advantage or passive_advantage
+    )
     if has_advantage or has_disadvantage:
         dice.append(random.randint(1, 20))
     die_roll = min(dice) if has_disadvantage else max(dice)
@@ -3024,6 +3132,18 @@ def attack_roll_with_target_condition_modifiers(
         advantageConditions=advantage_conditions or None,
         disadvantageConditions=disadvantage_conditions or None,
     )
+
+
+def _attack_modifier_amount(sheet: CharacterSheet, modifier: object) -> int:
+    from dnd_board.rules.shared.effects import AmountCalculation, CalculatedAmount, DiceAmount, ModifierOperation
+
+    amount = getattr(modifier, "amount", None)
+    value = condition_modifier_amount(sheet, amount)
+    if isinstance(amount, CalculatedAmount) and amount.calculation == AmountCalculation.SOURCE_PROFICIENCY_BONUS:
+        value = sheet.proficiencyBonus * amount.multiplier
+    elif isinstance(amount, DiceAmount):
+        value = amount.staticBonus + sum(random.randint(1, amount.diceType.value) for _ in range(amount.diceCount))
+    return -value if getattr(modifier, "operation", None) == ModifierOperation.SUBTRACT else value
 
 
 def attack_roll_with_critical_damage(roll: RollPayload) -> RollPayload:

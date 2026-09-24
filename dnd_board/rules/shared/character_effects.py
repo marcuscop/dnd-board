@@ -770,7 +770,15 @@ class CharacterEffectExecutionContext:
                 if source_attack is None or not set(predicate.properties).intersection(source_attack.properties or []):
                     return False
             elif isinstance(predicate, PendingDamageTypePredicate):
-                if self.pendingDamageType not in predicate.damageTypes:
+                pending_types = {
+                    component.damageType
+                    for component in (self.roll.damageComponents or [])
+                }
+                if self.roll.damageType is not None:
+                    pending_types.add(self.roll.damageType)
+                if self.pendingDamageType is not None:
+                    pending_types.add(self.pendingDamageType)
+                if not pending_types.intersection(predicate.damageTypes):
                     return False
             elif isinstance(predicate, OwnerAbilityScoreAtLeastPredicate):
                 if ability_score(self.owner, predicate.ability) < predicate.minimum:

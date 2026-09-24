@@ -28,6 +28,7 @@ from dnd_board.rules.shared.character_effects import (
 from dnd_board.rules.shared.condition_effects import condition_ongoing_effects
 from dnd_board.rules.shared.effects import (
     ApplyEffectOperation,
+    AddPendingWeaponDamageDice,
     BoundEffect,
     CancelPendingAction,
     EffectNodeId,
@@ -426,6 +427,7 @@ def _damage_prompt(
             in {
                 ResolutionInterceptorType.MODIFY_PENDING_DAMAGE,
                 ResolutionInterceptorType.REROLL_PENDING_DAMAGE,
+                ResolutionInterceptorType.APPLY_EFFECT,
             }
             and resolution_interceptor_key_for(
                 interceptor_type_for_interaction(interaction_source.interaction),
@@ -672,6 +674,7 @@ def interceptor_type_for_interaction(
         (ReplaceRollOutcome, ResolutionInterceptorType.REPLACE_ROLL_OUTCOME),
         (ModifyPendingDamage, ResolutionInterceptorType.MODIFY_PENDING_DAMAGE),
         (RerollPendingDamage, ResolutionInterceptorType.REROLL_PENDING_DAMAGE),
+        (AddPendingWeaponDamageDice, ResolutionInterceptorType.MODIFY_PENDING_DAMAGE),
         (ModifyRoll, ResolutionInterceptorType.MODIFY_ROLL),
         (PreventCondition, ResolutionInterceptorType.PREVENT_CONDITION),
         (ModifyAction, ResolutionInterceptorType.MODIFY_ACTION),
