@@ -12,8 +12,10 @@ import type {
   FogState,
   PlayerSummary,
   ResolutionInterceptorPrompt,
+  RestGrantPrompt,
   RollLogEntry,
   RollPayload,
+  ResourceId,
   ServerMessage,
   Token
 } from "../types";
@@ -52,6 +54,8 @@ export function useRoomConnection({
   const [expandedSheetId, setExpandedSheetId] = useState<string | null>(null);
   const [rolls, setRolls] = useState<RollPayload[]>([]);
   const [resolutionPrompts, setResolutionPrompts] = useState<ResolutionInterceptorPrompt[]>([]);
+  const [restPrompts, setRestPrompts] = useState<RestGrantPrompt[]>([]);
+  const [preparedProactiveResources, setPreparedProactiveResources] = useState<Record<string, ResourceId>>({});
   const [rollHistory, setRollHistory] = useState<RollLogEntry[]>([]);
   const [sheetStatus, setSheetStatus] = useState<"idle" | "loading" | "error">("idle");
   const [playerKey, setPlayerKey] = useState(requestedPlayerKey);
@@ -106,6 +110,7 @@ export function useRoomConnection({
         case "roll_created":
           setRolls((current) => upsertPendingRoll(current, message.roll));
           setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
+          setSheets((current) => applyRollResourceUpdates(current, message.roll));
           return;
         case "roll_resolved":
           setRolls((current) => (message.resolution.responseRolls ?? []).reduce(
@@ -114,12 +119,41 @@ export function useRoomConnection({
           ));
           setRollHistory((current) => appendRollLogEntry(current, message.logEntry));
           setSheets((current) => applyResolvedRollToSheetState(current, message.resolution));
+          setPreparedProactiveResources((current) => {
+            const updated = { ...current };
+            for (const roll of [message.resolution.roll, ...(message.resolution.responseRolls ?? [])]) {
+              for (const spent of roll.resourcesSpent ?? []) {
+                const owner = spent.ownerSheetId ?? roll.sheetId;
+                if (updated[owner] === spent.resource) delete updated[owner];
+              }
+            }
+            return updated;
+          });
           return;
         case "resolution_prompt_created":
           setResolutionPrompts((current) => upsertResolutionPrompt(current, message.prompt));
           return;
         case "resolution_prompt_resolved":
           setResolutionPrompts((current) => current.filter((prompt) => prompt.id !== message.promptId));
+          return;
+        case "rest_prompts_updated":
+          setRestPrompts(message.prompts);
+          return;
+        case "proactive_resource_prepared":
+          setPreparedProactiveResources((current) => {
+            const updated = { ...current };
+            if (message.resource) updated[message.sheetId] = message.resource;
+            else delete updated[message.sheetId];
+            return updated;
+          });
+          return;
+        case "sheet_state":
+          setSheets(message.sheets);
+          setRolls(message.pendingRolls);
+          setResolutionPrompts(message.pendingResolutionPrompts);
+          setRestPrompts(message.pendingRestPrompts);
+          setPreparedProactiveResources(message.preparedProactiveResources ?? {});
+          setRollHistory(message.rollHistory);
           return;
         case "roll_blocked":
         case "roll_logged":
@@ -149,6 +183,8 @@ export function useRoomConnection({
       setSheets(body.sheets);
       setRolls(body.pendingRolls);
       setResolutionPrompts(body.pendingResolutionPrompts);
+      setRestPrompts(body.pendingRestPrompts ?? []);
+      setPreparedProactiveResources(body.preparedProactiveResources ?? {});
       setRollHistory(body.rollHistory);
       setExpandedSheetId((current) => current && body.sheets.some((sheet) => sheet.id === current) ? current : null);
       setSheetStatus("idle");
@@ -202,6 +238,8 @@ export function useRoomConnection({
     playerKey,
     players,
     resolutionPrompts,
+    restPrompts,
+    preparedProactiveResources,
     rollHistory,
     rolls,
     send,
@@ -209,6 +247,8 @@ export function useRoomConnection({
     setEncounter,
     setFog,
     setResolutionPrompts,
+    setRestPrompts,
+    setPreparedProactiveResources,
     setRollHistory,
     setRolls,
     setSheets,
@@ -224,6 +264,8 @@ export type SheetStateResponse = {
   sheets: CharacterSheet[];
   pendingRolls: RollPayload[];
   pendingResolutionPrompts: ResolutionInterceptorPrompt[];
+  pendingRestPrompts?: RestGrantPrompt[];
+  preparedProactiveResources?: Record<string, ResourceId>;
   rollHistory: RollLogEntry[];
 };
 
@@ -242,7 +284,11 @@ export function upsertResolutionPrompt(prompts: ResolutionInterceptorPrompt[], p
 export function applyResolvedRollToSheetState(sheets: CharacterSheet[], resolution: NonNullable<RollLogEntry["resolution"]>) {
   const concentrationUpdates = new Map((resolution.concentrationUpdates ?? []).map((update) => [update.sheetId, update.activeConcentration]));
   const sheetUpdates = new Map((resolution.sheetUpdates ?? []).map((update) => [update.sheetId, update]));
-  return sheets.map((sheet) => {
+  const sheetsWithResources = [resolution.roll, ...(resolution.responseRolls ?? [])].reduce(
+    applyRollResourceUpdates,
+    sheets
+  );
+  return sheetsWithResources.map((sheet) => {
     const update = sheetUpdates.get(sheet.id);
     const targetUpdate = sheet.id === resolution.targetSheetId
       ? { hp: resolution.targetHp, conditions: resolution.targetConditions }
@@ -256,6 +302,21 @@ export function applyResolvedRollToSheetState(sheets: CharacterSheet[], resoluti
       ...(update?.damageVulnerabilities ? { damageVulnerabilities: update.damageVulnerabilities } : {}),
       ...(update?.damageImmunities ? { damageImmunities: update.damageImmunities } : {}),
       ...(concentrationUpdates.has(sheet.id) ? { activeConcentration: concentrationUpdates.get(sheet.id) } : {})
+    };
+  });
+}
+
+function applyRollResourceUpdates(sheets: CharacterSheet[], roll: RollPayload): CharacterSheet[] {
+  return sheets.map((sheet) => {
+    const updates = new Map((roll.resourcesSpent ?? [])
+      .filter((update) => (update.ownerSheetId ?? roll.sheetId) === sheet.id)
+      .map((update) => [update.resource, update.current]));
+    if (!updates.size) return sheet;
+    return {
+      ...sheet,
+      resources: sheet.resources.map((resource) => updates.has(resource.resource)
+        ? { ...resource, currentUses: updates.get(resource.resource)!, state: { ...resource.state, current: updates.get(resource.resource)! } }
+        : resource)
     };
   });
 }

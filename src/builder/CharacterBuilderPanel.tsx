@@ -89,7 +89,7 @@ export function CharacterBuilderPanel({
     }
     setDraft((current) => normalizeCharacterBuilderDraft({ ...current, className }, options));
   };
-  const updateStringList = (field: keyof Pick<CharacterBuilderDraft, "classSkillProficiencies" | "classExpertise" | "wizardCantrips" | "wizardSpellbookSpells" | "wizardPreparedSpells">, index: number, value: string) => {
+  const updateStringList = (field: keyof Pick<CharacterBuilderDraft, "classSkillProficiencies" | "classExpertise" | "originFeatTraining" | "wizardCantrips" | "wizardSpellbookSpells" | "wizardPreparedSpells">, index: number, value: string) => {
     if (!options) return;
     setDraft((current) => {
       const next = [...current[field]];
@@ -281,6 +281,23 @@ export function CharacterBuilderPanel({
               </div>
             </div>
           )}
+          {backgroundDetail?.originFeatTraining && (
+            <div className="builder-spell-choices">
+              <div className="builder-subsection-title">{backgroundDetail.originFeatTraining.label} Proficiencies</div>
+              {Array.from({ length: backgroundDetail.originFeatTraining.count }).map((_, index) => (
+                <label key={`origin-training-${index}`}>
+                  Skill or Tool {index + 1}
+                  <select value={draft.originFeatTraining[index] ?? ""} onChange={(event) => updateStringList("originFeatTraining", index, event.currentTarget.value)}>
+                    {backgroundDetail.originFeatTraining!.options.map((option) => (
+                      <option key={option.value} value={option.value} disabled={draft.originFeatTraining.includes(option.value) && draft.originFeatTraining[index] !== option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
           {classDetail && classDetail.skillProficiencies.maximum > 0 && (
             <div className="builder-spell-choices">
               <div className="builder-subsection-title">Class Skills</div>
@@ -448,6 +465,7 @@ function defaultCharacterBuilderDraft(playerKey: string): CharacterBuilderDraft 
     toolProficiency: "thievesTools",
     equipmentChoice: "package",
     magicInitiateSpells: [],
+    originFeatTraining: [],
     classSkillProficiencies: [],
     classExpertise: [],
     fightingStyle: "",
@@ -481,6 +499,22 @@ function normalizeCharacterBuilderDraft(draft: CharacterBuilderDraft, options: C
   const magicInitiateSpells = normalizedMagicInitiateSpells(draft.magicInitiateSpells, detail);
   const classSkillProficiencies = classDetail ? normalizedSelectedOptions(draft.classSkillProficiencies, classDetail.skillProficiencies.options ?? [], classDetail.skillProficiencies.maximum) : [];
   const classExpertise = classDetail ? normalizedSelectedOptions(draft.classExpertise, expertiseOptions({ ...draft, classSkillProficiencies }, classDetail, detail), classDetail.expertise.maximum) : [];
+  const originTraining = detail.originFeatTraining;
+  const alreadyTrained = new Set([
+    ...detail.skillProficiencies.map((option) => option.value),
+    ...classSkillProficiencies,
+    ...(toolProficiency ? [toolProficiency] : [])
+  ]);
+  const originFeatTraining = originTraining
+    ? normalizedSelectedOptions(
+        draft.originFeatTraining,
+        [
+          ...originTraining.options.filter((option) => !alreadyTrained.has(option.value)),
+          ...originTraining.options.filter((option) => alreadyTrained.has(option.value))
+        ],
+        originTraining.count
+      )
+    : [];
   const fightingStyle = classDetail && classDetail.fightingStyles.maximum > 0
     ? normalizedSelectedOptions([draft.fightingStyle], classDetail.fightingStyles.options ?? [], 1)[0] ?? ""
     : "";
@@ -498,6 +532,7 @@ function normalizeCharacterBuilderDraft(draft: CharacterBuilderDraft, options: C
     toolProficiency,
     equipmentChoice,
     magicInitiateSpells,
+    originFeatTraining,
     classSkillProficiencies,
     classExpertise,
     fightingStyle,

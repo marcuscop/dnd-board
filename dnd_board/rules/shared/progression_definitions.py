@@ -24,7 +24,10 @@ from dnd_board.rules.shared.effects import Modifier
 
 class ProgressionChoiceId(Enum):
     HIT_POINT_INCREASE = "hitPointIncrease"
+    BACKGROUND_FEAT = "backgroundFeat"
     FEAT_ABILITY_SCORE_INCREASE = "featAbilityScoreIncrease"
+    FEAT_SKILL_TRAINING = "featSkillTraining"
+    FEAT_TRAINING = "featTraining"
     FIGHTER_ABILITY_SCORE_IMPROVEMENT = "fighterAbilityScoreImprovement"
     ROGUE_ABILITY_SCORE_IMPROVEMENT = "rogueAbilityScoreImprovement"
     WIZARD_ABILITY_SCORE_IMPROVEMENT = "wizardAbilityScoreImprovement"

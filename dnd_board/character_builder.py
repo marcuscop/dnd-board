@@ -28,6 +28,7 @@ from dnd_board.character_sheet import (
     serialize_dataclass,
 )
 from dnd_board.rules.backgrounds import (
+    BACKGROUND_ORIGIN_FEATS,
     BackgroundEquipmentChoice,
     BackgroundOriginFeatType,
     BackgroundType,
@@ -42,8 +43,10 @@ from dnd_board.rules.backgrounds import (
     background_skill_proficiencies,
     background_tool_options,
 )
+from dnd_board.rules.feats import GENERAL_FEATS
 from dnd_board.rules.shared.resources import ResourceId
 from dnd_board.rules.progression import (
+    FeatGrant,
     FightingStyleGrant,
     ProgressionChoiceId,
     ProgressionGrantRecord,
@@ -103,6 +106,7 @@ class CharacterBuilderPayloadField(Enum):
     WIZARD_CANTRIPS = "wizardCantrips"
     WIZARD_SPELLBOOK_SPELLS = "wizardSpellbookSpells"
     WIZARD_PREPARED_SPELLS = "wizardPreparedSpells"
+    ORIGIN_FEAT_TRAINING = "originFeatTraining"
 
 
 class CharacterBuilderOptionField(Enum):
@@ -139,6 +143,7 @@ class CharacterBuilderRequest:
     wizard_cantrips: tuple[SpellId, ...]
     wizard_spellbook_spells: tuple[SpellId, ...]
     wizard_prepared_spells: tuple[SpellId, ...]
+    origin_feat_training: tuple[SkillType | ToolType, ...]
     ability_scores: AbilityScores
 
 
@@ -183,6 +188,10 @@ def character_builder_request_from_payload(payload: dict[str, Any], *, default_m
     wizard_cantrips = wizard_cantrips_from_payload(class_type, payload_value(payload, CharacterBuilderPayloadField.WIZARD_CANTRIPS, ()))
     wizard_spellbook_spells = wizard_spellbook_spells_from_payload(class_type, payload_value(payload, CharacterBuilderPayloadField.WIZARD_SPELLBOOK_SPELLS, ()))
     wizard_prepared_spells = wizard_prepared_spells_from_payload(class_type, payload_value(payload, CharacterBuilderPayloadField.WIZARD_PREPARED_SPELLS, ()), wizard_spellbook_spells)
+    origin_feat_training = origin_feat_training_from_payload(
+        background,
+        payload_value(payload, CharacterBuilderPayloadField.ORIGIN_FEAT_TRAINING, ()),
+    )
 
     return CharacterBuilderRequest(
         member_id=clean_text(payload_value(payload, CharacterBuilderPayloadField.MEMBER_ID), default_member_id, 40),
@@ -201,6 +210,7 @@ def character_builder_request_from_payload(payload: dict[str, Any], *, default_m
         wizard_cantrips=wizard_cantrips,
         wizard_spellbook_spells=wizard_spellbook_spells,
         wizard_prepared_spells=wizard_prepared_spells,
+        origin_feat_training=origin_feat_training,
         ability_scores=ability_scores,
     )
 
@@ -213,6 +223,28 @@ def build_party_member_config(request: CharacterBuilderRequest) -> PartyMemberCo
         fightingStyles=[request.fighting_style] if request.fighting_style else None,
     )
     base_skills, progression_grants, skills = builder_skill_progression(request, character_class)
+    origin_feat = BACKGROUND_ORIGIN_FEATS.get(background_definition(request.background).feat)
+    if origin_feat is not None and GENERAL_FEATS[origin_feat].trainingChoice is not None:
+        progression_grants.append(ProgressionGrantRecord(
+            ProgressionGrantSource(ProgressionChoiceId.BACKGROUND_FEAT, request.class_type),
+            (FeatGrant(request.class_type, CHARACTER_BUILDER_STARTING_LEVEL, origin_feat),),
+        ))
+        rule = progression_rule(
+            ProgressionChoiceId.FEAT_TRAINING,
+            [character_class],
+            skills,
+            progression_grants,
+        )
+        if rule is None:
+            raise ValueError("Background feat training is unavailable")
+        evaluation = evaluate_progression_rule(
+            rule,
+            [character_class],
+            skills,
+            [enum_key(option) for option in request.origin_feat_training],
+        )
+        progression_grants.append(ProgressionGrantRecord(evaluation.source, evaluation.grants))
+        skills = apply_progression_grants(base_skills, progression_grants)
     if request.fighting_style is not None:
         progression_grants.append(ProgressionGrantRecord(
             source=ProgressionGrantSource(
@@ -287,9 +319,45 @@ def background_details() -> dict[str, dict[str, Any]]:
             "toolOptions": serialize_options(enum_options(background_tool_options(background_type))),
             "equipmentChoices": serialize_options(enum_options(BackgroundEquipmentChoice)),
             "magicInitiateSpellChoices": magic_initiate_spell_choices(background_type),
+            "originFeatTraining": origin_feat_training_options(background_type),
         }
         for background_type in BackgroundType
     }
+
+
+def origin_feat_training_options(background: BackgroundType) -> dict[str, Any] | None:
+    feat = BACKGROUND_ORIGIN_FEATS.get(background_definition(background).feat)
+    training = GENERAL_FEATS[feat].trainingChoice if feat is not None else None
+    if training is None:
+        return None
+    return {
+        "label": enum_label(feat),
+        "count": training.count,
+        "options": serialize_options(enum_options((*training.skills, *training.tools))),
+    }
+
+
+def origin_feat_training_from_payload(
+    background: BackgroundType,
+    raw: Any,
+) -> tuple[SkillType | ToolType, ...]:
+    feat = BACKGROUND_ORIGIN_FEATS.get(background_definition(background).feat)
+    training = GENERAL_FEATS[feat].trainingChoice if feat is not None else None
+    if training is None:
+        if raw:
+            raise ValueError("This background has no feat training choice")
+        return ()
+    if not isinstance(raw, (list, tuple)) or len(raw) != training.count:
+        raise ValueError(f"Choose {training.count} {enum_label(feat)} proficiencies")
+    selected: list[SkillType | ToolType] = []
+    for value in raw:
+        skill = enum_value(SkillType, value)
+        tool = enum_value(ToolType, value)
+        option = skill if skill in training.skills else tool if tool in training.tools else None
+        if option is None or option in selected:
+            raise ValueError(f"Choose {training.count} distinct {enum_label(feat)} proficiencies")
+        selected.append(option)
+    return tuple(selected)
 
 
 def class_details() -> dict[str, dict[str, Any]]:

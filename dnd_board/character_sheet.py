@@ -7,7 +7,7 @@ from time import time_ns
 from types import SimpleNamespace, UnionType
 from typing import TYPE_CHECKING, Any, Iterable, Union, get_args, get_origin, get_type_hints
 
-from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ResourceCost, ResourceId, ResourceKey, ResourceKind, ResourceRecovery, ResourceState, ResourceUpdate
+from dnd_board.rules.shared.resources import RESOURCE_DEFINITIONS, ProactiveRerollPolicy, ResourceCost, ResourceId, ResourceKey, ResourceKind, ResourceRecovery, ResourceState, ResourceUpdate
 
 if TYPE_CHECKING:
     from dnd_board.rules.shared.effects import AbilityScoreAdjustment, ActiveOngoingEffect, ActiveScheduledEffect, AppliedEffectResult, CalculationType, DiceAmount, EffectNode, EffectNodeId, EffectResolutionInputs, FeatureMechanics, Interaction, ModifierOperation, SpellDamageTrait, WeaponAttackOption
@@ -1278,6 +1278,13 @@ class RollModifierBreakdown:
     description: str = ""
 
 
+@dataclass(frozen=True)
+class DieReplacement:
+    original: int
+    replacement: int
+    sourceResource: ResourceId | None = None
+
+
 @dataclass
 class RollSource:
     section: SheetSectionType
@@ -1349,6 +1356,8 @@ class ProgressionChoice:
     maximum: int
     selected: list[str]
     options: list[ProgressionChoiceOption]
+    sourceClass: ClassType | None = None
+    sourceLevel: int | None = None
 
 
 @dataclass
@@ -1380,6 +1389,10 @@ class ResourceTracker:
     @api_field
     def state(self) -> ResourceState:
         return ResourceState(self.resource, self.currentUses, self.maxUses)
+
+    @api_field
+    def proactiveReroll(self) -> ProactiveRerollPolicy | None:
+        return RESOURCE_DEFINITIONS[self.resource].proactiveReroll
 
 
 @dataclass
@@ -1630,6 +1643,9 @@ class RollPayload:
     effectInputs: EffectResolutionInputs | None = None
     criticalHit: bool | None = None
     d20TestType: D20TestType | None = None
+    proactiveResource: ResourceId | None = None
+    testDifficultyClass: int | None = None
+    dieReplacements: list[DieReplacement] | None = None
 
 
 @dataclass
@@ -1768,7 +1784,7 @@ def build_character_sheet(
     ability_modifiers = ability_modifier_map(ability_scores)
     skill_proficiencies = sheet_config.skills if sheet_config and sheet_config.skills else {}
     save_proficiencies = set(sheet_config.savingThrowProficiencies if sheet_config and sheet_config.savingThrowProficiencies else default_save_proficiencies(classes))
-    from dnd_board.rules.progression import saving_throw_proficiencies_from_grants, spell_damage_traits_from_grants
+    from dnd_board.rules.progression import saving_throw_proficiencies_from_grants, spell_damage_traits_from_grants, tool_proficiencies_from_grants
 
     save_proficiencies.update(saving_throw_proficiencies_from_grants(sheet_config.progressionGrants if sheet_config else None))
     configured_spells = hydrated_spell_entries(sheet_config.spells if sheet_config and sheet_config.spells else [])
@@ -1777,11 +1793,19 @@ def build_character_sheet(
     from dnd_board.rules.feats import effective_armor_training, effective_equipment_proficiencies
 
     proficiencies = effective_equipment_proficiencies(
-        classes, configured_feats, sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else []
+        classes,
+        configured_feats,
+        [
+            *(sheet_config.proficiencies if sheet_config and sheet_config.proficiencies else []),
+            *tool_proficiencies_from_grants(sheet_config.progressionGrants if sheet_config else None),
+        ],
     )
     _, shield_trained = effective_armor_training(classes, configured_feats, proficiencies)
     configured_resources = sheet_config.resources if sheet_config and sheet_config.resources else default_resources(classes, ability_scores, configured_feats, proficiency_bonus)
-    resources = apply_resource_overrides(with_hit_die_resources(configured_resources, classes), resource_overrides)
+    resources = apply_resource_overrides(
+        with_heroic_inspiration_resource(with_hit_die_resources(configured_resources, classes), kind),
+        resource_overrides,
+    )
     subclass_abilities = default_subclass_abilities(classes)
     abilities = [*resource_roll_abilities(resources), *subclass_abilities]
     features = default_features(classes)
@@ -3738,6 +3762,20 @@ def hit_die_resources(classes: list[CharacterClassLevel]) -> list[ResourceTracke
         )
         for resource_id, count in counts.items()
     ]
+
+
+def with_heroic_inspiration_resource(resources: list[ResourceTracker], kind: TokenKind) -> list[ResourceTracker]:
+    if kind != TokenKind.CHARACTER or any(resource.resource == ResourceId.HEROIC_INSPIRATION for resource in resources):
+        return resources
+    return [*resources, ResourceTracker(
+        id=enum_key(ResourceId.HEROIC_INSPIRATION),
+        name=ResourceId.HEROIC_INSPIRATION.value,
+        currentUses=0,
+        maxUses=1,
+        activation=TimeEconomy.SPECIAL,
+        description="Spend to reroll one die immediately after rolling it; use the new roll.",
+        resource=ResourceId.HEROIC_INSPIRATION,
+    )]
 
 
 def with_hit_die_resources(resources: list[ResourceTracker], classes: list[CharacterClassLevel]) -> list[ResourceTracker]:

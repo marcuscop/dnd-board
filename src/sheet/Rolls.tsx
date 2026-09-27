@@ -85,7 +85,10 @@ export function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: Cha
   const isBlocked = entry.entryType === RollLogEntryType.ROLL_BLOCKED;
   const isLogOnly = roll.source.actionId === "log";
   const responseRollText = entry.resolution?.responseRolls?.length
-    ? ` · ${entry.resolution.responseRolls.map((responseRoll) => `${responseRoll.label} ${rollMathText(responseRoll)}`).join(" · ")}`
+    ? ` · ${entry.resolution.responseRolls.map((responseRoll) => `${responseRoll.label} ${rollMathText(responseRoll)}${responseRoll.dieReplacements?.map((die) => ` (${die.original} → ${die.replacement})`).join("") ?? ""}`).join(" · ")}`
+    : "";
+  const replacementText = displayRoll.dieReplacements?.length
+    ? displayRoll.dieReplacements.map((die) => ` · ${die.sourceResourceLabel ?? "Reroll"} ${die.original} → ${die.replacement}`).join("")
     : "";
 
   return (
@@ -96,11 +99,11 @@ export function RollLogRow({ entry, roller }: { entry: RollLogEntry; roller: Cha
         {isBlocked
           ? ` ${actor}: ${roll.label}`
           : entry.resolution
-          ? ` ${actor}: ${displayRoll.label} ${rollMathText(displayRoll)}${responseRollText}; ${entry.resolution.outcome} to ${entry.resolution.targetName}`
-          : ` ${actor}: ${roll.label} `}
+          ? ` ${actor}: ${displayRoll.label} ${rollMathText(displayRoll)}${replacementText}${responseRollText}; ${entry.resolution.outcome} to ${entry.resolution.targetName}`
+          : ` ${actor}: ${roll.label}${replacementText} `}
         {!entry.resolution && !isBlocked && !isLogOnly && <span className="roll-result-number">{rollMathText(roll)}</span>}
-        {roll.resourcesSpent
-          ? roll.resourcesSpent.map((resource) => ` · ${resource.label} ${resource.current}/${resource.maximum}`).join("")
+        {displayRoll.resourcesSpent
+          ? displayRoll.resourcesSpent.map((resource) => ` · ${resource.label} ${resource.current}/${resource.maximum}`).join("")
           : ""}
       </span>
     </li>

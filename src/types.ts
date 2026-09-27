@@ -417,8 +417,9 @@ export type SpellControlProjection = {
   actions: EffectActionControl[];
   castOptions: { slotLevel: number; actions: EffectActionControl[] }[];
 };
-export type ResourceKind = "spellSlot" | "hitDie" | "featureUse" | "itemCharge" | "ammunition" | "action" | "bonusAction" | "reaction";
+export type ResourceKind = "spellSlot" | "hitDie" | "featureUse" | "itemCharge" | "ammunition" | "action" | "bonusAction" | "reaction" | "inspiration";
 export type ResourceId =
+  | "heroicInspiration"
   | "spellSlot"
   | "hitDieD6"
   | "hitDieD8"
@@ -578,6 +579,19 @@ export type ProgressionChoice = {
     value: string;
     label: string;
   }[];
+  sourceClass?: string | null;
+  sourceLevel?: number | null;
+};
+
+export type RestGrantPrompt = {
+  id: string;
+  sourceSheetId: string;
+  sourceName: string;
+  ownerPlayerKey: string;
+  label: string;
+  resource: string;
+  maximumTargets: number;
+  targets: { sheetId: string; name: string }[];
 };
 
 export type CharacterBuilderOption = {
@@ -627,6 +641,11 @@ export type CharacterBuilderBackgroundDetail = {
   toolOptions: CharacterBuilderOption[];
   equipmentChoices: CharacterBuilderOption[];
   magicInitiateSpellChoices?: CharacterBuilderMagicInitiateSpellChoices | null;
+  originFeatTraining?: {
+    label: string;
+    count: number;
+    options: CharacterBuilderOption[];
+  } | null;
 };
 
 export type CharacterBuilderToolDetail = {
@@ -674,6 +693,7 @@ export type CharacterBuilderDraft = {
   toolProficiency?: string;
   equipmentChoice: string;
   magicInitiateSpells: string[];
+  originFeatTraining: string[];
   classSkillProficiencies: string[];
   classExpertise: string[];
   fightingStyle: string;
@@ -778,6 +798,10 @@ export type CharacterSheet = {
       kind: ResourceKind;
       kindLabel: string;
     };
+    proactiveReroll?: {
+      triggers: ("failedD20Test" | "minimumDamageDie")[];
+      description: string;
+    } | null;
     state: {
       resource: ResourceId;
       resourceLabel: string;
@@ -964,6 +988,7 @@ export type RollPayload = {
     label: string;
     current: number;
     maximum: number;
+    ownerSheetId?: string;
   }[];
   pendingEffect?: EffectNode;
   effectInputs?: {
@@ -972,6 +997,9 @@ export type RollPayload = {
   };
   criticalHit?: boolean;
   d20TestType?: D20TestType;
+  proactiveResource?: ResourceId;
+  testDifficultyClass?: number;
+  dieReplacements?: { original: number; replacement: number; sourceResource?: ResourceId; sourceResourceLabel?: string }[];
 };
 
 export type RollDamageComponent = {
@@ -1087,6 +1115,9 @@ export type ServerMessage =
   | { type: "roll_resolved"; rollId: string; tokenId: string; preserveRoll?: boolean; resolution: RollResolution; logEntry: RollLogEntry }
   | { type: "resolution_prompt_created"; prompt: ResolutionInterceptorPrompt }
   | { type: "resolution_prompt_resolved"; promptId: string }
+  | { type: "rest_prompts_updated"; prompts: RestGrantPrompt[] }
+  | { type: "proactive_resource_prepared"; sheetId: string; resource: ResourceId | null }
+  | { type: "sheet_state"; sheets: CharacterSheet[]; pendingRolls: RollPayload[]; pendingResolutionPrompts: ResolutionInterceptorPrompt[]; pendingRestPrompts: RestGrantPrompt[]; preparedProactiveResources: Record<string, ResourceId>; rollHistory: RollLogEntry[] }
   | { type: "roll_blocked"; logEntry: RollLogEntry }
   | { type: "roll_logged"; logEntry: RollLogEntry }
   | { type: "token_lock_denied"; tokenId: string; lockedBy?: string }

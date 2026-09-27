@@ -46,6 +46,7 @@ from dnd_board.rules.progression import (
     SubclassChoiceDefinition,
     SubclassGrant,
     SkillSelectionIssue,
+    TrainingChoiceDefinition,
     apply_progression_grants,
     progression_feat_grants,
     apply_class_option_progression_grants,
@@ -690,6 +691,12 @@ def progression_rule_error(rule, issue: SkillSelectionIssue) -> str:
         if choice.destination == SpellCollection.PREPARED:
             return f"Prepared {source_label} spells must be legal spells from your spellbook"
         return f"Choose legal {destination_label}"
+    if isinstance(choice, TrainingChoiceDefinition):
+        if issue == SkillSelectionIssue.REQUIREMENT_NOT_MET:
+            return f"{rule.presentation.label} is not available"
+        if issue == SkillSelectionIssue.WRONG_COUNT:
+            return f"Choose {choice.count} distinct {rule.presentation.label.lower()} options"
+        return f"Choose legal {rule.presentation.label.lower()} options"
     class_label = enum_key(rule.requirements[0].characterClass).title()
     is_expertise = isinstance(choice, SkillChoiceDefinition) and choice.proficiency == ProficiencyLevel.EXPERTISE
     if issue == SkillSelectionIssue.REQUIREMENT_NOT_MET:

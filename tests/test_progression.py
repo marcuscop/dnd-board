@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from dnd_board.application.progression_service import ProgressionServiceError, apply_member_progression_rule, member_feat_eligibility_sheet, set_member_class_levels
-from dnd_board.character_sheet import AbilityScores, AbilityType, ArcaneShotType, BattleMasterManeuverType, CharacterClassLevel, ClassOptionKind, ClassOptionSelection, ClassType, FightingStyleType, PartyMember, PartyMemberConfig, PartyMemberSheet, ProficiencyLevel, ProgressionChoice, ProgressionChoiceType, RuneType, SkillType, SpellId, SpellSource, SpellStatus, TokenKind, build_character_sheet, enum_key, typed_json_from_value, typed_json_to_value
+from dnd_board.character_sheet import AbilityScores, AbilityType, ArcaneShotType, BattleMasterManeuverType, CharacterClassLevel, ClassOptionKind, ClassOptionSelection, ClassType, FightingStyleType, PartyMember, PartyMemberConfig, PartyMemberSheet, ProficiencyLevel, ProgressionChoice, ProgressionChoiceType, RuneType, SkillType, SpellId, SpellSource, SpellStatus, TimeEconomy, TokenKind, build_character_sheet, enum_key, typed_json_from_value, typed_json_to_value
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.rogue.base import RogueSubclassType
 from dnd_board.rules.classes.fighter.archetypes import normalized_eldritch_knight_spell
@@ -20,6 +20,7 @@ from dnd_board.rules.progression import (
     ProgressionGrantRecord,
     ProgressionGrantSource,
     ProgressionRuleViolation,
+    SkillProficiencyGrant,
     SkillSelectionIssue,
     SpellCollection,
     SpellGrant,
@@ -32,6 +33,7 @@ from dnd_board.rules.progression import (
     parse_progression_choice_id,
     prune_progression_choices,
     progression_choices,
+    progression_choice_for_rule,
     progression_rule,
     selected_enum_keys,
     level_advance_allowed,
@@ -42,13 +44,14 @@ from dnd_board.rules.progression import (
     saving_throw_proficiencies_from_grants,
     SavingThrowProficiencyGrant,
 )
-from dnd_board.rules.feats import FeatCategory, GeneralFeatType
+from dnd_board.rules.feats import GENERAL_FEATS, FeatCategory, GeneralFeatType, feat_abilities
 from dnd_board.rules.feats import (
     feat_hit_point_bonus,
     feat_hit_point_bonus_per_level,
     feat_speed_bonus,
     general_feat_feature,
 )
+from dnd_board.rules.shared.tool_types import ToolType
 from dnd_board.rules.shared.effects import AbilityScoreAdjustment
 
 
@@ -321,6 +324,214 @@ def test_feat_ability_score_grant_is_applied_and_removed_with_its_feat() -> None
         record.source.requiredFeat != GeneralFeatType.DEFENSIVE_DUELIST
         for record in member.sheet.progressionGrants or []
     )
+
+
+@pytest.mark.parametrize(
+    ("feat", "skill", "trained", "expected"),
+    [
+        (GeneralFeatType.KEEN_MIND, SkillType.ARCANA, False, ProficiencyLevel.PROFICIENT),
+        (GeneralFeatType.KEEN_MIND, SkillType.HISTORY, True, ProficiencyLevel.EXPERTISE),
+        (GeneralFeatType.OBSERVANT, SkillType.PERCEPTION, False, ProficiencyLevel.PROFICIENT),
+        (GeneralFeatType.OBSERVANT, SkillType.INSIGHT, True, ProficiencyLevel.EXPERTISE),
+    ],
+)
+def test_feat_skill_choice_grants_and_reconciles(
+    feat: GeneralFeatType,
+    skill: SkillType,
+    trained: bool,
+    expected: ProficiencyLevel,
+) -> None:
+    feat_record = ProgressionGrantRecord(
+        ProgressionGrantSource(ProgressionChoiceId.WIZARD_ABILITY_SCORE_IMPROVEMENT, ClassType.WIZARD),
+        (FeatGrant(ClassType.WIZARD, 4, feat),),
+    )
+    base_skills = {enum_key(skill): ProficiencyLevel.PROFICIENT} if trained else {}
+    member = PartyMemberConfig(
+        id="wizard",
+        name="Wizard",
+        maxHp=24,
+        abilityScores=AbilityScores(10, 10, 10, 16, 14, 10),
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(ClassType.WIZARD, 4)],
+            skills=dict(base_skills),
+            baseSkills=dict(base_skills),
+            progressionGrants=[feat_record],
+        ),
+    )
+    choices = progression_choices(
+        member.sheet.classes, [], member.sheet.skills,
+        progression_grants=member.sheet.progressionGrants,
+    )
+    choice = next(choice for choice in choices if choice.id == ProgressionChoiceId.FEAT_SKILL_TRAINING.value)
+    assert enum_key(skill) in {option.value for option in choice.options}
+
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_SKILL_TRAINING, [enum_key(skill)])
+    assert member.sheet.skills[enum_key(skill)] == expected
+    grant_record = next(
+        record for record in member.sheet.progressionGrants
+        if record.source.rule == ProgressionChoiceId.FEAT_SKILL_TRAINING
+    )
+    assert grant_record.source.requiredFeat == feat
+    assert typed_json_to_value(typed_json_from_value(grant_record)) == grant_record
+
+    set_member_class_levels(member, [CharacterClassLevel(ClassType.WIZARD, 3)])
+    assert (member.sheet.skills or {}).get(enum_key(skill), ProficiencyLevel.NONE) == base_skills.get(
+        enum_key(skill), ProficiencyLevel.NONE
+    )
+    assert not any(
+        record.source.requiredFeat == feat for record in member.sheet.progressionGrants or []
+    )
+
+
+def test_feat_skill_selection_does_not_reuse_another_feats_record() -> None:
+    classes = [CharacterClassLevel(ClassType.WIZARD, 8)]
+    feat_records = [
+        ProgressionGrantRecord(
+            ProgressionGrantSource(ProgressionChoiceId.WIZARD_ABILITY_SCORE_IMPROVEMENT, ClassType.WIZARD),
+            (
+                FeatGrant(ClassType.WIZARD, 4, GeneralFeatType.KEEN_MIND),
+                FeatGrant(ClassType.WIZARD, 8, GeneralFeatType.OBSERVANT),
+            ),
+        ),
+    ]
+    first = progression_rule(ProgressionChoiceId.FEAT_SKILL_TRAINING, classes, {}, feat_records)
+    assert first is not None and first.sourceFeat == GeneralFeatType.KEEN_MIND
+    result = evaluate_progression_rule(first, classes, {}, [enum_key(SkillType.ARCANA)])
+    feat_records.append(ProgressionGrantRecord(result.source, result.grants))
+    second = progression_rule(ProgressionChoiceId.FEAT_SKILL_TRAINING, classes, {}, feat_records)
+    assert second is not None and second.sourceFeat == GeneralFeatType.OBSERVANT
+    choice = progression_choice_for_rule(second, {}, feat_records, classes=classes)
+    assert choice is not None and choice.selected == []
+
+
+def test_feat_skill_upgrade_recomputes_when_other_proficiency_disappears() -> None:
+    skill = SkillType.INVESTIGATION
+    primary = ProgressionGrantRecord(
+        ProgressionGrantSource(ProgressionChoiceId.FEAT_SKILL_TRAINING, ClassType.WIZARD),
+        (SkillProficiencyGrant(skill, ProficiencyLevel.PROFICIENT, promoteExistingProficiency=True),),
+    )
+    other = ProgressionGrantRecord(
+        ProgressionGrantSource(ProgressionChoiceId.WIZARD_SKILL_PROFICIENCIES, ClassType.WIZARD),
+        (SkillProficiencyGrant(skill, ProficiencyLevel.PROFICIENT),),
+    )
+    assert apply_progression_grants({}, [primary, other])[enum_key(skill)] == ProficiencyLevel.EXPERTISE
+    assert apply_progression_grants({}, [primary])[enum_key(skill)] == ProficiencyLevel.PROFICIENT
+
+
+@pytest.mark.parametrize(
+    ("feat", "expected_abilities", "action_id"),
+    [
+        (GeneralFeatType.KEEN_MIND, {"intelligence"}, "keenMindQuickStudy"),
+        (GeneralFeatType.OBSERVANT, {"intelligence", "wisdom"}, "observantQuickSearch"),
+    ],
+)
+def test_keen_mind_and_observant_definition_choices_and_action_metadata(
+    feat: GeneralFeatType,
+    expected_abilities: set[str],
+    action_id: str,
+) -> None:
+    classes = [CharacterClassLevel(ClassType.WIZARD, 4)]
+    record = ProgressionGrantRecord(
+        ProgressionGrantSource(ProgressionChoiceId.WIZARD_ABILITY_SCORE_IMPROVEMENT, ClassType.WIZARD),
+        (FeatGrant(ClassType.WIZARD, 4, feat),),
+    )
+    choice = next(
+        choice for choice in progression_choices(classes, [], {}, progression_grants=[record])
+        if choice.id == ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE.value
+    )
+    assert {option.value for option in choice.options} == expected_abilities
+    action = next(
+        ability for ability in feat_abilities(classes, [general_feat_feature(enum_key(feat))])
+        if ability.id == action_id
+    )
+    assert action.activation == TimeEconomy.BONUS_ACTION
+
+
+def test_skilled_mixed_training_is_typed_and_removed_with_feat() -> None:
+    feat_record = ProgressionGrantRecord(
+        ProgressionGrantSource(ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT, ClassType.FIGHTER),
+        (FeatGrant(ClassType.FIGHTER, 4, GeneralFeatType.SKILLED),),
+    )
+    member = PartyMemberConfig(
+        id="fighter",
+        name="Fighter",
+        maxHp=36,
+        abilityScores=AbilityScores(16, 14, 14, 10, 10, 10),
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(ClassType.FIGHTER, 4)],
+            progressionGrants=[feat_record],
+        ),
+    )
+    selections = [enum_key(SkillType.ARCANA), enum_key(ToolType.LUTE), enum_key(ToolType.THIEVES_TOOLS)]
+    rule = progression_rule(ProgressionChoiceId.FEAT_TRAINING, member.sheet.classes, {}, [feat_record])
+    assert rule is not None
+    with pytest.raises(ProgressionRuleViolation):
+        evaluate_progression_rule(rule, member.sheet.classes, {}, selections[:2] + selections[:1])
+    with pytest.raises(ProgressionRuleViolation):
+        evaluate_progression_rule(rule, member.sheet.classes, {}, selections[:2] + [enum_key(ToolType.MUSICAL_INSTRUMENT)])
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_TRAINING, selections)
+    assert member.sheet.skills[enum_key(SkillType.ARCANA)] == ProficiencyLevel.PROFICIENT
+    training = next(
+        record for record in member.sheet.progressionGrants
+        if record.source.rule == ProgressionChoiceId.FEAT_TRAINING
+    )
+    assert typed_json_to_value(typed_json_from_value(training)) == training
+    sheet = build_character_sheet(
+        token_id=member.id,
+        kind=TokenKind.CHARACTER,
+        name=member.name,
+        owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(member.id, member.name, "player-1", None, member.abilityScores, member.maxHp, member.sheet),
+        current_hp=None,
+        resource_overrides={},
+    )
+    assert "Lute" in sheet.proficiencies
+    assert "Thieves' Tools" in sheet.proficiencies
+    set_member_class_levels(member, [CharacterClassLevel(ClassType.FIGHTER, 3)])
+    assert not any(record.source.rule == ProgressionChoiceId.FEAT_TRAINING for record in member.sheet.progressionGrants or [])
+    assert enum_key(SkillType.ARCANA) not in (member.sheet.skills or {})
+
+
+def test_repeatable_skilled_training_is_owned_by_each_acquisition() -> None:
+    classes = [CharacterClassLevel(ClassType.FIGHTER, 6)]
+    records = [ProgressionGrantRecord(
+        ProgressionGrantSource(ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT, ClassType.FIGHTER),
+        (
+            FeatGrant(ClassType.FIGHTER, 4, GeneralFeatType.SKILLED),
+            FeatGrant(ClassType.FIGHTER, 6, GeneralFeatType.SKILLED),
+        ),
+    )]
+    first = progression_rule(ProgressionChoiceId.FEAT_TRAINING, classes, {}, records)
+    assert first is not None and first.sourceFeatLevel == 4
+    assert progression_choice_for_rule(first, {}, records, classes=classes).sourceLevel == 4
+    first_result = evaluate_progression_rule(first, classes, {}, [enum_key(SkillType.ARCANA), enum_key(ToolType.LUTE), enum_key(ToolType.THIEVES_TOOLS)])
+    records.append(ProgressionGrantRecord(first_result.source, first_result.grants))
+    second = progression_rule(ProgressionChoiceId.FEAT_TRAINING, classes, {}, records)
+    assert second is not None and second.sourceFeatLevel == 6
+    assert progression_choice_for_rule(second, {}, records, classes=classes).sourceLevel == 6
+    second_result = evaluate_progression_rule(second, classes, {}, [enum_key(SkillType.HISTORY), enum_key(ToolType.FLUTE), enum_key(ToolType.HERBALISM_KIT)])
+    records.append(ProgressionGrantRecord(second_result.source, second_result.grants))
+    assert len([record for record in records if record.source.rule == ProgressionChoiceId.FEAT_TRAINING]) == 2
+    assert progression_rule(ProgressionChoiceId.FEAT_TRAINING, classes, {}, records) is None
+    assert typed_json_to_value(typed_json_from_value(records[-1])) == records[-1]
+
+
+def test_musician_training_accepts_only_distinct_instruments() -> None:
+    classes = [CharacterClassLevel(ClassType.ROGUE, 1)]
+    records = [ProgressionGrantRecord(
+        ProgressionGrantSource(ProgressionChoiceId.BACKGROUND_FEAT, ClassType.ROGUE),
+        (FeatGrant(ClassType.ROGUE, 1, GeneralFeatType.MUSICIAN),),
+    )]
+    rule = progression_rule(ProgressionChoiceId.FEAT_TRAINING, classes, {}, records)
+    assert rule is not None
+    assert {option.value for option in progression_choice_for_rule(rule, {}, records, classes=classes).options} == {
+        enum_key(tool) for tool in GENERAL_FEATS[GeneralFeatType.MUSICIAN].trainingChoice.tools
+    }
+    with pytest.raises(ProgressionRuleViolation):
+        evaluate_progression_rule(rule, classes, {}, [enum_key(ToolType.LUTE), enum_key(ToolType.FLUTE), enum_key(SkillType.ARCANA)])
+    result = evaluate_progression_rule(rule, classes, {}, [enum_key(ToolType.LUTE), enum_key(ToolType.FLUTE), enum_key(ToolType.DRUM)])
+    assert len(result.grants) == 3
 
 
 def test_ability_score_progression_can_grant_a_typed_feat() -> None:

@@ -371,6 +371,12 @@ def _damage_save_forced_failure_applies(roll: RollPayload, target: CharacterShee
     )
 
 
+def damage_save_can_succeed(roll: RollPayload, target: CharacterSheet) -> bool:
+    return not _damage_save_forced_failure_applies(roll, target) and not bool(
+        condition_saving_throw_forced_failure_conditions(target, roll.damageSavingThrow)
+    )
+
+
 def _damage_save_forced_failure_label(
     target: CharacterSheet,
     creature_type_forced_failure: bool,
@@ -802,15 +808,26 @@ async def create_ability_score_action(
     operations: ActionOperations,
     *,
     saving_throw: bool = False,
+    difficulty_class: int | None = None,
 ) -> dict[str, Any]:
     ability = enum_value(AbilityType, ability_key)
     if ability is None:
         raise ActionServiceError(404, "Ability not found")
+    if difficulty_class is not None and not 1 <= difficulty_class <= 99:
+        raise ActionServiceError(400, "Difficulty Class must be between 1 and 99")
     payload = (
         build_saving_throw_roll_payload(sheet, player.player_key, ability)
         if saving_throw
         else build_ability_check_roll_payload(sheet, player.player_key, ability)
     )
+    payload.testDifficultyClass = difficulty_class
+    await attach_prepared_proactive_resource(room, sheet, payload, operations)
+    if difficulty_class is not None and payload.total < difficulty_class:
+        from dnd_board.application.proactive_roll_service import reroll_failed_test
+
+        rerolled = reroll_failed_test(room, payload, sheet, operations.all_sheets, operations.save)
+        if rerolled is not None:
+            payload = rerolled.roll
     prompt = resolution_prompt_for_d20_test(payload, sheet)
     if prompt is not None:
         room.pending_resolution_prompts[prompt.id] = prompt
@@ -831,6 +848,14 @@ async def create_death_saving_throw_action(
     if sheet.hp.current > 0 or ConditionType.DEAD in sheet.conditions:
         raise ActionServiceError(409, "Death saves are only available at 0 Hit Points")
     payload = build_death_saving_throw_roll_payload(sheet, player.player_key)
+    payload.testDifficultyClass = 10
+    await attach_prepared_proactive_resource(room, sheet, payload, operations)
+    if payload.total < 10:
+        from dnd_board.application.proactive_roll_service import reroll_failed_test
+
+        rerolled = reroll_failed_test(room, payload, sheet, operations.all_sheets, operations.save)
+        if rerolled is not None:
+            payload = rerolled.roll
     prompt = resolution_prompt_for_d20_test(payload, sheet)
     if prompt is not None:
         room.pending_resolution_prompts[prompt.id] = prompt
@@ -976,12 +1001,30 @@ async def store_outgoing_roll(
     payload: RollPayload,
     operations: ActionOperations,
 ) -> dict[str, Any]:
+    await attach_prepared_proactive_resource(room, sheet, payload, operations)
     response = await store_roll(room, payload, operations)
     state_changed = clear_conditions_after_outgoing_roll(room, sheet, payload, operations)
     if payload.resourcesSpent or state_changed:
         operations.save(room)
         await operations.broadcast_room(room)
     return response
+
+
+async def attach_prepared_proactive_resource(
+    room: Room,
+    sheet: CharacterSheet,
+    payload: RollPayload,
+    operations: ActionOperations,
+) -> None:
+    resource = room.prepared_proactive_resources.pop(sheet.id, None)
+    if resource is None:
+        return
+    payload.proactiveResource = resource
+    await operations.broadcast(room, {
+        "type": "proactive_resource_prepared",
+        "sheetId": sheet.id,
+        "resource": None,
+    })
 
 
 async def store_roll(

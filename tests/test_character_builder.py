@@ -27,7 +27,7 @@ from dnd_board.character_builder import (
     wizard_spell_entries_from_payload,
     wizard_spellbook_spells_from_payload,
 )
-from dnd_board.character_sheet import AbilityScores, AbilityType, ClassType, DamageType, EquipmentType, FightingStyleType, PartyManifest, ProficiencyLevel, RestType, SkillType, SpellId, SpellSource, enum_key, enum_label, typed_json_to_value
+from dnd_board.character_sheet import AbilityScores, AbilityType, ClassType, DamageType, EquipmentType, FightingStyleType, PartyManifest, ProficiencyLevel, RestType, SkillType, SpellId, SpellSource, TokenKind, PartyMember, build_character_sheet, enum_key, enum_label, typed_json_to_value
 from dnd_board.rules.backgrounds import BackgroundEquipmentChoice, BackgroundFeatureType, BackgroundType, ToolType, background_definition, background_equipment, background_feats, background_skill_proficiencies, background_tool_options
 from dnd_board.rules.feats import GeneralFeatType
 from dnd_board.rules.progression import HitPointGrant, ProgressionChoiceId
@@ -724,6 +724,70 @@ def valid_character_builder_payload() -> dict:
             enum_key(AbilityType.CONSTITUTION): 1,
         },
     }
+
+
+def test_builder_exposes_origin_feat_training_from_definitions() -> None:
+    details = character_builder_options()[option_key(CharacterBuilderOptionField.BACKGROUND_DETAILS)]
+    skilled = details[enum_key(BackgroundType.CHARLATAN)]["originFeatTraining"]
+    musician = details[enum_key(BackgroundType.ENTERTAINER)]["originFeatTraining"]
+    assert skilled["count"] == 3
+    assert {enum_key(SkillType.ARCANA), enum_key(ToolType.LUTE)} <= {option["value"] for option in skilled["options"]}
+    assert musician["count"] == 3
+    assert enum_key(ToolType.LUTE) in {option["value"] for option in musician["options"]}
+    assert enum_key(SkillType.ARCANA) not in {option["value"] for option in musician["options"]}
+    assert details[enum_key(BackgroundType.CRIMINAL)]["originFeatTraining"] is None
+
+
+@pytest.mark.parametrize(
+    ("background", "training", "expected_skill"),
+    [
+        (BackgroundType.CHARLATAN, (SkillType.ARCANA, ToolType.LUTE, ToolType.THIEVES_TOOLS), SkillType.ARCANA),
+        (BackgroundType.ENTERTAINER, (ToolType.LUTE, ToolType.FLUTE, ToolType.DRUM), None),
+    ],
+)
+def test_builder_applies_origin_feat_training(
+    background: BackgroundType,
+    training: tuple[SkillType | ToolType, ...],
+    expected_skill: SkillType | None,
+) -> None:
+    payload = valid_character_builder_payload()
+    payload[payload_key(CharacterBuilderPayloadField.BACKGROUND)] = enum_key(background)
+    payload[payload_key(CharacterBuilderPayloadField.ORIGIN_FEAT_TRAINING)] = [enum_key(option) for option in training]
+    if background == BackgroundType.ENTERTAINER:
+        payload[payload_key(CharacterBuilderPayloadField.BACKGROUND_ABILITY_INCREASES)] = {
+            enum_key(AbilityType.DEXTERITY): 2,
+            enum_key(AbilityType.CHARISMA): 1,
+        }
+    request = character_builder_request_from_payload(payload, default_member_id="player-1", default_owner="player-1")
+    member = build_party_member_config(request)
+    assert request.origin_feat_training == training
+    assert len([record for record in member.sheet.progressionGrants if record.source.rule == ProgressionChoiceId.FEAT_TRAINING]) == 1
+    if expected_skill is not None:
+        assert member.sheet.skills[enum_key(expected_skill)] == ProficiencyLevel.PROFICIENT
+    sheet = build_character_sheet(
+        token_id=member.id,
+        kind=TokenKind.CHARACTER,
+        name=member.name,
+        owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(member.id, member.name, "player-1", None, member.abilityScores, member.maxHp, member.sheet),
+        current_hp=None,
+        resource_overrides={},
+    )
+    assert "Lute" in sheet.proficiencies
+    assert not any(choice.id == ProgressionChoiceId.FEAT_TRAINING.value for choice in sheet.pendingChoices)
+
+
+def test_builder_rejects_missing_or_duplicate_origin_feat_training() -> None:
+    payload = valid_character_builder_payload()
+    payload[payload_key(CharacterBuilderPayloadField.BACKGROUND)] = enum_key(BackgroundType.CHARLATAN)
+    with pytest.raises(ValueError, match="Choose 3 Skilled"):
+        character_builder_request_from_payload(payload, default_member_id="player-1", default_owner="player-1")
+    payload[payload_key(CharacterBuilderPayloadField.ORIGIN_FEAT_TRAINING)] = [
+        enum_key(SkillType.ARCANA), enum_key(SkillType.ARCANA), enum_key(ToolType.LUTE),
+    ]
+    with pytest.raises(ValueError, match="distinct"):
+        character_builder_request_from_payload(payload, default_member_id="player-1", default_owner="player-1")
 
 
 @pytest.mark.parametrize(

@@ -262,6 +262,7 @@ class CharacterEffectExecutionContext:
         self.criticalAttackNodes: set[EffectNodeId] = set()
         self.criticalDamagePreparedNodes: set[EffectNodeId] = set()
         self.pendingDamages: dict[EffectNodeId, PendingDamage] = {}
+        self.runtimeDamageDice: dict[EffectNodeId, list[tuple[int, int]]] = {}
         self.amountInputs = {entry.effectNodeId: entry.amount for entry in roll.effectInputs.amounts} if roll.effectInputs else {}
         self.selectionInputs = {
             entry.effectNodeId: entry
@@ -643,12 +644,17 @@ class CharacterEffectExecutionContext:
         trait = character_sheet.spell_damage_trait(source, damage_type) if self.source_spell() is not None else None
         minimum_die_result = trait.minimumDieResult if trait is not None else 1
         parts = amount.amounts if isinstance(amount, CombinedAmount) else [amount]
-        total = sum(self.resolve_runtime_amount_part(part, source, minimum_die_result) for part in parts)
+        dice: list[tuple[int, int]] = []
+        total = sum(self.resolve_runtime_amount_part(part, source, minimum_die_result, dice) for part in parts)
         for scale in scaling:
             increments = effect_scaling_increments(scale, source, self.source_spell().level if self.source_spell() else 1, None)
             if scale.additionalDice is not None:
-                total += increments * self.resolve_runtime_amount_part(scale.additionalDice, source, minimum_die_result)
+                total += sum(
+                    self.resolve_runtime_amount_part(scale.additionalDice, source, minimum_die_result, dice)
+                    for _ in range(increments)
+                )
             total += increments * scale.additionalFixedAmount
+        self.runtimeDamageDice[node_id] = dice
         return total
 
     def resolve_runtime_amount_part(
@@ -656,11 +662,15 @@ class CharacterEffectExecutionContext:
         amount: FixedAmount | DiceAmount | CalculatedAmount | DerivedAmount,
         source: CharacterSheet,
         minimum_die_result: int = 1,
+        dice: list[tuple[int, int]] | None = None,
     ) -> int:
         if isinstance(amount, FixedAmount):
             return amount.value
         if isinstance(amount, DiceAmount):
-            return sum(max(minimum_die_result, character_sheet.random.randint(1, amount.diceType.value)) for _ in range(amount.diceCount)) + amount.staticBonus
+            results = [max(minimum_die_result, character_sheet.random.randint(1, amount.diceType.value)) for _ in range(amount.diceCount)]
+            if dice is not None:
+                dice.extend((amount.diceType.value, result) for result in results)
+            return sum(results) + amount.staticBonus
         if isinstance(amount, DerivedAmount):
             raise TypeError("Derived runtime amounts require a preceding applied result")
         if amount.calculation in {

@@ -9,6 +9,7 @@ from typing import Any
 from dnd_board.application.action_service import (
     ActionOperations,
     ability_check_modifier,
+    damage_save_can_succeed,
     log_blocked_roll,
     log_roll_note,
     resolve_damage_save_for_roll,
@@ -27,6 +28,7 @@ from dnd_board.application.resolution_interactions import (
     resolution_prompt_for_effect_event,
 )
 from dnd_board.application.resource_service import spend_sheet_resources
+from dnd_board.application.proactive_roll_service import reroll_failed_test, reroll_minimum_damage, reroll_runtime_damage
 from dnd_board.application.encounter_service import authorize_action, commit_action_authorization
 from dnd_board.application.room_state import CharacterRuntimeSnapshot, InteractionEventKey, PendingCharacterResolution, Player, Room
 from dnd_board.character_sheet import (
@@ -346,6 +348,21 @@ def continue_effect_resolution(
 
         current_target = pending.active.context.current_target()
         current_source = pending.active.context.source or current_target
+        if advanced.eventType == ResolutionEventType.DAMAGE_PENDING and advanced.effectNodeId is not None and current_source.id == pending.roll.sheetId:
+            rerolled = reroll_minimum_damage(room, pending.roll, current_source, advanced.effectNodeId, operations.all_sheets, operations.save)
+            if rerolled is None:
+                runtime_dice = pending.active.context.runtimeDamageDice.get(advanced.effectNodeId, [])
+                rerolled = reroll_runtime_damage(room, pending.roll, current_source, runtime_dice, operations.all_sheets, operations.save)
+            if rerolled is not None:
+                pending.roll = rerolled.roll
+                pending.active.context.roll = rerolled.roll
+                pending_damage_to_update = pending.active.context.pendingDamages.get(advanced.effectNodeId)
+                if pending_damage_to_update is not None:
+                    difference = rerolled.replacement - rerolled.original
+                    pending_damage_to_update.currentAmount += difference
+                    pending_damage_to_update.rolledAmount += difference
+                    pending.active.context.amountInputs[advanced.effectNodeId] = pending_damage_to_update.currentAmount
+                pending.outcomePrefixes.append(f"{rerolled.roll.sourceLabel} rerolls damage die {rerolled.original} to {rerolled.replacement}")
         pending_damage = (
             pending.active.context.pendingDamages.get(advanced.effectNodeId)
             if advanced.effectNodeId is not None
@@ -380,6 +397,20 @@ def continue_effect_resolution(
                 advanced.pendingEffect.attack,
             )
             natural = resolved_d20(attack_roll)
+            missed = natural == 1 or (natural != 20 and attack_roll.total < current_target.armorClass)
+            if missed and current_source.id == pending.roll.sheetId:
+                candidate = replace(attack_roll, proactiveResource=pending.roll.proactiveResource)
+                rerolled = reroll_failed_test(room, candidate, current_source, operations.all_sheets, operations.save)
+                if rerolled is not None:
+                    attack_roll = rerolled.roll
+                    pending.roll = replace(
+                        pending.roll,
+                        proactiveResource=None,
+                        resourcesSpent=[*(pending.roll.resourcesSpent or []), *(attack_roll.resourcesSpent or [])],
+                    )
+                    pending.active.context.roll = pending.roll
+                    pending.outcomePrefixes.append(f"{attack_roll.sourceLabel} rerolls attack die {rerolled.original} to {rerolled.replacement}")
+            natural = resolved_d20(attack_roll)
             roll_outcome = RollOutcome.HIT if natural == 20 or (natural != 1 and attack_roll.total >= current_target.armorClass) else RollOutcome.MISS
             pending.active.context.attackRollPayloads[advanced.effectNodeId] = attack_roll
             pending.active.context.attackRollOutcomes[advanced.effectNodeId] = roll_outcome
@@ -407,6 +438,30 @@ def continue_effect_resolution(
                 damageSaveSucceeded=None,
             )
             save_outcome, save_roll, resolved_roll = resolve_damage_save_for_roll(configured, current_target)
+            if (
+                save_roll is not None
+                and not resolved_roll.damageSaveSucceeded
+                and save_roll.total < save_dc
+                and damage_save_can_succeed(configured, current_target)
+            ):
+                prepared_resource = room.prepared_proactive_resources.pop(current_target.id, None)
+                if prepared_resource is not None:
+                    candidate = replace(save_roll, proactiveResource=prepared_resource)
+                    rerolled = reroll_failed_test(room, candidate, current_target, operations.all_sheets, operations.save)
+                    if rerolled is not None:
+                        save_roll = rerolled.roll
+                        succeeded = save_roll.total >= save_dc
+                        resolved_roll = replace(
+                            resolved_roll,
+                            damageSaveSucceeded=succeeded,
+                            resourcesSpent=[*(resolved_roll.resourcesSpent or []), *(save_roll.resourcesSpent or [])],
+                        )
+                        save_outcome = (
+                            f"{current_target.name} {'passes' if succeeded else 'fails'} DC {save_dc} "
+                            f"{enum_label(saving_throw.ability)} save after rerolling {rerolled.original} to {rerolled.replacement}"
+                        )
+                    else:
+                        room.prepared_proactive_resources[current_target.id] = prepared_resource
             roll_outcome = RollOutcome.SUCCESS if resolved_roll.damageSaveSucceeded else RollOutcome.FAILURE
             inputs = resolved_roll.effectInputs or EffectResolutionInputs()
             pending.roll = replace(
@@ -529,10 +584,19 @@ def resolve_roll_or_prompt(
 
     source = operations.source_sheet(room, roll)
     working_roll = attack_roll_with_target_condition_modifiers(roll, target, source)
+    if working_roll.resolution == RollResolutionMode.ATTACK_VS_ARMOR_CLASS and source is not None:
+        natural = resolved_d20(working_roll)
+        if natural == 1 or (natural != 20 and working_roll.total < target.armorClass):
+            rerolled = reroll_failed_test(room, working_roll, source, operations.all_sheets, operations.save)
+            if rerolled is not None:
+                working_roll = rerolled.roll
+                prefixes.append(f"{source.name} rerolls attack die {rerolled.original} to {rerolled.replacement}")
     working_roll, contest_outcome, contest_rolls = resolve_contested_check_for_roll(
+        room,
         working_roll,
         target,
         source,
+        operations,
     )
     if contest_outcome is not None:
         prefixes.append(contest_outcome)
@@ -574,9 +638,11 @@ def resolve_roll_or_prompt(
 
 
 def resolve_contested_check_for_roll(
+    room: Room,
     roll: RollPayload,
     target: CharacterSheet,
     source: CharacterSheet | None,
+    operations: ResolutionOperations,
 ) -> tuple[RollPayload, str | None, list[RollPayload]]:
     found = first_contested_check_effect(roll.pendingEffect)
     if found is None:
@@ -612,6 +678,32 @@ def resolve_contested_check_for_roll(
         saving_throw_conditions=False,
         modifier_target=RollModifierEffectTarget.ABILITY_CHECK,
     )
+    if source_response.total <= target_response.total:
+        rerolled = reroll_failed_test(
+            room,
+            replace(source_response, proactiveResource=roll.proactiveResource),
+            source,
+            operations.all_sheets,
+            operations.save,
+        )
+        if rerolled is not None:
+            source_response = rerolled.roll
+            roll = replace(roll, proactiveResource=None, resourcesSpent=[*(roll.resourcesSpent or []), *(source_response.resourcesSpent or [])])
+    if target_response.total < source_response.total:
+        prepared_resource = room.prepared_proactive_resources.pop(target.id, None)
+        if prepared_resource is not None:
+            rerolled = reroll_failed_test(
+                room,
+                replace(target_response, proactiveResource=prepared_resource),
+                target,
+                operations.all_sheets,
+                operations.save,
+            )
+            if rerolled is not None:
+                target_response = rerolled.roll
+                roll = replace(roll, resourcesSpent=[*(roll.resourcesSpent or []), *(target_response.resourcesSpent or [])])
+            else:
+                room.prepared_proactive_resources[target.id] = prepared_resource
     source_won = source_response.total > target_response.total
     outcome = RollOutcome.SUCCESS if source_won else RollOutcome.FAILURE
     verb = "wins" if source_won else "fails"

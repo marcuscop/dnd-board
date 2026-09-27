@@ -4,6 +4,7 @@ from dnd_board.character_sheet import ResourceTracker, TimeEconomy
 from dnd_board.rules.shared.resources import (
     RESOURCE_DEFINITIONS,
     InsufficientResourceError,
+    ProactiveRerollTrigger,
     ResourceCost,
     ResourceDefinition,
     ResourceId,
@@ -70,6 +71,15 @@ def test_spell_slot_resource_ids_are_typed_by_level() -> None:
 
 def test_every_stateful_resource_has_a_definition() -> None:
     assert set(RESOURCE_DEFINITIONS) == set(ResourceId) - {ResourceId.SPELL_SLOT}
+
+
+def test_heroic_inspiration_declares_its_proactive_reroll_policy() -> None:
+    policy = RESOURCE_DEFINITIONS[ResourceId.HEROIC_INSPIRATION].proactiveReroll
+    assert policy is not None
+    assert policy.triggers == (
+        ProactiveRerollTrigger.FAILED_D20_TEST,
+        ProactiveRerollTrigger.MINIMUM_DAMAGE_DIE,
+    )
 
 
 def test_short_rest_resources_also_recover_on_a_long_rest() -> None:

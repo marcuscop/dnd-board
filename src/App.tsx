@@ -29,6 +29,8 @@ export function App() {
     setSheets: room.setSheets,
     setRolls: room.setRolls,
     setResolutionPrompts: room.setResolutionPrompts,
+    setRestPrompts: room.setRestPrompts,
+    setPreparedProactiveResources: room.setPreparedProactiveResources,
     setRollHistory: room.setRollHistory,
     setSheetStatus: room.setSheetStatus
   });
@@ -75,6 +77,7 @@ export function App() {
         onRollAdHocDice={sheetActions.rollAdHocDice}
         onClearSheetRolls={sheetActions.clearSheetRolls}
         onRestSheets={sheetActions.restSheets}
+        onRespondToRestGrantPrompt={sheetActions.respondToRestGrantPrompt}
         onUpdateProgressionChoice={sheetActions.updateProgressionChoice}
         onUpdateCondition={sheetActions.updateCondition}
         onRemoveOngoingEffect={sheetActions.removeOngoingEffect}
@@ -83,9 +86,12 @@ export function App() {
         onUpdateEquipmentSlot={sheetActions.updateEquipmentSlot}
         onUpdateSheetLevel={sheetActions.updateSheetLevel}
         onUpdateResource={sheetActions.updateResource}
+        onPrepareProactiveResource={sheetActions.prepareProactiveResource}
         playerKey={room.playerKey}
         roomId={INITIAL_ROUTE.roomId}
         resolutionPrompts={room.resolutionPrompts}
+        restPrompts={room.restPrompts}
+        preparedProactiveResources={room.preparedProactiveResources}
         rollHistory={room.rollHistory}
         rolls={room.rolls}
         sheets={room.sheets}

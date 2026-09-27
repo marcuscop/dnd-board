@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dnd_board.character_sheet import AbilityType, CurrencyUnit, EquipmentItem, Money, ProficiencyLevel, Purse, SheetFeature, SkillType, TimeEconomy, enum_key, enum_label
 from dnd_board.rules.equipment import EquipmentId, equipment_item, tool_equipment_item
 from dnd_board.rules.feats import GeneralFeatType, general_feat_feature
+from dnd_board.rules.shared.tool_types import MUSICAL_INSTRUMENT_OPTIONS, ToolType
 
 
 class BackgroundType(Enum):
@@ -79,49 +80,6 @@ class BackgroundSource(Enum):
     FAERUN = "Faerun"
     RAVENLOFT = "Ravenloft"
     EXOTIC = "Exotic"
-
-
-class ToolType(Enum):
-    ARTISANS_TOOLS = "one kind of Artisan's Tools"
-    ALCHEMISTS_SUPPLIES = "Alchemist's Supplies"
-    BREWERS_SUPPLIES = "Brewer's Supplies"
-    CALLIGRAPHERS_SUPPLIES = "Calligrapher's Supplies"
-    CARPENTERS_TOOLS = "Carpenter's Tools"
-    CARTOGRAPHERS_TOOLS = "Cartographer's Tools"
-    COBBLERS_TOOLS = "Cobbler's Tools"
-    COOKS_UTENSILS = "Cook's Utensils"
-    GLASSBLOWERS_TOOLS = "Glassblower's Tools"
-    JEWELERS_TOOLS = "Jeweler's Tools"
-    LEATHERWORKERS_TOOLS = "Leatherworker's Tools"
-    MASONS_TOOLS = "Mason's Tools"
-    PAINTERS_SUPPLIES = "Painter's Supplies"
-    POTTERS_TOOLS = "Potter's Tools"
-    SMITHS_TOOLS = "Smith's Tools"
-    TINKERS_TOOLS = "Tinker's Tools"
-    WEAVERS_TOOLS = "Weaver's Tools"
-    WOODCARVERS_TOOLS = "Woodcarver's Tools"
-    DISGUISE_KIT = "Disguise Kit"
-    FORGERY_KIT = "Forgery Kit"
-    GAMING_SET = "one Gaming Set"
-    DICE_SET = "Dice Set"
-    DRAGONCHESS_SET = "Dragonchess Set"
-    PLAYING_CARD_SET = "Playing Card Set"
-    THREE_DRAGON_ANTE_SET = "Three-Dragon Ante Set"
-    HERBALISM_KIT = "Herbalism Kit"
-    MUSICAL_INSTRUMENT = "one Musical Instrument"
-    BAGPIPES = "Bagpipes"
-    DRUM = "Drum"
-    DULCIMER = "Dulcimer"
-    FLUTE = "Flute"
-    LUTE = "Lute"
-    LYRE = "Lyre"
-    HORN = "Horn"
-    PAN_FLUTE = "Pan Flute"
-    SHAWM = "Shawm"
-    VIOL = "Viol"
-    NAVIGATORS_TOOLS = "Navigator's Tools"
-    POISONERS_KIT = "Poisoner's Kit"
-    THIEVES_TOOLS = "Thieves' Tools"
 
 
 class BackgroundEquipmentChoice(Enum):
@@ -251,20 +209,6 @@ GAMING_SET_OPTIONS = (
     ToolType.PLAYING_CARD_SET,
     ToolType.THREE_DRAGON_ANTE_SET,
 )
-
-MUSICAL_INSTRUMENT_OPTIONS = (
-    ToolType.BAGPIPES,
-    ToolType.DRUM,
-    ToolType.DULCIMER,
-    ToolType.FLUTE,
-    ToolType.LUTE,
-    ToolType.LYRE,
-    ToolType.HORN,
-    ToolType.PAN_FLUTE,
-    ToolType.SHAWM,
-    ToolType.VIOL,
-)
-
 
 @dataclass(frozen=True)
 class BackgroundEquipmentGrant:

@@ -12,6 +12,8 @@ import type {
   DiceType,
   EquipmentSlot,
   ResolutionInterceptorPrompt,
+  RestGrantPrompt,
+  ResourceId,
   RollLogEntry,
   RollPayload
 } from "../types";
@@ -27,6 +29,8 @@ type SheetStateResponse = {
   sheets: CharacterSheet[];
   pendingRolls: RollPayload[];
   pendingResolutionPrompts?: ResolutionInterceptorPrompt[];
+  pendingRestPrompts?: RestGrantPrompt[];
+  preparedProactiveResources?: Record<string, ResourceId>;
   rollHistory: RollLogEntry[];
 };
 
@@ -38,12 +42,14 @@ type SheetActionOptions = {
   setSheets: Dispatch<SetStateAction<CharacterSheet[]>>;
   setRolls: Dispatch<SetStateAction<RollPayload[]>>;
   setResolutionPrompts: Dispatch<SetStateAction<ResolutionInterceptorPrompt[]>>;
+  setRestPrompts: Dispatch<SetStateAction<RestGrantPrompt[]>>;
+  setPreparedProactiveResources: Dispatch<SetStateAction<Record<string, ResourceId>>>;
   setRollHistory: Dispatch<SetStateAction<RollLogEntry[]>>;
   setSheetStatus: Dispatch<SetStateAction<SheetStatus>>;
 };
 
 export function useSheetActions(options: SheetActionOptions) {
-  const { roomId, playerKey, turnId, loadSheets, setSheets, setRolls, setResolutionPrompts, setRollHistory, setSheetStatus } = options;
+  const { roomId, playerKey, turnId, loadSheets, setSheets, setRolls, setResolutionPrompts, setRestPrompts, setPreparedProactiveResources, setRollHistory, setSheetStatus } = options;
   const sheetPath = useCallback((sheet: CharacterSheet) => `/api/rooms/${encodeURIComponent(roomId)}/sheet/${encodeURIComponent(sheet.id)}`, [roomId]);
   const fail = useCallback((error: unknown) => {
     console.error(error);
@@ -64,8 +70,19 @@ export function useSheetActions(options: SheetActionOptions) {
     setSheets(body.sheets);
     setRolls(body.pendingRolls);
     setResolutionPrompts(body.pendingResolutionPrompts ?? []);
+    setRestPrompts(body.pendingRestPrompts ?? []);
+    setPreparedProactiveResources(body.preparedProactiveResources ?? {});
     setRollHistory(body.rollHistory);
-  }, [setResolutionPrompts, setRollHistory, setRolls, setSheets]);
+  }, [setResolutionPrompts, setRestPrompts, setPreparedProactiveResources, setRollHistory, setRolls, setSheets]);
+
+  const prepareProactiveResource = useCallback(async (sheet: CharacterSheet, resource: ResourceId, prepared: boolean) => {
+    try {
+      applySheetState(await postJson<SheetStateResponse>(
+        `${sheetPath(sheet)}/resources/${encodeURIComponent(resource)}/prepare`,
+        { playerKey, prepared }
+      ));
+    } catch (error) { fail(error); }
+  }, [applySheetState, fail, playerKey, sheetPath]);
 
   const rollAttack = useCallback((sheet: CharacterSheet, attackId: string, weaponOption?: string) => reloadAfter(
     postJson(`${sheetPath(sheet)}/rolls/attack`, { playerKey, attackId, weaponOption, turnId })
@@ -75,12 +92,12 @@ export function useSheetActions(options: SheetActionOptions) {
     postJson(`${sheetPath(sheet)}/rolls/damage`, { playerKey, attackId, weaponOption, turnId })
   ), [playerKey, reloadAfter, sheetPath, turnId]);
 
-  const rollAbilityCheck = useCallback(async (sheet: CharacterSheet, ability: string) => {
-    try { await postJson(`${sheetPath(sheet)}/rolls/ability-check`, { playerKey, ability }); } catch (error) { fail(error); }
+  const rollAbilityCheck = useCallback(async (sheet: CharacterSheet, ability: string, difficultyClass?: number) => {
+    try { await postJson(`${sheetPath(sheet)}/rolls/ability-check`, { playerKey, ability, difficultyClass }); } catch (error) { fail(error); }
   }, [fail, playerKey, sheetPath]);
 
-  const rollSavingThrow = useCallback(async (sheet: CharacterSheet, ability: string) => {
-    try { await postJson(`${sheetPath(sheet)}/rolls/saving-throw`, { playerKey, ability }); } catch (error) { fail(error); }
+  const rollSavingThrow = useCallback(async (sheet: CharacterSheet, ability: string, difficultyClass?: number) => {
+    try { await postJson(`${sheetPath(sheet)}/rolls/saving-throw`, { playerKey, ability, difficultyClass }); } catch (error) { fail(error); }
   }, [fail, playerKey, sheetPath]);
 
   const rollDeathSavingThrow = useCallback(async (sheet: CharacterSheet) => {
@@ -157,6 +174,16 @@ export function useSheetActions(options: SheetActionOptions) {
     }
   }, [applySheetState, fail, playerKey, roomId]);
 
+  const respondToRestGrantPrompt = useCallback(async (prompt: RestGrantPrompt, targetSheetIds: string[]) => {
+    try {
+      applySheetState(await postJson<SheetStateResponse>(
+        `/api/rooms/${encodeURIComponent(roomId)}/sheet/rest/prompts/${encodeURIComponent(prompt.id)}/respond`,
+        { playerKey },
+        { targetSheetIds }
+      ));
+    } catch (error) { fail(error); }
+  }, [applySheetState, fail, playerKey, roomId]);
+
   const clearSheetRolls = useCallback(async (sheet: CharacterSheet) => {
     try { applySheetState(await postJson<SheetStateResponse>(`${sheetPath(sheet)}/rolls/clear`, { playerKey })); }
     catch (error) { fail(error); }
@@ -218,6 +245,8 @@ export function useSheetActions(options: SheetActionOptions) {
     clearSheetRolls,
     createCharacter,
     respondToResolutionPrompt,
+    respondToRestGrantPrompt,
+    prepareProactiveResource,
     restSheets,
     rollAbilityCheck,
     rollAdHocDice,

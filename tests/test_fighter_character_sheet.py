@@ -211,6 +211,7 @@ def test_fighter_progression_resources_level_1_to_20() -> None:
         assert {resource.id: resource.maxUses for resource in sheet.resources} == {
             **expected_resources,
             "hitDieD10": level,
+            "heroicInspiration": 1,
         }
 
 

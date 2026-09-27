@@ -74,6 +74,7 @@ from dnd_board.rules.shared.effects import (
     Modifier,
     SpellDamageTrait,
 )
+from dnd_board.rules.shared.tool_types import ToolType
 
 
 MIN_CHARACTER_LEVEL = 1
@@ -124,6 +125,8 @@ CLASS_OPTION_PROGRESSION_DEFINITIONS = (
 def configured_progression_choice_ids() -> tuple[ProgressionChoiceId, ...]:
     configured: list[ProgressionChoiceId] = [
         ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE,
+        ProgressionChoiceId.FEAT_SKILL_TRAINING,
+        ProgressionChoiceId.FEAT_TRAINING,
     ]
     for choices in (
         (
@@ -210,6 +213,17 @@ class ClassLevelRequirement:
 class SkillProficiencyGrant:
     skill: SkillType
     proficiency: ProficiencyLevel
+    minimumClassLevel: int = 1
+    promoteExistingProficiency: bool = False
+
+    def __post_init__(self) -> None:
+        if self.minimumClassLevel < 1:
+            raise ValueError("Grant minimum class level must be positive")
+
+
+@dataclass(frozen=True)
+class ToolProficiencyGrant:
+    tool: ToolType
     minimumClassLevel: int = 1
 
     def __post_init__(self) -> None:
@@ -324,7 +338,7 @@ class SubclassGrant:
             raise ValueError("Grant minimum class level must be positive")
 
 
-CharacterGrant = AbilityScoreGrant | ClassOptionGrant | FeatGrant | FightingStyleGrant | HitPointGrant | SavingThrowProficiencyGrant | SkillProficiencyGrant | SpellGrant | SubclassGrant
+CharacterGrant = AbilityScoreGrant | ClassOptionGrant | FeatGrant | FightingStyleGrant | HitPointGrant | SavingThrowProficiencyGrant | SkillProficiencyGrant | ToolProficiencyGrant | SpellGrant | SubclassGrant
 
 
 @dataclass(frozen=True)
@@ -334,6 +348,15 @@ class SkillChoiceDefinition:
     proficiency: ProficiencyLevel
     requiresExistingProficiency: bool = False
     grantMinimumLevels: tuple[int, ...] = ()
+    promoteExistingProficiency: bool = False
+
+
+@dataclass(frozen=True)
+class TrainingChoiceDefinition:
+    skills: tuple[SkillType, ...]
+    tools: tuple[ToolType, ...]
+    count: int
+    minimumClassLevel: int
 
 
 @dataclass(frozen=True)
@@ -381,7 +404,7 @@ class SubclassChoiceDefinition:
     count: int = 1
 
 
-CharacterChoiceDefinition = AbilityScoreChoiceDefinition | ClassOptionChoiceDefinition | FeatChoiceDefinition | HitPointChoiceDefinition | SkillChoiceDefinition | SpellChoiceDefinition | SubclassChoiceDefinition
+CharacterChoiceDefinition = AbilityScoreChoiceDefinition | ClassOptionChoiceDefinition | FeatChoiceDefinition | HitPointChoiceDefinition | SkillChoiceDefinition | TrainingChoiceDefinition | SpellChoiceDefinition | SubclassChoiceDefinition
 
 
 @dataclass(frozen=True)
@@ -610,6 +633,125 @@ def progression_rule(
                 feat_grant.characterClass,
                 feat_grant.minimumClassLevel,
                 adjustment=adjustment,
+            ),),
+            sourceFeat=feat_grant.feat,
+            sourceFeatLevel=feat_grant.minimumClassLevel,
+        )
+    if choice_id == ProgressionChoiceId.FEAT_SKILL_TRAINING:
+        records = progression_grants or []
+        completed = {
+            (
+                record.source.requiredFeat,
+                record.source.characterClass,
+                record.source.requiredFeatLevel,
+            )
+            for record in records
+            if record.source.rule == choice_id
+            and any(isinstance(grant, SkillProficiencyGrant) for grant in record.grants)
+        }
+        feat_entry = next(
+            (
+                (record, grant)
+                for record in records
+                for grant in record.grants
+                if isinstance(grant, FeatGrant)
+                and GENERAL_FEATS[grant.feat].skillChoice is not None
+                and (
+                    grant_source is None
+                    or (
+                        grant.feat == grant_source.requiredFeat
+                        and grant.characterClass == grant_source.characterClass
+                        and grant.minimumClassLevel == grant_source.requiredFeatLevel
+                    )
+                )
+                and (
+                    grant_source is not None
+                    or (grant.feat, grant.characterClass, grant.minimumClassLevel) not in completed
+                )
+            ),
+            None,
+        )
+        if feat_entry is None:
+            return None
+        feat_record, feat_grant = feat_entry
+        skill_choice = GENERAL_FEATS[feat_grant.feat].skillChoice
+        if skill_choice is None:
+            return None
+        return ProgressionRule(
+            choice_id,
+            ProgressionChoicePresentation(
+                ProgressionChoiceType.SKILL_PROFICIENCIES,
+                f"{enum_label(feat_grant.feat)} Skill",
+                "Choose one skill; gain proficiency, or Expertise if already proficient.",
+            ),
+            (ClassLevelRequirement(
+                feat_grant.characterClass,
+                feat_grant.minimumClassLevel,
+                feat_record.source.requiredSubclass,
+            ),),
+            (SkillChoiceDefinition(
+                skill_choice.candidates,
+                1,
+                ProficiencyLevel.PROFICIENT,
+                grantMinimumLevels=(feat_grant.minimumClassLevel,),
+                promoteExistingProficiency=skill_choice.promoteExistingProficiency,
+            ),),
+            sourceFeat=feat_grant.feat,
+            sourceFeatLevel=feat_grant.minimumClassLevel,
+        )
+    if choice_id == ProgressionChoiceId.FEAT_TRAINING:
+        records = progression_grants or []
+        completed = {
+            (record.source.requiredFeat, record.source.characterClass, record.source.requiredFeatLevel)
+            for record in records
+            if record.source.rule == choice_id
+            and any(isinstance(grant, (SkillProficiencyGrant, ToolProficiencyGrant)) for grant in record.grants)
+        }
+        feat_entry = next(
+            (
+                (record, grant)
+                for record in records
+                for grant in record.grants
+                if isinstance(grant, FeatGrant)
+                and GENERAL_FEATS[grant.feat].trainingChoice is not None
+                and (
+                    grant_source is None
+                    or (
+                        grant.feat == grant_source.requiredFeat
+                        and grant.characterClass == grant_source.characterClass
+                        and grant.minimumClassLevel == grant_source.requiredFeatLevel
+                    )
+                )
+                and (
+                    grant_source is not None
+                    or (grant.feat, grant.characterClass, grant.minimumClassLevel) not in completed
+                )
+            ),
+            None,
+        )
+        if feat_entry is None:
+            return None
+        feat_record, feat_grant = feat_entry
+        training = GENERAL_FEATS[feat_grant.feat].trainingChoice
+        if training is None:
+            return None
+        return ProgressionRule(
+            choice_id,
+            ProgressionChoicePresentation(
+                ProgressionChoiceType.SKILL_PROFICIENCIES,
+                f"{enum_label(feat_grant.feat)} Training",
+                f"Choose {training.count} distinct skills or tools from the listed options.",
+            ),
+            (ClassLevelRequirement(
+                feat_grant.characterClass,
+                feat_grant.minimumClassLevel,
+                feat_record.source.requiredSubclass,
+            ),),
+            (TrainingChoiceDefinition(
+                training.skills,
+                training.tools,
+                training.count,
+                feat_grant.minimumClassLevel,
             ),),
             sourceFeat=feat_grant.feat,
             sourceFeatLevel=feat_grant.minimumClassLevel,
@@ -1059,6 +1201,21 @@ def evaluate_progression_rule(
             selected_fighting_styles=selected_fighting_styles,
             feat_eligibility_sheet=feat_eligibility_sheet,
         )
+    if len(rule.choices) == 1 and isinstance(rule.choices[0], TrainingChoiceDefinition):
+        choice = rule.choices[0]
+        if len(values) != choice.count or len(set(values)) != choice.count:
+            raise ProgressionRuleViolation(SkillSelectionIssue.WRONG_COUNT)
+        grants: list[CharacterGrant] = []
+        for value in values:
+            skill = enum_value(SkillType, value)
+            tool = enum_value(ToolType, value)
+            if skill in choice.skills:
+                grants.append(SkillProficiencyGrant(skill, ProficiencyLevel.PROFICIENT, choice.minimumClassLevel))
+            elif tool in choice.tools:
+                grants.append(ToolProficiencyGrant(tool, choice.minimumClassLevel))
+            else:
+                raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_OPTION)
+        return ProgressionEvaluation(progression_grant_source(rule), tuple(grants))
     if len(rule.choices) == 1 and isinstance(rule.choices[0], ClassOptionChoiceDefinition):
         return evaluate_class_option_progression_choice(
             rule,
@@ -1104,6 +1261,7 @@ def evaluate_progression_rule(
                     if index < len(choice.grantMinimumLevels)
                     else 1
                 ),
+                choice.promoteExistingProficiency,
             )
             for index, skill in enumerate(selected)
         ),
@@ -1532,14 +1690,34 @@ def apply_progression_grants(
         ProficiencyLevel.PROFICIENT: 1,
         ProficiencyLevel.EXPERTISE: 2,
     }
-    for record in records:
-        for grant in record.grants:
-            if not isinstance(grant, SkillProficiencyGrant):
+    grants = [
+        grant
+        for record in records
+        for grant in record.grants
+        if isinstance(grant, SkillProficiencyGrant)
+    ]
+    for promoting in (False, True):
+        for grant in grants:
+            if grant.promoteExistingProficiency != promoting:
                 continue
             current = skills.get(enum_key(grant.skill), ProficiencyLevel.NONE)
-            if proficiency_rank[grant.proficiency] > proficiency_rank[current]:
-                skills[enum_key(grant.skill)] = grant.proficiency
+            granted = (
+                ProficiencyLevel.EXPERTISE
+                if grant.promoteExistingProficiency and proficiency_rank[current] >= 1
+                else grant.proficiency
+            )
+            if proficiency_rank[granted] > proficiency_rank[current]:
+                skills[enum_key(grant.skill)] = granted
     return skills
+
+
+def tool_proficiencies_from_grants(records: list[ProgressionGrantRecord] | None) -> list[str]:
+    return list(dict.fromkeys(
+        enum_label(grant.tool)
+        for record in records or []
+        for grant in record.grants
+        if isinstance(grant, ToolProficiencyGrant)
+    ))
 
 
 def subclass_grant_classes(
@@ -1900,6 +2078,9 @@ def progression_model_types() -> list[type[object]]:
         SkillChoiceDefinition,
         SavingThrowProficiencyGrant,
         SkillProficiencyGrant,
+        ToolProficiencyGrant,
+        TrainingChoiceDefinition,
+        ToolType,
         SpellChoiceDefinition,
         SpellCollection,
         SpellConstraint,
@@ -2039,19 +2220,49 @@ def progression_choice_for_rule(
             classes or [],
             records,
         )
+    if len(rule.choices) == 1 and isinstance(rule.choices[0], TrainingChoiceDefinition):
+        choice = rule.choices[0]
+        source = progression_grant_source(rule)
+        record = next((record for record in records or [] if record.source == source), None)
+        if record is not None and len(record.grants) == choice.count:
+            return None
+        selected = [
+            enum_key(grant.skill) if isinstance(grant, SkillProficiencyGrant) else enum_key(grant.tool)
+            for grant in record.grants
+            if isinstance(grant, (SkillProficiencyGrant, ToolProficiencyGrant))
+        ] if record is not None else []
+        return replace(multi_choice(
+            choice_id=rule.id,
+            choice_type=rule.presentation.choiceType,
+            label=rule.presentation.label,
+            description=rule.presentation.description,
+            minimum=choice.count,
+            maximum=choice.count,
+            selected=selected,
+            options=[
+                ProgressionChoiceOption(enum_key(option), enum_label(option))
+                for option in (*choice.skills, *choice.tools)
+            ],
+        ), sourceClass=source.characterClass, sourceLevel=source.requiredFeatLevel)
     if len(rule.choices) != 1:
         raise ValueError("Progression rules require exactly one homogeneous choice family")
     choice = rule.choices[0]
     if choice.count <= 0:
         return None
+    source = progression_grant_source(rule) if rule.sourceFeat is not None else None
     record = next(
-        (record for record in records or [] if record.source.rule == rule.id),
+        (
+            record for record in records or []
+            if (record.source == source if source is not None else record.source.rule == rule.id)
+        ),
         None,
     )
     if records is not None and record is not None and len(record.grants) >= choice.count:
         return None
     if record is not None:
         selected = [enum_key(grant.skill) for grant in record.grants]
+    elif source is not None:
+        selected = []
     else:
         selected = [
             enum_key(skill)

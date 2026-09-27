@@ -23,6 +23,7 @@ from dnd_board.application.room_state import (
     DamageDefenseType,
     FogState,
     Player,
+    PendingRest,
     RevealedArea,
     Room,
     Token,
@@ -121,6 +122,7 @@ from dnd_board.application.encounter_service import (
     start_encounter as begin_encounter,
     update_encounter_order,
 )
+from dnd_board.application.rest_service import apply_rest_grants, choose_rest_grant, prepare_rest, rest_ready_to_commit, visible_rest_prompts
 
 from dnd_board.character_sheet import (
     AbilityType,
@@ -153,6 +155,7 @@ from dnd_board.character_sheet import (
     roll_payload_to_dict,
     roll_log_entry_to_dict,
     resolution_interceptor_prompt_to_dict,
+    serialize_dataclass,
     sanitize_identifier,
 )
 from dnd_board.character_builder import (
@@ -173,6 +176,7 @@ from dnd_board.rules.shared.effects import (
     OngoingEffectId,
 )
 from dnd_board.rules.shared.resources import (
+    RESOURCE_DEFINITIONS,
     ResourceId,
     ResourceState,
     adjust_resource,
@@ -396,6 +400,8 @@ async def start_room_encounter(
 ) -> dict[str, Any]:
     room = get_or_create_room(sanitize_room_id(room_id))
     player = Player("http-encounter-start", "DM", normalize_player_key(playerKey, room.id), None, room.id)
+    if room.pending_rest is not None:
+        raise HTTPException(status_code=409, detail="Finish the pending rest choices before starting an encounter")
     try:
         encounter = await begin_encounter(
             room,
@@ -610,13 +616,13 @@ async def roll_sheet_spell_effect(room_id: str, sheet_id: str, spell_id: str, pl
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/ability-check")
-async def roll_sheet_ability_check(room_id: str, sheet_id: str, playerKey: str, ability: str) -> dict[str, Any]:
-    return await create_ability_check_roll(room_id, sheet_id, playerKey, ability)
+async def roll_sheet_ability_check(room_id: str, sheet_id: str, playerKey: str, ability: str, difficultyClass: int | None = None) -> dict[str, Any]:
+    return await create_ability_check_roll(room_id, sheet_id, playerKey, ability, difficultyClass)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/saving-throw")
-async def roll_sheet_saving_throw(room_id: str, sheet_id: str, playerKey: str, ability: str) -> dict[str, Any]:
-    return await create_saving_throw_roll(room_id, sheet_id, playerKey, ability)
+async def roll_sheet_saving_throw(room_id: str, sheet_id: str, playerKey: str, ability: str, difficultyClass: int | None = None) -> dict[str, Any]:
+    return await create_saving_throw_roll(room_id, sheet_id, playerKey, ability, difficultyClass)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/rolls/death-saving-throw")
@@ -677,6 +683,8 @@ async def update_sheet_resource(room_id: str, sheet_id: str, resource_id: str, p
         currentUses,
     ).current
     room.resource_uses.setdefault(sheet.tokenId, {})[resource.id] = adjusted
+    if adjusted == 0 and room.prepared_proactive_resources.get(sheet.id) == resource.resource:
+        room.prepared_proactive_resources.pop(sheet.id, None)
     save_room_to_disk(room)
     await log_action_note(
         room,
@@ -691,6 +699,28 @@ async def update_sheet_resource(room_id: str, sheet_id: str, resource_id: str, p
     await broadcast_room_state(room)
     updated = get_visible_sheet(room, player, sheet.id)
     return {"roomId": room.id, "sheet": project_sheet(updated) if updated else project_sheet(sheet)}
+
+
+@app.post("/api/rooms/{room_id}/sheet/{sheet_id}/resources/{resource_id}/prepare")
+async def prepare_sheet_resource(room_id: str, sheet_id: str, resource_id: str, playerKey: str, prepared: bool) -> dict[str, Any]:
+    room = get_or_create_room(sanitize_room_id(room_id))
+    player = Player(id="http-sheet-resource", name="Sheet Resource", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    sheet = get_visible_sheet(room, player, sanitize_identifier(sheet_id))
+    if sheet is None:
+        raise HTTPException(status_code=404, detail="Sheet not found")
+    if not can_control_sheet_roll(player, sheet):
+        raise HTTPException(status_code=403, detail="Cannot prepare this sheet's resource")
+    resource = next((item for item in sheet.resources if sanitize_identifier(item.id) == sanitize_identifier(resource_id)), None)
+    if resource is None or RESOURCE_DEFINITIONS[resource.resource].proactiveReroll is None:
+        raise HTTPException(status_code=400, detail="Resource does not support proactive use")
+    if prepared:
+        if resource.currentUses < 1:
+            raise HTTPException(status_code=409, detail="No resource uses remain")
+        room.prepared_proactive_resources[sheet.id] = resource.resource
+    else:
+        room.prepared_proactive_resources.pop(sheet.id, None)
+    await broadcast_sheet_state(room)
+    return sheet_state_message(room, player)
 
 
 @app.post("/api/rooms/{room_id}/sheet/{sheet_id}/level")
@@ -780,6 +810,8 @@ async def rest_room_sheets(
         raise HTTPException(status_code=400, detail="Invalid rest type")
     if room.encounter is not None:
         raise HTTPException(status_code=409, detail="End the encounter before resting")
+    if room.pending_rest is not None:
+        raise HTTPException(status_code=409, detail="Finish the pending rest choices first")
     if rest_type == RestType.LONG_REST and hitDice:
         raise HTTPException(status_code=400, detail="Hit Dice can only be spent during a Short Rest")
 
@@ -797,6 +829,57 @@ async def rest_room_sheets(
             validate_hit_die_spends(sheet, spends_by_sheet.get(sheet.id, []))
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+    pending_rest = prepare_rest(sheets, rest_type, player.player_key, spends_by_sheet)
+    if pending_rest.prompts:
+        room.pending_rest = pending_rest
+        await broadcast_rest_prompts(room)
+        return sheet_state_message(room, player)
+
+    return await complete_room_rest(room, player, pending_rest)
+
+
+class RestGrantResponse(BaseModel):
+    targetSheetIds: list[str]
+
+
+@app.post("/api/rooms/{room_id}/sheet/rest/prompts/{prompt_id}/respond")
+async def respond_to_rest_grant_prompt(
+    room_id: str,
+    prompt_id: str,
+    playerKey: str,
+    response: RestGrantResponse,
+) -> dict[str, Any]:
+    room = get_or_create_room(sanitize_room_id(room_id))
+    player = Player(id="http-rest-prompt", name="Rest Prompt", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
+    pending = room.pending_rest
+    prompt = pending.prompts.get(sanitize_identifier(prompt_id)) if pending is not None else None
+    if pending is None or prompt is None:
+        raise HTTPException(status_code=404, detail="Rest prompt not found")
+    if not is_dm(player) and prompt.ownerPlayerKey != player.player_key:
+        raise HTTPException(status_code=403, detail="Cannot answer this rest prompt")
+    try:
+        choose_rest_grant(pending, prompt.id, response.targetSheetIds)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if rest_ready_to_commit(pending):
+        pending.committing = True
+        initiator = Player(id="http-sheet-rest", name="DM", player_key=pending.initiatorPlayerKey, websocket=None, room_id=room.id)
+        return await complete_room_rest(room, initiator, pending)
+    await broadcast_rest_prompts(room)
+    return sheet_state_message(room, player)
+
+
+async def complete_room_rest(room: Room, player: Player, pending_rest: PendingRest) -> dict[str, Any]:
+    rest_type = pending_rest.restType
+    sheets = [sheet for sheet in visible_sheets(room, player) if sheet.kind == TokenKind.CHARACTER]
+    try:
+        for sheet in sheets:
+            validate_hit_die_spends(sheet, pending_rest.hitDiceBySheet.get(sheet.id, []))
+    except ValueError as error:
+        room.pending_rest = None
+        await broadcast_rest_prompts(room)
+        raise HTTPException(status_code=409, detail=f"Rest state changed; start the rest again: {error}") from error
 
     for sheet in sheets:
         if sheet.hp.current < 1:
@@ -819,7 +902,7 @@ async def rest_room_sheets(
                 DiceType.D20, [], action_operations(),
             )
             continue
-        next_hp, die_results = roll_hit_dice_for_rest(sheet, spends_by_sheet.get(sheet.id, []))
+        next_hp, die_results = roll_hit_dice_for_rest(sheet, pending_rest.hitDiceBySheet.get(sheet.id, []))
         if die_results:
             room.hit_points[sheet.tokenId] = next_hp
         for result in die_results:
@@ -830,8 +913,14 @@ async def rest_room_sheets(
                 f"{resource.name}: {result.healing} healing, {result.hitPointsRestored} HP restored; {result.remaining} remaining",
                 result.die, list(result.rolls), action_operations(),
             )
+    for prompt, summary in apply_rest_grants(room, pending_rest, sheets):
+        source = next((sheet for sheet in sheets if sheet.id == prompt.sourceSheetId), None)
+        if source is not None:
+            await log_action_note(room, source, player, prompt.label, summary, DiceType.D20, [], action_operations())
+    if room.pending_rest is pending_rest:
+        room.pending_rest = None
     save_room_to_disk(room)
-    await broadcast_room_state(room)
+    await broadcast_sheet_state(room)
     return sheet_state_message(room, player)
 
 
@@ -1346,6 +1435,31 @@ async def broadcast_room_state(room: Room) -> None:
     await broadcast(room, room_state_message(room))
 
 
+async def broadcast_rest_prompts(room: Room) -> None:
+    disconnected: list[Player] = []
+    for participant in list(room.players.values()):
+        try:
+            await send(participant, {
+                "type": "rest_prompts_updated",
+                "prompts": [serialize_dataclass(prompt) for prompt in visible_rest_prompts(room.pending_rest, participant.player_key, is_dm(participant))],
+            })
+        except (RuntimeError, WebSocketDisconnect):
+            disconnected.append(participant)
+    for participant in disconnected:
+        await leave_room(participant)
+
+
+async def broadcast_sheet_state(room: Room) -> None:
+    disconnected: list[Player] = []
+    for participant in list(room.players.values()):
+        try:
+            await send(participant, sheet_state_message(room, participant))
+        except (RuntimeError, WebSocketDisconnect):
+            disconnected.append(participant)
+    for participant in disconnected:
+        await leave_room(participant)
+
+
 def room_state_message(room: Room) -> dict[str, Any]:
     return {
         "type": "room_state",
@@ -1369,6 +1483,12 @@ def sheet_state_message(room: Room, player: Player) -> dict[str, Any]:
         "sheets": [project_sheet(sheet) for sheet in sheets],
         "pendingRolls": [roll_payload_to_dict(roll) for roll in visible_pending_rolls(room, player)],
         "pendingResolutionPrompts": [resolution_interceptor_prompt_to_dict(prompt) for prompt in visible_resolution_prompts(room, player)],
+        "pendingRestPrompts": [serialize_dataclass(prompt) for prompt in visible_rest_prompts(room.pending_rest, player.player_key, is_dm(player))],
+        "preparedProactiveResources": {
+            sheet.id: enum_key(resource)
+            for sheet in sheets
+            if (resource := room.prepared_proactive_resources.get(sheet.id)) is not None
+        },
         "rollHistory": [roll_log_entry_to_dict(entry) for entry in visible_roll_history(room, player)],
     }
 
@@ -1621,7 +1741,7 @@ async def create_spell_condition_roll(room_id: str, sheet_id: str, player_key: s
     )
 
 
-async def create_ability_check_roll(room_id: str, sheet_id: str, player_key: str, ability_key: str) -> dict[str, Any]:
+async def create_ability_check_roll(room_id: str, sheet_id: str, player_key: str, ability_key: str, difficulty_class: int | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_ability_score_action(
@@ -1630,11 +1750,12 @@ async def create_ability_check_roll(room_id: str, sheet_id: str, player_key: str
             sheet,
             ability_key,
             action_operations(),
+            difficulty_class=difficulty_class,
         )
     )
 
 
-async def create_saving_throw_roll(room_id: str, sheet_id: str, player_key: str, ability_key: str) -> dict[str, Any]:
+async def create_saving_throw_roll(room_id: str, sheet_id: str, player_key: str, ability_key: str, difficulty_class: int | None = None) -> dict[str, Any]:
     room, player, sheet = roll_context(room_id, sheet_id, player_key)
     return await action_service_response(
         create_ability_score_action(
@@ -1644,6 +1765,7 @@ async def create_saving_throw_roll(room_id: str, sheet_id: str, player_key: str,
             ability_key,
             action_operations(),
             saving_throw=True,
+            difficulty_class=difficulty_class,
         )
     )
 
@@ -1859,6 +1981,8 @@ async def load_room_from_disk(room: Room, player: Player) -> bool:
     room.next_token_number = next_dynamic_token_number(tokens)
     room.pending_rolls = {}
     room.pending_resolution_prompts = {}
+    room.pending_rest = None
+    room.prepared_proactive_resources = {}
     room.pending_effect_executions = {}
     room.roll_history = []
     room.hit_points = {}

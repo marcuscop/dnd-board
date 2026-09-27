@@ -24,6 +24,8 @@ from dnd_board.character_sheet import (
 )
 from dnd_board.rules.shared.character_effects import CharacterEffectExecution
 from dnd_board.rules.encounter import EncounterState
+from dnd_board.rules.rest import HitDieSpend
+from dnd_board.rules.shared.resources import ResourceId
 from dnd_board.rules.shared.effects import (
     ActiveOngoingEffect,
     ActiveScheduledEffect,
@@ -173,6 +175,35 @@ class PendingCharacterResolution:
     pendingBoundEffects: list[BoundEffect] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class RestGrantTarget:
+    sheetId: str
+    name: str
+
+
+@dataclass(frozen=True)
+class RestGrantPrompt:
+    id: str
+    sourceSheetId: str
+    sourceName: str
+    ownerPlayerKey: str
+    label: str
+    resource: ResourceId
+    maximumTargets: int
+    targets: tuple[RestGrantTarget, ...]
+
+
+@dataclass
+class PendingRest:
+    id: str
+    restType: RestType
+    initiatorPlayerKey: str
+    hitDiceBySheet: dict[str, list[HitDieSpend]]
+    prompts: dict[str, RestGrantPrompt]
+    choices: dict[str, tuple[str, ...] | None]
+    committing: bool = False
+
+
 @dataclass
 class Room:
     id: str
@@ -203,3 +234,5 @@ class Room:
     scheduled_effects: dict[str, list[ActiveScheduledEffect]]
     pending_effect_executions: dict[int, PendingCharacterResolution]
     encounter: EncounterState | None = None
+    pending_rest: PendingRest | None = None
+    prepared_proactive_resources: dict[str, ResourceId] = field(default_factory=dict)

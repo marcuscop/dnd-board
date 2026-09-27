@@ -1098,6 +1098,37 @@ canvas.is-dragging,
   gap: 8px;
 }
 
+.rest-grant-prompt {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(244, 191, 79, 0.38);
+}
+
+.rest-grant-prompt-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.rest-grant-prompt-heading span {
+  color: #d8b778;
+  font-size: 0.78rem;
+}
+
+.rest-grant-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.rest-grant-targets label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .panel-title-row {
   display: flex;
   align-items: center;
@@ -1359,6 +1390,35 @@ canvas.is-dragging,
 .resource-row {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+}
+
+.proactive-resource-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.proactive-resource-row strong {
+  margin-right: auto;
+}
+
+.proactive-resource-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.proactive-dc-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+}
+
+.proactive-dc-input input {
+  width: 64px;
 }
 
 .resource-row p {

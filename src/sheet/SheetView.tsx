@@ -12,6 +12,8 @@ import type {
   EquipmentSlot,
   ProgressionChoice,
   ResolutionInterceptorPrompt,
+  RestGrantPrompt,
+  ResourceId,
   RollAction,
   RollLogEntry,
   RollPayload,
@@ -22,6 +24,7 @@ import { CharacterBuilderPanel, shouldShowCharacterBuilder } from "../builder/Ch
 import { AdHocDiceRoller } from "./AdHocDiceRoller";
 import { EncounterControls } from "./EncounterControls";
 import { ResolutionPromptPanel } from "./ResolutionPromptPanel";
+import { RestGrantPromptPanel } from "./RestGrantPromptPanel";
 import { RestControls } from "./RestControls";
 import type { RestHitDieSelection } from "./RestControls";
 import { InlineRolls, isTargetableRoll, RollCard, RollLogRow } from "./Rolls";
@@ -161,11 +164,11 @@ export type SheetViewProps = {
   onExpand: (sheetId: string | null) => void;
   onEncounterChange: (encounter: EncounterState | null) => void;
   onClearSheetRolls: (sheet: CharacterSheet) => void;
-  onRollAbilityCheck: (sheet: CharacterSheet, ability: string) => void;
+  onRollAbilityCheck: (sheet: CharacterSheet, ability: string, difficultyClass?: number) => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string, weaponOption?: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string, weaponOption?: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, abilityId: string, actionId: string) => void;
-  onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
+  onRollSavingThrow: (sheet: CharacterSheet, ability: string, difficultyClass?: number) => void;
   onRollDeathSavingThrow: (sheet: CharacterSheet) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string, spellSlotLevel?: number) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number, choiceIndex?: number) => void;
@@ -183,10 +186,14 @@ export type SheetViewProps = {
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
+  onPrepareProactiveResource: (sheet: CharacterSheet, resource: ResourceId, prepared: boolean) => void;
   onRespondToResolutionPrompt: (prompt: ResolutionInterceptorPrompt, use: boolean) => void;
+  onRespondToRestGrantPrompt: (prompt: RestGrantPrompt, targetSheetIds: string[]) => void;
   playerKey: string;
   roomId: string;
   resolutionPrompts: ResolutionInterceptorPrompt[];
+  restPrompts: RestGrantPrompt[];
+  preparedProactiveResources: Record<string, ResourceId>;
   rollHistory: RollLogEntry[];
   rolls: RollPayload[];
   sheets: CharacterSheet[];
@@ -194,7 +201,7 @@ export type SheetViewProps = {
   tokens: Token[];
 };
 
-export function SheetView({ connection, encounter, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onEncounterChange, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollDeathSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollBoundWeaponSpell, onRollSpellHealing, onRollSpellTemporaryHitPoints, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onRemoveOngoingEffect, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, onRespondToResolutionPrompt, playerKey, roomId, resolutionPrompts, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
+export function SheetView({ connection, encounter, expandedSheetId, isDm, onReloadSheets, onCreateCharacter, onClearSheetRolls, onExpand, onEncounterChange, onRollAbilityCheck, onRollAttack, onRollDamage, onRollResourceAction, onRollSavingThrow, onRollDeathSavingThrow, onRollSpellAttack, onRollSpellDamage, onRollBoundWeaponSpell, onRollSpellHealing, onRollSpellTemporaryHitPoints, onRollSpellEffect, onRollAdHocDice, onRestSheets, onUpdateProgressionChoice, onUpdateCondition, onRemoveOngoingEffect, onUpdateExhaustion, onUpdateDamageDefense, onUpdateEquipmentSlot, onUpdateSheetLevel, onUpdateResource, onPrepareProactiveResource, onRespondToResolutionPrompt, onRespondToRestGrantPrompt, playerKey, roomId, resolutionPrompts, restPrompts, preparedProactiveResources, rollHistory, rolls, sheets, sheetStatus, tokens }: SheetViewProps) {
   const expandedSheet = expandedSheetId ? sheets.find((sheet) => sheet.id === expandedSheetId) : null;
   const partySheets = useMemo(() => sheets.filter((sheet) => sheet.kind === TokenKind.CHARACTER), [sheets]);
   const otherSheets = useMemo(() => sheets.filter((sheet) => sheet.kind !== TokenKind.CHARACTER), [sheets]);
@@ -263,7 +270,7 @@ export function SheetView({ connection, encounter, expandedSheetId, isDm, onRelo
           </p>
         </div>
         {!expandedSheet && isDm && (
-          <RestControls sheets={partySheets} disabled={encounter !== null} onRest={onRestSheets} />
+          <RestControls sheets={partySheets} disabled={encounter !== null || restPrompts.length > 0} onRest={onRestSheets} />
         )}
         {!expandedSheet && (
           <EncounterControls
@@ -283,6 +290,7 @@ export function SheetView({ connection, encounter, expandedSheetId, isDm, onRelo
         prompts={resolutionPrompts}
         onRespond={onRespondToResolutionPrompt}
       />
+      <RestGrantPromptPanel prompts={restPrompts} onRespond={onRespondToRestGrantPrompt} />
 
       {expandedSheet ? (
         <FullSheet
@@ -323,6 +331,8 @@ export function SheetView({ connection, encounter, expandedSheetId, isDm, onRelo
           onUpdateEquipmentSlot={onUpdateEquipmentSlot}
           onUpdateSheetLevel={onUpdateSheetLevel}
           onUpdateResource={onUpdateResource}
+          onPrepareProactiveResource={onPrepareProactiveResource}
+          preparedProactiveResource={preparedProactiveResources[expandedSheet.id]}
           onClose={() => onExpand(null)}
           isDm={isDm}
         />
@@ -792,6 +802,8 @@ function ProgressionChoiceRow({
   const [selected, setSelected] = useState<string[]>(choice.selected);
   const choiceStateKey = [
     choice.id,
+    choice.sourceClass ?? "",
+    choice.sourceLevel ?? "",
     choice.minimum,
     choice.maximum,
     choice.selected.join(","),
@@ -1142,7 +1154,9 @@ function FullSheet({
   onUpdateDamageDefense,
   onUpdateEquipmentSlot,
   onUpdateSheetLevel,
-  onUpdateResource
+  onUpdateResource,
+  onPrepareProactiveResource,
+  preparedProactiveResource
 }: {
   sheet: CharacterSheet;
   encounter: EncounterState | null;
@@ -1156,11 +1170,11 @@ function FullSheet({
   onDragRollEnd: () => void;
   onDragRollStart: (rollId: string, preserveRoll: boolean) => void;
   onClose: () => void;
-  onRollAbilityCheck: (sheet: CharacterSheet, ability: string) => void;
+  onRollAbilityCheck: (sheet: CharacterSheet, ability: string, difficultyClass?: number) => void;
   onRollAttack: (sheet: CharacterSheet, attackId: string, weaponOption?: string) => void;
   onRollDamage: (sheet: CharacterSheet, attackId: string, weaponOption?: string) => void;
   onRollResourceAction: (sheet: CharacterSheet, resourceId: string, actionId: string) => void;
-  onRollSavingThrow: (sheet: CharacterSheet, ability: string) => void;
+  onRollSavingThrow: (sheet: CharacterSheet, ability: string, difficultyClass?: number) => void;
   onRollDeathSavingThrow: (sheet: CharacterSheet) => void;
   onRollSpellAttack: (sheet: CharacterSheet, spellId: string, spellSlotLevel?: number) => void;
   onRollSpellDamage: (sheet: CharacterSheet, spellId: string, effectIndex: number, spellSlotLevel?: number, instanceIndex?: number, choiceIndex?: number) => void;
@@ -1176,10 +1190,13 @@ function FullSheet({
   onUpdateEquipmentSlot: (sheet: CharacterSheet, itemId: string, slot: EquipmentSlot) => void;
   onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
+  onPrepareProactiveResource: (sheet: CharacterSheet, resource: ResourceId, prepared: boolean) => void;
+  preparedProactiveResource?: ResourceId;
 }) {
   const scores = Object.entries(sheet.abilityScores);
   const metadata = [sheet.race, sheet.background, sheet.alignment].filter(Boolean).join(" · ");
   const [selectedWeaponOptions, setSelectedWeaponOptions] = useState<Record<string, string>>({});
+  const [testDc, setTestDc] = useState<number | "">("");
   const encounterParticipant = encounter?.participantStates.find((participant) => participant.participantId === sheet.id);
   const actionBudget = encounterParticipant?.resources.find((resource) => resource.resource === "action");
   const bonusActionBudget = encounterParticipant?.resources.find((resource) => resource.resource === "bonusAction");
@@ -1226,7 +1243,7 @@ function FullSheet({
             <strong>{score}</strong>
             <small>{formatSigned(Math.floor((score - 10) / 2))}</small>
             <div className="ability-roll-actions">
-              <button disabled={!canRoll} onClick={() => onRollAbilityCheck(sheet, ability)}>
+              <button disabled={!canRoll} onClick={() => onRollAbilityCheck(sheet, ability, testDc || undefined)}>
                 Roll Check
               </button>
             </div>
@@ -1250,6 +1267,41 @@ function FullSheet({
         <SheetStat label="Temp HP" value={String(sheet.hp.temporary)} />
       </div>
 
+      {sheet.resources.some((resource) => resource.proactiveReroll) && (
+        <section className="sheet-panel proactive-resource-panel">
+          <label className="proactive-dc-input">
+            Check DC
+            <input
+              type="number"
+              min={1}
+              max={99}
+              value={testDc}
+              onChange={(event) => setTestDc(event.currentTarget.value === "" ? "" : Number(event.currentTarget.value))}
+            />
+          </label>
+          {sheet.resources.filter((resource) => resource.proactiveReroll).map((resource) => (
+            <div className="proactive-resource-row" key={resource.id}>
+              <strong>{resource.name}</strong>
+              <ResourceStepper
+                canRoll={canRoll}
+                currentUses={resource.currentUses}
+                maxUses={resource.maxUses}
+                onUpdate={(currentUses) => onUpdateResource(sheet, resource.id, currentUses)}
+              />
+              <label title={resource.proactiveReroll?.description}>
+                <input
+                  type="checkbox"
+                  checked={preparedProactiveResource === resource.resource}
+                  disabled={!canRoll || (resource.currentUses === 0 && preparedProactiveResource !== resource.resource)}
+                  onChange={(event) => onPrepareProactiveResource(sheet, resource.resource, event.currentTarget.checked)}
+                />
+                Next roll
+              </label>
+            </div>
+          ))}
+        </section>
+      )}
+
       <div className="sheet-columns">
         <section className="sheet-panel">
           <h2>Saving Throws</h2>
@@ -1259,7 +1311,7 @@ function FullSheet({
                 <span>
                   {cleanName(save.ability)} {save.proficient ? "*" : ""} <strong>{formatSigned(save.modifier)}</strong>
                 </span>
-                <button disabled={!canRoll} onClick={() => onRollSavingThrow(sheet, save.ability)}>
+                <button disabled={!canRoll} onClick={() => onRollSavingThrow(sheet, save.ability, testDc || undefined)}>
                   Roll Save
                 </button>
                 <InlineRolls

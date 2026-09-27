@@ -28,6 +28,7 @@ from dnd_board.character_sheet import (
     RollModifierType,
     RollResolutionMode,
     SheetAbility,
+    SkillType,
     TimeEconomy,
     WeaponCategory,
     WeaponProperty,
@@ -37,6 +38,7 @@ from dnd_board.character_sheet import (
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
 from dnd_board.rules.equipment import CLASS_ARMOR_TRAINING, MULTICLASS_ARMOR_TRAINING, EquipmentId
 from dnd_board.rules.species import SpeciesType
+from dnd_board.rules.shared.tool_types import MUSICAL_INSTRUMENT_OPTIONS, SELECTABLE_TOOL_TYPES, ToolType
 from dnd_board.rules.shared.effects import (
     AbilityScoreAdjustmentChoice,
     AddPendingWeaponDamageDice,
@@ -125,7 +127,7 @@ from dnd_board.rules.shared.effects import (
     OngoingReplacementPolicy,
 )
 from dnd_board.rules.encounter import TurnBoundary, TurnOccurrence, TurnParticipantReference, TurnTiming, UsageScope
-from dnd_board.rules.shared.resources import ResourceCost, ResourceId
+from dnd_board.rules.shared.resources import ResourceCost, ResourceId, ResourceRecoveryTrigger, RestGrantCount, RestGrantRecipient, RestResourceGrant, ToolProficiencyRequirement
 
 
 class FeatCategory(Enum):
@@ -166,6 +168,7 @@ class FeatAbilityId(Enum):
     HEALER = "healer"
     LUCKY_ADVANTAGE = "luckyAdvantage"
     LUCKY_DISADVANTAGE = "luckyDisadvantage"
+    KEEN_MIND_QUICK_STUDY = "keenMindQuickStudy"
     OBSERVANT_QUICK_SEARCH = "observantQuickSearch"
     TELEKINETIC_SHOVE = "telekineticShove"
     BOON_OF_COMBAT_PROWESS = "boonOfCombatProwess"
@@ -495,6 +498,27 @@ class FeatResourceDefinition:
 
 
 @dataclass(frozen=True)
+class FeatSkillChoice:
+    candidates: tuple[SkillType, ...]
+    promoteExistingProficiency: bool = True
+
+
+@dataclass(frozen=True)
+class FeatTrainingChoice:
+    skills: tuple[SkillType, ...] = ()
+    tools: tuple[ToolType, ...] = ()
+    count: int = 3
+
+
+@dataclass(frozen=True)
+class FeatActionDeclaration:
+    actionId: FeatAbilityId
+    label: str
+    activation: TimeEconomy
+    description: str
+
+
+@dataclass(frozen=True)
 class GeneralFeatDefinition:
     featType: GeneralFeatType
     source: RuleSource
@@ -509,6 +533,10 @@ class GeneralFeatDefinition:
     spellDamageTraitChoice: SpellDamageTraitChoice | None = None
     armorTraining: tuple[ArmorCategory, ...] = ()
     shieldTraining: bool = False
+    skillChoice: FeatSkillChoice | None = None
+    trainingChoice: FeatTrainingChoice | None = None
+    actionDeclarations: tuple[FeatActionDeclaration, ...] = ()
+    restGrants: tuple[RestResourceGrant, ...] = ()
 
 
 def general_feat(
@@ -525,6 +553,10 @@ def general_feat(
     spell_damage_trait_choice: SpellDamageTraitChoice | None = None,
     armor_training: tuple[ArmorCategory, ...] = (),
     shield_training: bool = False,
+    skill_choice: FeatSkillChoice | None = None,
+    training_choice: FeatTrainingChoice | None = None,
+    action_declarations: tuple[FeatActionDeclaration, ...] = (),
+    rest_grants: tuple[RestResourceGrant, ...] = (),
 ) -> GeneralFeatDefinition:
     return GeneralFeatDefinition(
         featType=feat_type,
@@ -540,6 +572,10 @@ def general_feat(
         spellDamageTraitChoice=spell_damage_trait_choice,
         armorTraining=armor_training,
         shieldTraining=shield_training,
+        skillChoice=skill_choice,
+        trainingChoice=training_choice,
+        actionDeclarations=action_declarations,
+        restGrants=rest_grants,
     )
 
 
@@ -1371,7 +1407,20 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     ),
     GeneralFeatType.INFERNAL_CONSTITUTION: general_feat(GeneralFeatType.INFERNAL_CONSTITUTION, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Constitution; gain cold and poison resilience.", (species_prerequisite(SpeciesType.TIEFLING),)),
     GeneralFeatType.INSPIRING_LEADER: general_feat(GeneralFeatType.INSPIRING_LEADER, RuleSource.PLAYERS_HANDBOOK_2024, "Give temporary hit points to a small group after a speech.", (ability_prerequisite(13, AbilityType.CHARISMA),)),
-    GeneralFeatType.KEEN_MIND: general_feat(GeneralFeatType.KEEN_MIND, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence; improve recall and orientation."),
+    GeneralFeatType.KEEN_MIND: general_feat(
+        GeneralFeatType.KEEN_MIND,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Intelligence. Gain proficiency or Expertise in one lore skill, and take the Study action as a Bonus Action.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.INTELLIGENCE)),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.INTELLIGENCE,)),
+        skill_choice=FeatSkillChoice((SkillType.ARCANA, SkillType.HISTORY, SkillType.INVESTIGATION, SkillType.NATURE, SkillType.RELIGION)),
+        action_declarations=(FeatActionDeclaration(
+            FeatAbilityId.KEEN_MIND_QUICK_STUDY,
+            "Quick Study",
+            TimeEconomy.BONUS_ACTION,
+            "Take the Study action as a Bonus Action.",
+        ),),
+    ),
     GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT: general_feat(GeneralFeatType.KEENNESS_OF_THE_STONE_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; darkvision and stone strike.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.STONE_STRIKE))),
     GeneralFeatType.LIGHTLY_ARMORED: general_feat(
         GeneralFeatType.LIGHTLY_ARMORED,
@@ -1428,8 +1477,33 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         armor_training=(ArmorCategory.MEDIUM,),
     ),
     GeneralFeatType.MOUNTED_COMBATANT: general_feat(GeneralFeatType.MOUNTED_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, "Improve mounted attacks and protect your mount."),
-    GeneralFeatType.MUSICIAN: general_feat(GeneralFeatType.MUSICIAN, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Musical Instruments and grant Heroic Inspiration after a Short or Long Rest."),
-    GeneralFeatType.OBSERVANT: general_feat(GeneralFeatType.OBSERVANT, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence or Wisdom; read lips and improve passive Investigation/Perception."),
+    GeneralFeatType.MUSICIAN: general_feat(
+        GeneralFeatType.MUSICIAN,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "Gain proficiency with three Musical Instruments and grant Heroic Inspiration to up to your Proficiency Bonus in allies after a Short or Long Rest.",
+        training_choice=FeatTrainingChoice(tools=MUSICAL_INSTRUMENT_OPTIONS),
+        rest_grants=(RestResourceGrant(
+            ResourceId.HEROIC_INSPIRATION,
+            (ResourceRecoveryTrigger.SHORT_REST, ResourceRecoveryTrigger.LONG_REST),
+            RestGrantRecipient.ALLY,
+            RestGrantCount.PROFICIENCY_BONUS,
+            requirements=(ToolProficiencyRequirement(MUSICAL_INSTRUMENT_OPTIONS),),
+        ),),
+    ),
+    GeneralFeatType.OBSERVANT: general_feat(
+        GeneralFeatType.OBSERVANT,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Intelligence or Wisdom. Gain proficiency or Expertise in Insight, Investigation, or Perception, and take the Search action as a Bonus Action.",
+        (level_prerequisite(4), ability_prerequisite(13, AbilityType.INTELLIGENCE, AbilityType.WISDOM)),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.INTELLIGENCE, AbilityType.WISDOM)),
+        skill_choice=FeatSkillChoice((SkillType.INSIGHT, SkillType.INVESTIGATION, SkillType.PERCEPTION)),
+        action_declarations=(FeatActionDeclaration(
+            FeatAbilityId.OBSERVANT_QUICK_SEARCH,
+            "Quick Search",
+            TimeEconomy.BONUS_ACTION,
+            "Take the Search action as a Bonus Action.",
+        ),),
+    ),
     GeneralFeatType.ORCISH_FURY: general_feat(GeneralFeatType.ORCISH_FURY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength or Constitution; add weapon damage and retaliate after endurance.", (species_prerequisite(SpeciesType.ORC),)),
     GeneralFeatType.PIERCER: general_feat(
         GeneralFeatType.PIERCER,
@@ -1488,7 +1562,13 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     ),
     GeneralFeatType.SHIELD_MASTER: general_feat(GeneralFeatType.SHIELD_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Add shield tactics to attacks and Dexterity saves."),
     GeneralFeatType.SKILL_EXPERT: general_feat(GeneralFeatType.SKILL_EXPERT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 in one ability; gain one skill proficiency and one expertise."),
-    GeneralFeatType.SKILLED: general_feat(GeneralFeatType.SKILLED, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three skills or tools."),
+    GeneralFeatType.SKILLED: general_feat(
+        GeneralFeatType.SKILLED,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "Gain proficiency in any combination of three skills or tools.",
+        repeatable=True,
+        training_choice=FeatTrainingChoice(skills=tuple(SkillType), tools=SELECTABLE_TOOL_TYPES),
+    ),
     GeneralFeatType.SKULKER: general_feat(GeneralFeatType.SKULKER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve hiding and ranged stealth.", (ability_prerequisite(13, AbilityType.DEXTERITY),)),
     GeneralFeatType.SLASHER: general_feat(
         GeneralFeatType.SLASHER,
@@ -2265,7 +2345,6 @@ def feat_abilities(
         (GeneralFeatType.HEALER, FeatAbilityId.HEALER, TimeEconomy.ACTION, None, "Use a Healer's Kit to restore hit points or stabilize a creature."),
         (GeneralFeatType.LUCKY, FeatAbilityId.LUCKY_ADVANTAGE, TimeEconomy.SPECIAL, ResourceId.LUCK_POINTS, "Spend 1 Luck Point to gain Advantage on a D20 Test."),
         (GeneralFeatType.LUCKY, FeatAbilityId.LUCKY_DISADVANTAGE, TimeEconomy.REACTION, ResourceId.LUCK_POINTS, "Spend 1 Luck Point to impose Disadvantage on an attack roll against you."),
-        (GeneralFeatType.OBSERVANT, FeatAbilityId.OBSERVANT_QUICK_SEARCH, TimeEconomy.BONUS_ACTION, None, "Take the Search action as a Bonus Action."),
         (GeneralFeatType.TELEKINETIC, FeatAbilityId.TELEKINETIC_SHOVE, TimeEconomy.BONUS_ACTION, None, "Telekinetically shove one creature you can see within 30 feet."),
         (GeneralFeatType.BOON_OF_COMBAT_PROWESS, FeatAbilityId.BOON_OF_COMBAT_PROWESS, TimeEconomy.SPECIAL, ResourceId.BOON_OF_COMBAT_PROWESS, "Turn a missed melee weapon attack into a hit."),
         (GeneralFeatType.BOON_OF_DIMENSIONAL_TRAVEL, FeatAbilityId.BOON_OF_DIMENSIONAL_TRAVEL, TimeEconomy.ACTION, ResourceId.BOON_OF_DIMENSIONAL_TRAVEL, "Cast Misty Step without a spell slot or components."),
@@ -2285,6 +2364,14 @@ def feat_abilities(
         ))
     for feat_type in selected_feats:
         definition = GENERAL_FEATS[feat_type]
+        for action in definition.actionDeclarations:
+            abilities.append(SheetAbility(
+                id=action.actionId.value,
+                name=action.label,
+                source=enum_label(feat_type),
+                activation=action.activation,
+                description=action.description,
+            ))
         for effect in definition.mechanics.activatedEffects:
             if not isinstance(effect, ActivatedEffect) or effect.actionId is None or effect.activation is None:
                 continue

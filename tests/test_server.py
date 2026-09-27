@@ -24,6 +24,7 @@ from dnd_board.application.progression_service import (
 from dnd_board.application.persistence import load_room as load_room_save
 from dnd_board.application.room_state import ActiveConcentration, ActiveMaxHitPointIncrease, ActiveMaxHitPointReduction
 from dnd_board.application.resource_service import reset_sheet_resources
+from dnd_board.application.rest_service import prepare_rest
 from dnd_board.rules.classes.fighter.archetypes import eldritch_knight_catalog_spell
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.rogue.archetypes import RogueSubclassAbilityType, RogueSubclassAttackType, RogueSubclassRollActionType
@@ -83,6 +84,7 @@ from dnd_board.rules.shared.effects import (
     WeaponAttackOptionId,
 )
 from dnd_board.rules.shared.resources import ResourceCost, ResourceId, ResourceKind, ResourcePaymentScope, ResourceRecovery, ResourceRecoveryTrigger
+from dnd_board.rules.shared.tool_types import ToolType
 from dnd_board.character_sheet import (
     AbilityScores,
     AbilityType,
@@ -1489,6 +1491,194 @@ def test_resolved_attack_log_contains_target_condition_roll_breakdown(tmp_path, 
     assert log_entry["resolution"]["roll"]["die"] == "2d20kl1"
     assert log_entry["resolution"]["roll"]["disadvantageConditions"] == ["invisible"]
     assert log_entry["resolution"]["roll"]["disadvantageConditionsLabel"] == ["Invisible"]
+
+
+@pytest.mark.parametrize(
+    ("dice", "expected_attack_die", "expected_damage_die"),
+    [([1, 4, 15], 15, 4), ([15, 1, 6], 15, 6)],
+)
+def test_prepared_inspiration_rerolls_one_eligible_die_and_spends_once(
+    tmp_path, monkeypatch, dice, expected_attack_die, expected_damage_die,
+) -> None:
+    attack = AttackAction("longsword", "Longsword", AbilityType.STRENGTH, 1, DiceType.D8, damageType=DamageType.SLASHING)
+    write_party_campaign(
+        tmp_path,
+        "prepared-inspiration-test",
+        PartyMemberConfig(
+            id="player-1", name="Attacker", maxHp=20,
+            abilityScores=AbilityScores(strength=16, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                attacks=[attack],
+                resources=[ResourceTracker(
+                    enum_key(ResourceId.HEROIC_INSPIRATION), ResourceId.HEROIC_INSPIRATION.value,
+                    1, 1, TimeEconomy.SPECIAL, "Prepared reroll", ResourceId.HEROIC_INSPIRATION,
+                )],
+            ),
+        ),
+        PartyMemberConfig(id="player-2", name="Target", maxHp=20, sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)])),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    rolled_dice = iter(dice)
+    monkeypatch.setattr(random, "randint", lambda _minimum, _maximum: next(rolled_dice))
+    client = TestClient(server.app)
+    resource_key = enum_key(ResourceId.HEROIC_INSPIRATION)
+
+    armed = client.post(
+        f"/api/rooms/prepared-inspiration-test/sheet/player-1/resources/{resource_key}/prepare?playerKey=player-1&prepared=true"
+    )
+    assert armed.status_code == 200
+    assert armed.json()["preparedProactiveResources"] == {"player-1": resource_key}
+    created = client.post("/api/rooms/prepared-inspiration-test/sheet/player-1/rolls/attack?playerKey=player-1")
+    assert created.status_code == 200
+    assert created.json()["roll"]["proactiveResource"] == resource_key
+    assert client.get("/api/rooms/prepared-inspiration-test/sheet?playerKey=player-1").json()["preparedProactiveResources"] == {}
+
+    resolved = client.post(
+        f"/api/rooms/prepared-inspiration-test/rolls/{created.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+    assert resolved.status_code == 200
+    result = resolved.json()["resolution"]
+    assert result["roll"]["dice"] == [expected_attack_die]
+    assert result["roll"]["damageComponents"][0]["dice"] == [expected_damage_die]
+    assert result["targetHp"]["current"] == 20 - expected_damage_die - 3
+    spent = [item for item in result["roll"]["resourcesSpent"] if item["resource"] == resource_key]
+    assert len(spent) == 1 and spent[0]["current"] == 0
+    resources = client.get("/api/rooms/prepared-inspiration-test/sheet/player-1?playerKey=player-1").json()["sheet"]["resources"]
+    assert next(item for item in resources if item["resource"] == resource_key)["currentUses"] == 0
+
+
+def test_prepared_inspiration_uses_declared_check_dc_without_prompting(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "prepared-check-test",
+        PartyMemberConfig(
+            id="player-1", name="Checker", maxHp=12,
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)],
+                resources=[ResourceTracker(
+                    enum_key(ResourceId.HEROIC_INSPIRATION), ResourceId.HEROIC_INSPIRATION.value,
+                    1, 1, TimeEconomy.SPECIAL, "Prepared reroll", ResourceId.HEROIC_INSPIRATION,
+                )],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    dice = iter([2, 18])
+    monkeypatch.setattr(random, "randint", lambda _minimum, _maximum: next(dice))
+    client = TestClient(server.app)
+    resource_key = enum_key(ResourceId.HEROIC_INSPIRATION)
+    client.post(f"/api/rooms/prepared-check-test/sheet/player-1/resources/{resource_key}/prepare?playerKey=player-1&prepared=true")
+
+    result = client.post("/api/rooms/prepared-check-test/sheet/player-1/rolls/ability-check?playerKey=player-1&ability=strength&difficultyClass=15")
+
+    assert result.status_code == 200
+    assert result.json()["roll"]["dice"] == [18]
+    assert result.json()["roll"]["dieReplacements"][0]["original"] == 2
+    assert result.json()["roll"]["resourcesSpent"][-1]["current"] == 0
+    assert client.get("/api/rooms/prepared-check-test/sheet?playerKey=dm").json()["rollHistory"][-1]["roll"]["dieReplacements"][0]["replacement"] == 18
+
+
+def test_prepared_inspiration_without_check_dc_does_not_spend(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path, "inspired-unknown-dc-test",
+        PartyMemberConfig(
+            id="player-1", name="Checker", maxHp=12,
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)],
+                resources=[ResourceTracker(
+                    enum_key(ResourceId.HEROIC_INSPIRATION), ResourceId.HEROIC_INSPIRATION.value,
+                    1, 1, TimeEconomy.SPECIAL, "Prepared reroll", ResourceId.HEROIC_INSPIRATION,
+                )],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(random, "randint", lambda _minimum, _maximum: 1)
+    client = TestClient(server.app)
+    resource_key = enum_key(ResourceId.HEROIC_INSPIRATION)
+    client.post(f"/api/rooms/inspired-unknown-dc-test/sheet/player-1/resources/{resource_key}/prepare?playerKey=player-1&prepared=true")
+
+    result = client.post("/api/rooms/inspired-unknown-dc-test/sheet/player-1/rolls/ability-check?playerKey=player-1&ability=strength")
+
+    assert result.status_code == 200
+    assert result.json()["roll"]["dice"] == [1]
+    assert result.json()["roll"].get("dieReplacements") is None
+    sheet = client.get("/api/rooms/inspired-unknown-dc-test/sheet/player-1?playerKey=player-1").json()["sheet"]
+    assert next(item for item in sheet["resources"] if item["resource"] == resource_key)["currentUses"] == 1
+
+
+def test_prepared_inspiration_rerolls_failed_death_save(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path, "inspired-death-save-test",
+        PartyMemberConfig(
+            id="player-1", name="Downed", maxHp=12,
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)],
+                resources=[ResourceTracker(
+                    enum_key(ResourceId.HEROIC_INSPIRATION), ResourceId.HEROIC_INSPIRATION.value,
+                    1, 1, TimeEconomy.SPECIAL, "Prepared reroll", ResourceId.HEROIC_INSPIRATION,
+                )],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    dice = iter([2, 16])
+    monkeypatch.setattr(random, "randint", lambda _minimum, _maximum: next(dice))
+    client = TestClient(server.app)
+    room = server.get_or_create_room("inspired-death-save-test")
+    room.hit_points["player-1"] = 0
+    resource_key = enum_key(ResourceId.HEROIC_INSPIRATION)
+    client.post(f"/api/rooms/inspired-death-save-test/sheet/player-1/resources/{resource_key}/prepare?playerKey=player-1&prepared=true")
+
+    result = client.post("/api/rooms/inspired-death-save-test/sheet/player-1/rolls/death-saving-throw?playerKey=player-1")
+
+    assert result.status_code == 200
+    assert result.json()["roll"]["dice"] == [16]
+    assert result.json()["roll"]["dieReplacements"][0]["original"] == 2
+    assert result.json()["roll"]["resourcesSpent"][-1]["current"] == 0
+
+
+def test_prepared_inspiration_rerolls_target_owned_spell_save(tmp_path, monkeypatch) -> None:
+    tasha = wizard_spell_entry(SpellId.TASHA_S_HIDEOUS_LAUGHTER)
+    assert tasha is not None
+    write_party_campaign(
+        tmp_path,
+        "inspired-spell-save-test",
+        PartyMemberConfig(
+            id="player-1", name="Caster", maxHp=20,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=18, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.WIZARD, level=5)], spells=[tasha]),
+        ),
+        PartyMemberConfig(
+            id="player-2", name="Target", maxHp=20,
+            abilityScores=AbilityScores(strength=10, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=5)],
+                resources=[ResourceTracker(
+                    enum_key(ResourceId.HEROIC_INSPIRATION), ResourceId.HEROIC_INSPIRATION.value,
+                    1, 1, TimeEconomy.SPECIAL, "Prepared reroll", ResourceId.HEROIC_INSPIRATION,
+                )],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    dice = iter([1, 20])
+    monkeypatch.setattr(random, "randint", lambda _minimum, _maximum: next(dice))
+    client = TestClient(server.app)
+    resource_key = enum_key(ResourceId.HEROIC_INSPIRATION)
+    client.post(f"/api/rooms/inspired-spell-save-test/sheet/player-2/resources/{resource_key}/prepare?playerKey=player-2&prepared=true")
+
+    effect = client.post("/api/rooms/inspired-spell-save-test/sheet/player-1/spells/tashaSHideousLaughter/rolls/effect?playerKey=player-1")
+    resolved = client.post(f"/api/rooms/inspired-spell-save-test/rolls/{effect.json()['roll']['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+
+    assert resolved.status_code == 200
+    resolution = resolved.json()["resolution"]
+    assert resolution["responseRolls"][0]["dieReplacements"][0]["replacement"] == 20
+    assert resolution["roll"]["resourcesSpent"][-1]["ownerSheetId"] == "player-2"
+    assert resolution["targetConditions"] == []
+    target = client.get("/api/rooms/inspired-spell-save-test/sheet/player-2?playerKey=player-2").json()["sheet"]
+    assert next(item for item in target["resources"] if item["resource"] == resource_key)["currentUses"] == 0
 
 
 def test_ad_hoc_dice_roll_is_logged_for_everyone(monkeypatch) -> None:
@@ -3662,6 +3852,56 @@ def test_interception_fighting_style_reduces_damage_to_ally(tmp_path, monkeypatc
     assert server.get_or_create_room("interception-interceptor-test").pending_effect_executions == {}
 
 
+def test_prepared_inspiration_rerolls_engine_rolled_damage(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path,
+        "inspired-runtime-damage-test",
+        PartyMemberConfig(
+            id="player-1", name="Source", maxHp=20,
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(name=ClassType.WIZARD, level=1)],
+                resources=[ResourceTracker(
+                    enum_key(ResourceId.HEROIC_INSPIRATION), ResourceId.HEROIC_INSPIRATION.value,
+                    1, 1, TimeEconomy.SPECIAL, "Prepared reroll", ResourceId.HEROIC_INSPIRATION,
+                )],
+            ),
+        ),
+        PartyMemberConfig(id="player-2", name="Target", maxHp=20, sheet=PartyMemberSheet(classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1)])),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    dice = iter([1, 5])
+    monkeypatch.setattr(random, "randint", lambda _minimum, _maximum: next(dice))
+    client = TestClient(server.app)
+    room = server.get_or_create_room("inspired-runtime-damage-test")
+    room.scheduled_effects["player-2"] = [ActiveScheduledEffect(
+        id=ScheduledEffectId(50, EffectNodeId((0,))),
+        sourceSheetId="player-1", targetSheetId="player-2", sourceLabel="Delayed Fire",
+        effect=ScheduledEffect(
+            ResolutionEventType.CONDITION_APPLIED,
+            ApplyEffect(DamageEffect(DiceAmount(1, DiceType.D6), DamageType.FIRE)),
+        ),
+    )]
+    trigger = RollPayload(
+        id="inspired-runtime-trigger", sheetId="player-1", tokenId="player-1", roller="player-1",
+        source=RollSource(SheetSectionType.ABILITIES, "trigger", "effect"), sourceLabel="Trigger",
+        resolution=RollResolutionMode.NONE, label="Trigger", iconUrl=None, dice=[], diceType=DiceType.D20,
+        die="", modifier=0, modifierBreakdown=[], total=0, createdAt=50,
+        pendingEffect=ApplyEffect(ConditionChangeEffect(ConditionType.PRONE, ConditionOperation.ADD)),
+        proactiveResource=ResourceId.HEROIC_INSPIRATION,
+    )
+    room.pending_rolls[server.roll_queue_key(trigger)] = trigger
+
+    response = client.post(
+        "/api/rooms/inspired-runtime-damage-test/rolls/inspired-runtime-trigger/resolve?playerKey=dm&targetSheetId=player-2"
+    )
+
+    assert response.status_code == 200
+    resolution = response.json()["resolution"]
+    assert resolution["targetHp"]["current"] == 15
+    assert resolution["roll"]["dieReplacements"][0]["replacement"] == 5
+    assert resolution["roll"]["resourcesSpent"][-1]["current"] == 0
+
+
 def test_multiple_reductions_stack_against_one_stable_runtime_damage_roll(tmp_path, monkeypatch) -> None:
     write_party_campaign(
         tmp_path,
@@ -5745,6 +5985,7 @@ def test_attack_resource_costs_are_validated_and_consumed_atomically(tmp_path, m
         "arrows": 1,
         "bolts": 0,
         "hitDieD10": 1,
+        "heroicInspiration": 0,
     }
 
     client.post(
@@ -6961,8 +7202,69 @@ def test_long_rest_resets_short_and_long_rest_resources(tmp_path, monkeypatch) -
     resources = {resource["id"]: resource for resource in rested_sheet["resources"]}
 
     assert response.status_code == 200
-    assert all(resource["currentUses"] == resource["maxUses"] for resource in resources.values())
+    assert all(
+        resource["currentUses"] == resource["maxUses"]
+        for resource in resources.values()
+        if resource["id"] != enum_key(ResourceId.HEROIC_INSPIRATION)
+    )
+    assert resources[enum_key(ResourceId.HEROIC_INSPIRATION)]["currentUses"] == 0
     assert rested_sheet["hp"]["temporary"] == 0
+
+
+def test_musician_rest_prompt_grants_shared_heroic_inspiration(tmp_path, monkeypatch) -> None:
+    campaign = tmp_path / "musician-rest-test"
+    party = campaign / "party"
+    party.mkdir(parents=True)
+    (campaign / "campaign.json").write_text('{"id":"musician-rest-test","name":"Musician Rest Test"}', encoding="utf-8")
+    (party / "party.json").write_text(json.dumps(typed_json_from_value(PartyManifest(members=[
+        PartyMemberConfig(
+            id="player-1", name="Musician", maxHp=12,
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(ClassType.ROGUE, 1)],
+                feats=[general_feat_feature(enum_key(GeneralFeatType.MUSICIAN))],
+                proficiencies=[ToolType.LUTE.value],
+            ),
+        ),
+        PartyMemberConfig(id="player-2", name="Ally Two", maxHp=12, sheet=PartyMemberSheet(classes=[CharacterClassLevel(ClassType.ROGUE, 1)])),
+        PartyMemberConfig(id="player-3", name="Ally Three", maxHp=12, sheet=PartyMemberSheet(classes=[CharacterClassLevel(ClassType.ROGUE, 1)])),
+    ]))), encoding="utf-8")
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    client = TestClient(server.app)
+    room = server.get_or_create_room("musician-rest-test")
+    sheets = server.visible_sheets(room, server.Player("test-dm", "DM", "dm", None, room.id))
+    untrained = [replace(sheet, proficiencies=[]) if sheet.id == "player-1" else sheet for sheet in sheets]
+    assert prepare_rest(untrained, RestType.SHORT_REST, "dm", {}).prompts == {}
+    wrong_tool = [replace(sheet, proficiencies=[ToolType.SMITHS_TOOLS.value]) if sheet.id == "player-1" else sheet for sheet in sheets]
+    assert prepare_rest(wrong_tool, RestType.SHORT_REST, "dm", {}).prompts == {}
+
+    staged = client.post("/api/rooms/musician-rest-test/sheet/rest?playerKey=dm&rest=short")
+    assert staged.status_code == 200
+    assert room.pending_rest is not None
+    assert len(staged.json()["pendingRestPrompts"]) == 1
+    prompt = staged.json()["pendingRestPrompts"][0]
+    assert prompt["maximumTargets"] == 2
+    assert {target["sheetId"] for target in prompt["targets"]} == {"player-2", "player-3"}
+    assert client.post("/api/rooms/musician-rest-test/sheet/rest?playerKey=dm&rest=short").status_code == 409
+    owner_view = client.get("/api/rooms/musician-rest-test/sheet?playerKey=player-1")
+    assert len(owner_view.json()["pendingRestPrompts"]) == 1
+    other_view = client.get("/api/rooms/musician-rest-test/sheet?playerKey=player-2")
+    assert other_view.json()["pendingRestPrompts"] == []
+
+    response_path = f"/api/rooms/musician-rest-test/sheet/rest/prompts/{prompt['id']}/respond"
+    assert client.post(f"{response_path}?playerKey=player-2", json={"targetSheetIds": ["player-2"]}).status_code == 403
+    assert client.post(f"{response_path}?playerKey=player-1", json={"targetSheetIds": ["player-2", "player-2"]}).status_code == 409
+    answered = client.post(f"{response_path}?playerKey=player-1", json={"targetSheetIds": ["player-2", "player-3"]})
+    assert answered.status_code == 200
+    assert room.pending_rest is None
+    resources_by_sheet = {
+        sheet["id"]: {resource["id"]: resource for resource in sheet["resources"]}
+        for sheet in answered.json()["sheets"]
+    }
+    for target_id in ("player-2", "player-3"):
+        assert resources_by_sheet[target_id][enum_key(ResourceId.HEROIC_INSPIRATION)]["currentUses"] == 1
+    assert resources_by_sheet["player-1"][enum_key(ResourceId.HEROIC_INSPIRATION)]["currentUses"] == 0
+    assert client.post(f"{response_path}?playerKey=dm", json={"targetSheetIds": []}).status_code == 404
+    assert any("grants Heroic Inspiration" in entry.roll.label for entry in room.roll_history)
 
 
 def test_rest_clears_only_conditions_with_matching_durations(tmp_path, monkeypatch) -> None:
@@ -7751,6 +8053,44 @@ def test_pushing_attack_triggers_visible_strength_save_without_condition(tmp_pat
     assert resolution.json()["resolution"]["responseRolls"][0]["label"] == "Strength Save"
     assert resolution.json()["resolution"]["responseRolls"][0]["sourceLabel"] == "Pushing Attack"
     assert any(response_roll["tokenId"] == "player-2" and response_roll["label"] == "Strength Save" for response_roll in pending)
+
+
+def test_prepared_inspiration_rerolls_losing_contested_check(tmp_path, monkeypatch) -> None:
+    write_party_campaign(
+        tmp_path, "inspired-contest-test",
+        PartyMemberConfig(
+            id="player-1", name="Grappler", maxHp=30,
+            abilityScores=AbilityScores(strength=18, dexterity=10, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(
+                name=ClassType.FIGHTER, level=3, subclass=FighterSubclassType.BATTLE_MASTER,
+                classOptions=[ClassOptionSelection(ClassOptionKind.MANEUVER, BattleMasterManeuverType.GRAPPLING_STRIKE)],
+            )]),
+        ),
+        PartyMemberConfig(
+            id="player-2", name="Escaper", maxHp=30,
+            abilityScores=AbilityScores(strength=10, dexterity=16, constitution=10, intelligence=10, wisdom=10, charisma=10),
+            sheet=PartyMemberSheet(resources=[ResourceTracker(
+                enum_key(ResourceId.HEROIC_INSPIRATION), ResourceId.HEROIC_INSPIRATION.value,
+                1, 1, TimeEconomy.SPECIAL, "Prepared reroll", ResourceId.HEROIC_INSPIRATION,
+            )]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    dice = iter([3, 10, 4, 19])
+    monkeypatch.setattr(random, "randint", lambda _minimum, _maximum: next(dice))
+    client = TestClient(server.app)
+    resource_key = enum_key(ResourceId.HEROIC_INSPIRATION)
+    client.post(f"/api/rooms/inspired-contest-test/sheet/player-2/resources/{resource_key}/prepare?playerKey=player-2&prepared=true")
+
+    roll = client.post("/api/rooms/inspired-contest-test/sheet/player-1/resources/superiorityDice/rolls/grapplingStrike?playerKey=player-1").json()["roll"]
+    resolved = client.post(f"/api/rooms/inspired-contest-test/rolls/{roll['id']}/resolve?playerKey=dm&targetSheetId=player-2")
+
+    assert resolved.status_code == 200
+    resolution = resolved.json()["resolution"]
+    assert resolution["responseRolls"][1]["dice"] == [19]
+    assert resolution["responseRolls"][1]["dieReplacements"][0]["original"] == 4
+    assert resolution["targetConditions"] == []
+    assert resolution["roll"]["resourcesSpent"][-1]["ownerSheetId"] == "player-2"
 
 
 def test_grappling_strike_resolves_contested_check_and_applies_grappled(tmp_path, monkeypatch) -> None:

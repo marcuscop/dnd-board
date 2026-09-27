@@ -5,6 +5,8 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Mapping, Sequence
 
+from dnd_board.rules.shared.tool_types import ToolType
+
 
 class ResourceKind(Enum):
     SPELL_SLOT = "Spell Slot"
@@ -15,9 +17,11 @@ class ResourceKind(Enum):
     ACTION = "Action"
     BONUS_ACTION = "Bonus Action"
     REACTION = "Reaction"
+    INSPIRATION = "Inspiration"
 
 
 class ResourceId(Enum):
+    HEROIC_INSPIRATION = "Heroic Inspiration"
     SPELL_SLOT = "Selected Spell Slot"
     HIT_DIE_D6 = "Hit Die d6"
     HIT_DIE_D8 = "Hit Die d8"
@@ -103,6 +107,33 @@ class ResourceRecoveryTrigger(Enum):
     TURN_ENDED = "Turn Ended"
 
 
+class RestGrantRecipient(Enum):
+    ALLY = "Ally"
+
+
+class RestGrantCount(Enum):
+    PROFICIENCY_BONUS = "Proficiency Bonus"
+
+
+@dataclass(frozen=True)
+class ToolProficiencyRequirement:
+    anyOf: tuple[ToolType, ...]
+
+
+@dataclass(frozen=True)
+class RestResourceGrant:
+    resource: ResourceId
+    triggers: tuple[ResourceRecoveryTrigger, ...]
+    recipient: RestGrantRecipient
+    maximumTargets: RestGrantCount
+    requirements: tuple[ToolProficiencyRequirement, ...] = ()
+
+
+def rest_grant_requirements_met(grant: RestResourceGrant, proficiencies: Sequence[str]) -> bool:
+    known_tools = {tool for tool in ToolType if tool.value in proficiencies}
+    return all(any(tool in known_tools for tool in requirement.anyOf) for requirement in grant.requirements)
+
+
 class ResourcePaymentScope(Enum):
     ACTIVATION = "Activation"
     PART = "Part"
@@ -120,11 +151,23 @@ class ResourceRecovery:
     amount: int | None = None
 
 
+class ProactiveRerollTrigger(Enum):
+    FAILED_D20_TEST = "Failed D20 Test"
+    MINIMUM_DAMAGE_DIE = "Minimum Damage Die"
+
+
+@dataclass(frozen=True)
+class ProactiveRerollPolicy:
+    triggers: tuple[ProactiveRerollTrigger, ...]
+    description: str
+
+
 @dataclass(frozen=True)
 class ResourceDefinition:
     key: ResourceKey
     label: str
     recoveries: tuple[ResourceRecovery, ...] = ()
+    proactiveReroll: ProactiveRerollPolicy | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +190,7 @@ class ResourceUpdate:
     label: str
     current: int
     maximum: int
+    ownerSheetId: str | None = None
 
 
 class InsufficientResourceError(ValueError):
@@ -188,6 +232,17 @@ def full_recovery(trigger: ResourceRecoveryTrigger) -> ResourceRecovery:
 
 
 RESOURCE_DEFINITIONS: Mapping[ResourceId, ResourceDefinition] = {
+    ResourceId.HEROIC_INSPIRATION: ResourceDefinition(
+        ResourceKey(ResourceId.HEROIC_INSPIRATION, ResourceKind.INSPIRATION),
+        ResourceId.HEROIC_INSPIRATION.value,
+        proactiveReroll=ProactiveRerollPolicy(
+            (
+                ProactiveRerollTrigger.FAILED_D20_TEST,
+                ProactiveRerollTrigger.MINIMUM_DAMAGE_DIE,
+            ),
+            "House rule: declare before one roll. Replace the first failed test die; otherwise replace the first damage die showing 1. Spend only when a die is replaced.",
+        ),
+    ),
     **{
         resource: ResourceDefinition(
             ResourceKey(resource, ResourceKind.HIT_DIE),
