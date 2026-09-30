@@ -289,7 +289,7 @@ def test_wizard_prepared_spell_rule_rejects_spells_outside_the_spellbook() -> No
         raise AssertionError("Expected a prepared spell outside the spellbook to be rejected")
 
 
-def test_lazy_wizard_prepared_migration_preserves_existing_skills() -> None:
+def test_wizard_prepared_migration_preserves_base_skills() -> None:
     level_one = CharacterClassLevel(name=ClassType.WIZARD, level=1)
     spellbook = wizard_spellbook_spell_options(1)[:wizard_spellbook_spell_count(level_one)]
     member = PartyMemberConfig(
@@ -297,7 +297,7 @@ def test_lazy_wizard_prepared_migration_preserves_existing_skills() -> None:
         name="Merlin",
         sheet=PartyMemberSheet(
             classes=[level_one],
-            skills={
+            baseSkills={
                 enum_key(SkillType.ARCANA): ProficiencyLevel.PROFICIENT,
                 enum_key(SkillType.HISTORY): ProficiencyLevel.PROFICIENT,
             },
@@ -546,7 +546,7 @@ def wizard_sheet(level: int, subclass: WizardSubclassType | None = None):
             maxHp=6 + 2 + max(0, level - 1) * 5,
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.WIZARD, level=level, subclass=subclass)],
-                skills={},
+                baseSkills={},
             ),
         ),
         current_hp=None,

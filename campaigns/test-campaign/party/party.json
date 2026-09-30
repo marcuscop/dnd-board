@@ -110,7 +110,7 @@
                   "$type": "int",
                   "value": 30
                 },
-                "skills": {
+                "baseSkills": {
                   "$type": "dict",
                   "value": {
                     "athletics": {
@@ -369,6 +369,10 @@
                         "resourceCosts": {
                           "$type": "tuple",
                           "items": []
+                        },
+                        "activationInstances": {
+                          "$type": "int",
+                          "value": 1
                         }
                       }
                     },
@@ -455,6 +459,10 @@
                         "resourceCosts": {
                           "$type": "tuple",
                           "items": []
+                        },
+                        "activationInstances": {
+                          "$type": "int",
+                          "value": 1
                         }
                       }
                     }
@@ -823,7 +831,7 @@
                   "$type": "int",
                   "value": 30
                 },
-                "skills": {
+                "baseSkills": {
                   "$type": "dict",
                   "value": {
                     "arcana": {
@@ -1260,7 +1268,7 @@
                   "$type": "int",
                   "value": 30
                 },
-                "skills": {
+                "baseSkills": {
                   "$type": "dict",
                   "value": {
                     "investigation": {
@@ -4723,6 +4731,10 @@
                         "resourceCosts": {
                           "$type": "tuple",
                           "items": []
+                        },
+                        "activationInstances": {
+                          "$type": "int",
+                          "value": 1
                         }
                       }
                     }
@@ -5105,7 +5117,7 @@
                   "$type": "int",
                   "value": 30
                 },
-                "skills": {
+                "baseSkills": {
                   "$type": "dict",
                   "value": {
                     "medicine": {

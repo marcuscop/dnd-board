@@ -56,6 +56,7 @@ from dnd_board.character_sheet import (
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.fighter import archetypes as fighter_archetypes
 from dnd_board.rules.classes.fighter.base import fighter_features, fighter_resources, subclass_description
+from dnd_board.rules.equipment import WeaponTrainingCategory
 from dnd_board.rules.feats import (
     BackgroundPrerequisiteType,
     FIGHTING_STYLE_FEATS,
@@ -66,7 +67,6 @@ from dnd_board.rules.feats import (
     GENERAL_FEATS,
     GeneralFeatType,
     GiantStrikeType,
-    WeaponProficiencyType,
     armor_class_bonus,
     feat_abilities,
     feat_prerequisite_label,
@@ -321,7 +321,7 @@ def test_general_feat_prerequisites_are_structured_and_evaluable() -> None:
         background="Soldier",
         abilityScores=AbilityScores(12, 12, 12, 10, 10, 10),
         classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=4)],
-        proficiencies=["Light armor", "Martial Weapon"],
+        proficiencies=["Light armor"],
         feats=[],
         features=[],
         abilities=[],
@@ -366,7 +366,7 @@ def test_feat_prerequisite_labels_and_checks_cover_all_prerequisite_types() -> N
     )
 
     assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.SPECIES_SIZE, speciesSizes=())) == ""
-    assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=(WeaponProficiencyType.MARTIAL,), backgrounds=(BackgroundPrerequisiteType.GIANT_FOUNDLING,))) == "Martial Weapon or Giant Foundling"
+    assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=(WeaponTrainingCategory.MARTIAL,), backgrounds=(BackgroundPrerequisiteType.GIANT_FOUNDLING,))) == "Martial Weapon or Giant Foundling"
     assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.CHARACTER_FEATURE, features=(FeatCharacterFeatureType.SPELLCASTING,))) == "Spellcasting Feature"
     assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.SPELLCASTING)) == "Spellcasting or Pact Magic"
     assert feat_prerequisite_label(FeatPrerequisite(FeatPrerequisiteType.BACKGROUND, backgrounds=(BackgroundPrerequisiteType.GIANT_FOUNDLING,))) == "Giant Foundling"
@@ -377,7 +377,11 @@ def test_feat_prerequisite_labels_and_checks_cover_all_prerequisite_types() -> N
 
     assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.CHARACTER_LEVEL, minimumLevel=19), spellcaster_sheet)
     assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.SPECIES_SIZE, speciesSizes=()), spellcaster_sheet) is False
-    assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=(WeaponProficiencyType.MARTIAL,)), spellcaster_sheet)
+    martial_prerequisite = FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=(WeaponTrainingCategory.MARTIAL,))
+    assert not feat_prerequisite_met(martial_prerequisite, spellcaster_sheet)
+    spellcaster_sheet.classes = [CharacterClassLevel(ClassType.FIGHTER, 1)]
+    assert feat_prerequisite_met(martial_prerequisite, spellcaster_sheet)
+    spellcaster_sheet.classes = []
     assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.CHARACTER_FEATURE, features=(FeatCharacterFeatureType.SPELLCASTING,)), spellcaster_sheet)
     assert feat_prerequisite_met(spellcasting_prerequisite(), spellcaster_sheet)
     assert feat_prerequisite_met(FeatPrerequisite(FeatPrerequisiteType.FEAT, feats=(GeneralFeatType.STRIKE_OF_THE_GIANTS,)), spellcaster_sheet)

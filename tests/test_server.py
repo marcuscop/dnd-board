@@ -6560,7 +6560,7 @@ def test_tough_origin_feat_adds_hit_points_on_level_up(tmp_path, monkeypatch) ->
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=1, fightingStyles=[FightingStyleType.DEFENSE])],
-                skills={
+                baseSkills={
                     enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT,
                     enum_key(SkillType.PERCEPTION): ProficiencyLevel.PROFICIENT,
                 },
@@ -6590,7 +6590,7 @@ def test_dm_level_up_exposes_pending_fighter_choices_and_applies_them(tmp_path, 
             abilityScores=AbilityScores(strength=16, dexterity=14, constitution=15, intelligence=10, wisdom=12, charisma=8),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.FIGHTER, level=2, fightingStyles=[FightingStyleType.DEFENSE])],
-                skills={
+                baseSkills={
                     enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT,
                     enum_key(SkillType.PERCEPTION): ProficiencyLevel.PROFICIENT,
                 },
@@ -6636,7 +6636,7 @@ def test_level_down_prunes_unavailable_fighter_choices_and_hp(tmp_path, monkeypa
                         fightingStyles=[FightingStyleType.DEFENSE],
                     )
                 ],
-                skills={
+                baseSkills={
                     enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT,
                     enum_key(SkillType.PERCEPTION): ProficiencyLevel.PROFICIENT,
                 },
@@ -6749,7 +6749,7 @@ def test_wizard_level_up_preserves_existing_cantrips_before_new_cantrip_choice(t
             abilityScores=AbilityScores(strength=8, dexterity=14, constitution=14, intelligence=16, wisdom=10, charisma=10),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.WIZARD, level=3, subclass=WizardSubclassType.ABJURER)],
-                skills={
+                baseSkills={
                     enum_key(SkillType.ARCANA): ProficiencyLevel.PROFICIENT,
                     enum_key(SkillType.HISTORY): ProficiencyLevel.PROFICIENT,
                 },
@@ -6857,7 +6857,7 @@ def test_rogue_levels_into_soulknife_and_uses_homing_strikes(tmp_path, monkeypat
             abilityScores=AbilityScores(strength=10, dexterity=16, constitution=14, intelligence=12, wisdom=12, charisma=10),
             sheet=PartyMemberSheet(
                 classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)],
-                skills={
+                baseSkills={
                     enum_key(SkillType.SLEIGHT_OF_HAND): ProficiencyLevel.EXPERTISE,
                     enum_key(SkillType.STEALTH): ProficiencyLevel.EXPERTISE,
                     enum_key(SkillType.PERCEPTION): ProficiencyLevel.PROFICIENT,
@@ -8107,7 +8107,7 @@ def test_grappling_strike_resolves_contested_check_and_applies_grappled(tmp_path
             maxHp=40,
             abilityScores=AbilityScores(strength=18, dexterity=10, constitution=12, intelligence=10, wisdom=10, charisma=10),
             sheet=PartyMemberSheet(
-                skills={enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT},
+                baseSkills={enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT},
                 classes=[
                     CharacterClassLevel(
                         name=ClassType.FIGHTER,
@@ -8123,7 +8123,7 @@ def test_grappling_strike_resolves_contested_check_and_applies_grappled(tmp_path
             name="Escaper",
             maxHp=30,
             abilityScores=AbilityScores(strength=10, dexterity=16, constitution=10, intelligence=10, wisdom=10, charisma=10),
-            sheet=PartyMemberSheet(skills={enum_key(SkillType.ACROBATICS): ProficiencyLevel.PROFICIENT}),
+            sheet=PartyMemberSheet(baseSkills={enum_key(SkillType.ACROBATICS): ProficiencyLevel.PROFICIENT}),
         ),
     )
 
@@ -8175,7 +8175,7 @@ def test_grappling_strike_does_not_apply_grappled_when_target_wins_contest(tmp_p
             name="Escaper",
             maxHp=30,
             abilityScores=AbilityScores(strength=10, dexterity=18, constitution=10, intelligence=10, wisdom=10, charisma=10),
-            sheet=PartyMemberSheet(skills={enum_key(SkillType.ACROBATICS): ProficiencyLevel.PROFICIENT}),
+            sheet=PartyMemberSheet(baseSkills={enum_key(SkillType.ACROBATICS): ProficiencyLevel.PROFICIENT}),
         ),
     )
 

@@ -179,6 +179,66 @@ class WeaponTrainingCategory(Enum):
     MARTIAL = "Martial"
 
 
+@dataclass(frozen=True)
+class WeaponTrainingProfile:
+    categories: tuple[WeaponTrainingCategory, ...] = ()
+    martialPropertiesAny: tuple[WeaponProperty, ...] = ()
+
+    def permits(self, definition: EquipmentDefinition) -> bool:
+        if definition.weaponTraining in self.categories:
+            return True
+        return definition.weaponTraining == WeaponTrainingCategory.MARTIAL and any(
+            prop in definition.properties for prop in self.martialPropertiesAny
+        )
+
+    def permits_category(self, category: WeaponTrainingCategory) -> bool:
+        return any(
+            definition.weaponTraining == category and self.permits(definition)
+            for definition in EQUIPMENT_DEFINITIONS.values()
+        )
+
+
+def catalog_attack_weapon_training(
+    equipment: list[EquipmentItem], attack_id: str, training: WeaponTrainingProfile
+) -> bool | None:
+    item = next(
+        (item for item in equipment if item.itemType == EquipmentType.WEAPON and item.id == attack_id),
+        None,
+    )
+    if item is None:
+        return None
+    definition = equipment_definition(item.definitionId or item.name)
+    return training.permits(definition) if definition is not None and definition.weaponTraining is not None else None
+
+
+CLASS_WEAPON_TRAINING: dict[ClassType, WeaponTrainingProfile] = {
+    ClassType.ADVENTURER: WeaponTrainingProfile(),
+    ClassType.ARTIFICER: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE,)),
+    ClassType.BARD: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE,)),
+    ClassType.CLERIC: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE,)),
+    ClassType.CREATURE: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE, WeaponTrainingCategory.MARTIAL)),
+    ClassType.DRUID: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE,)),
+    ClassType.FIGHTER: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE, WeaponTrainingCategory.MARTIAL)),
+    ClassType.PALADIN: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE, WeaponTrainingCategory.MARTIAL)),
+    ClassType.RANGER: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE, WeaponTrainingCategory.MARTIAL)),
+    ClassType.ROGUE: WeaponTrainingProfile(
+        (WeaponTrainingCategory.SIMPLE,),
+        (WeaponProperty.FINESSE, WeaponProperty.LIGHT),
+    ),
+    ClassType.SORCERER: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE,)),
+    ClassType.WARLOCK: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE,)),
+    ClassType.WIZARD: WeaponTrainingProfile((WeaponTrainingCategory.SIMPLE,)),
+}
+
+
+MULTICLASS_WEAPON_TRAINING: dict[ClassType, WeaponTrainingProfile] = {
+    **{character_class: WeaponTrainingProfile() for character_class in ClassType},
+    ClassType.FIGHTER: WeaponTrainingProfile((WeaponTrainingCategory.MARTIAL,)),
+    ClassType.PALADIN: WeaponTrainingProfile((WeaponTrainingCategory.MARTIAL,)),
+    ClassType.RANGER: WeaponTrainingProfile((WeaponTrainingCategory.MARTIAL,)),
+}
+
+
 class WeaponMastery(Enum):
     CLEAVE = "Cleave"
     GRAZE = "Graze"

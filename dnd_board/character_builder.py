@@ -244,7 +244,6 @@ def build_party_member_config(request: CharacterBuilderRequest) -> PartyMemberCo
             [enum_key(option) for option in request.origin_feat_training],
         )
         progression_grants.append(ProgressionGrantRecord(evaluation.source, evaluation.grants))
-        skills = apply_progression_grants(base_skills, progression_grants)
     if request.fighting_style is not None:
         progression_grants.append(ProgressionGrantRecord(
             source=ProgressionGrantSource(
@@ -270,7 +269,6 @@ def build_party_member_config(request: CharacterBuilderRequest) -> PartyMemberCo
             background=background_label(request.background),
             classes=[character_class],
             speed=species.speed,
-            skills=skills or None,
             baseSkills=base_skills or None,
             progressionGrants=progression_grants or None,
             proficiencies=background_proficiencies(request.tool_proficiency) or None,

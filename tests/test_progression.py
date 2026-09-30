@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from dnd_board.application.progression_service import ProgressionServiceError, apply_member_progression_rule, member_feat_eligibility_sheet, set_member_class_levels
-from dnd_board.character_sheet import AbilityScores, AbilityType, ArcaneShotType, BattleMasterManeuverType, CharacterClassLevel, ClassOptionKind, ClassOptionSelection, ClassType, FightingStyleType, PartyMember, PartyMemberConfig, PartyMemberSheet, ProficiencyLevel, ProgressionChoice, ProgressionChoiceType, RuneType, SkillType, SpellId, SpellSource, SpellStatus, TimeEconomy, TokenKind, build_character_sheet, enum_key, typed_json_from_value, typed_json_to_value
+from dnd_board.character_sheet import AbilityScores, AbilityType, ArcaneShotType, AttackAction, BattleMasterManeuverType, CharacterClassLevel, ClassOptionKind, ClassOptionSelection, ClassType, DamageType, DiceType, EquipmentItem, EquipmentSlot, EquipmentType, FightingStyleType, PartyMember, PartyMemberConfig, PartyMemberSheet, ProficiencyLevel, ProgressionChoice, ProgressionChoiceType, RuneType, SkillType, SpellId, SpellSource, SpellStatus, TimeEconomy, TokenKind, build_attack_roll_payload, build_character_sheet, enum_key, typed_json_from_value, typed_json_to_value
 from dnd_board.rules.classes.fighter.base import FighterSubclassType
 from dnd_board.rules.classes.rogue.base import RogueSubclassType
 from dnd_board.rules.classes.fighter.archetypes import normalized_eldritch_knight_spell
@@ -44,7 +44,8 @@ from dnd_board.rules.progression import (
     saving_throw_proficiencies_from_grants,
     SavingThrowProficiencyGrant,
 )
-from dnd_board.rules.feats import GENERAL_FEATS, FeatCategory, GeneralFeatType, feat_abilities
+from dnd_board.rules.feats import GENERAL_FEATS, FeatCategory, GeneralFeatType, effective_weapon_training, feat_abilities
+from dnd_board.rules.equipment import CLASS_WEAPON_TRAINING, MULTICLASS_WEAPON_TRAINING, WeaponTrainingCategory
 from dnd_board.rules.feats import (
     feat_hit_point_bonus,
     feat_hit_point_bonus_per_level,
@@ -53,6 +54,7 @@ from dnd_board.rules.feats import (
 )
 from dnd_board.rules.shared.tool_types import ToolType
 from dnd_board.rules.shared.effects import AbilityScoreAdjustment
+from dnd_board.rules.equipment import EquipmentId
 
 
 def hp_record(
@@ -63,6 +65,210 @@ def hp_record(
         ProgressionGrantSource(ProgressionChoiceId.HIT_POINT_INCREASE, class_type),
         grants,
     )
+
+
+@pytest.mark.parametrize(
+    ("selection", "strength", "dexterity"),
+    [(["strength"], 18, 14), (["strength", "dexterity"], 17, 15)],
+)
+def test_ability_score_improvement_feat_uses_two_point_grants(selection, strength, dexterity) -> None:
+    member = PartyMemberConfig(
+        id="fighter", name="Fighter", maxHp=36,
+        abilityScores=AbilityScores(16, 14, 14, 10, 10, 10),
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(ClassType.FIGHTER, 4)],
+            progressionGrants=[ProgressionGrantRecord(
+                ProgressionGrantSource(ProgressionChoiceId.FIGHTER_ABILITY_SCORE_IMPROVEMENT, ClassType.FIGHTER),
+                (FeatGrant(ClassType.FIGHTER, 4, GeneralFeatType.ABILITY_SCORE_IMPROVEMENT),),
+            )],
+        ),
+    )
+
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE, selection)
+
+    assert member.abilityScores.strength == strength
+    assert member.abilityScores.dexterity == dexterity
+    assert GENERAL_FEATS[GeneralFeatType.ABILITY_SCORE_IMPROVEMENT].repeatable
+    set_member_class_levels(member, [CharacterClassLevel(ClassType.FIGHTER, 3)])
+    assert member.abilityScores.strength == 16
+    assert member.abilityScores.dexterity == 14
+
+
+def test_skill_expert_grants_distinct_proficiency_and_expertise_choices() -> None:
+    member = PartyMemberConfig(
+        id="rogue", name="Rogue", maxHp=28,
+        abilityScores=AbilityScores(10, 16, 12, 10, 10, 10),
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(ClassType.ROGUE, 4)],
+            baseSkills={enum_key(SkillType.ATHLETICS): ProficiencyLevel.PROFICIENT},
+            progressionGrants=[ProgressionGrantRecord(
+                ProgressionGrantSource(ProgressionChoiceId.ROGUE_ABILITY_SCORE_IMPROVEMENT, ClassType.ROGUE),
+                (FeatGrant(ClassType.ROGUE, 4, GeneralFeatType.SKILL_EXPERT),),
+            )],
+        ),
+    )
+
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_SKILL_TRAINING, [enum_key(SkillType.ARCANA)])
+    expertise = progression_rule(
+        ProgressionChoiceId.FEAT_EXPERTISE,
+        member.sheet.classes,
+        member.sheet.skills,
+        member.sheet.progressionGrants,
+    )
+    assert expertise is not None
+    assert SkillType.ARCANA in expertise.choices[0].candidates
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_EXPERTISE, [enum_key(SkillType.ARCANA)])
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE, ["dexterity"])
+    assert member.sheet.skills[enum_key(SkillType.ARCANA)] == ProficiencyLevel.EXPERTISE
+    assert member.abilityScores.dexterity == 17
+    assert any(record.source.rule == ProgressionChoiceId.FEAT_EXPERTISE for record in member.sheet.progressionGrants)
+    set_member_class_levels(member, [CharacterClassLevel(ClassType.ROGUE, 3)])
+    assert member.sheet.skills.get(enum_key(SkillType.ARCANA), ProficiencyLevel.NONE) == ProficiencyLevel.NONE
+    assert member.abilityScores.dexterity == 16
+
+
+def test_sheet_serializes_skill_sources_without_cached_effective_skills() -> None:
+    skill = enum_key(SkillType.STEALTH)
+    sheet = PartyMemberSheet(
+        baseSkills={skill: ProficiencyLevel.PROFICIENT},
+        progressionGrants=[ProgressionGrantRecord(
+            ProgressionGrantSource(ProgressionChoiceId.ROGUE_EXPERTISE, ClassType.ROGUE),
+            (SkillProficiencyGrant(SkillType.STEALTH, ProficiencyLevel.EXPERTISE),),
+        )],
+    )
+
+    encoded = typed_json_from_value(sheet)
+    assert "skills" not in encoded["fields"]
+    assert "baseSkills" in encoded["fields"]
+    restored = typed_json_to_value(encoded, PartyMemberSheet)
+    assert restored.skills[skill] == ProficiencyLevel.EXPERTISE
+    restored.progressionGrants = []
+    assert restored.skills[skill] == ProficiencyLevel.PROFICIENT
+
+
+def test_martial_weapon_training_changes_catalog_weapon_attack_proficiency(monkeypatch) -> None:
+    member = PartyMemberConfig(
+        id="wizard", name="Wizard", maxHp=20,
+        abilityScores=AbilityScores(15, 10, 10, 16, 10, 10),
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(ClassType.WIZARD, 4)],
+            equipment=[EquipmentItem(
+                id="glaive", name="Glaive", definitionId=EquipmentId.GLAIVE,
+                itemType=EquipmentType.WEAPON, slot=EquipmentSlot.TWO_HANDS,
+            )],
+            attacks=[AttackAction("glaive", "Glaive", AbilityType.STRENGTH, 1, DiceType.D10, damageType=DamageType.SLASHING)],
+        ),
+    )
+    def sheet():
+        return build_character_sheet(
+            token_id=member.id, kind=TokenKind.CHARACTER, name=member.name, owner="player-1",
+            avatar_url=None,
+            party_member=PartyMember(member.id, member.name, "player-1", None, member.abilityScores, member.maxHp, member.sheet),
+            current_hp=None, resource_overrides={},
+        )
+
+    monkeypatch.setattr("dnd_board.character_sheet.random.randint", lambda _minimum, _maximum: 10)
+    before = sheet()
+    assert not before.attacks[0].proficient
+    before_roll = build_attack_roll_payload(before, "player-1", before.attacks[0])
+    member.sheet.progressionGrants = [ProgressionGrantRecord(
+        ProgressionGrantSource(ProgressionChoiceId.WIZARD_ABILITY_SCORE_IMPROVEMENT, ClassType.WIZARD),
+        (FeatGrant(ClassType.WIZARD, 4, GeneralFeatType.MARTIAL_WEAPON_TRAINING),),
+    )]
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE, ["strength"])
+    after = sheet()
+    after_roll = build_attack_roll_payload(after, "player-1", after.attacks[0])
+    assert after.attacks[0].proficient
+    assert after_roll.total - before_roll.total == 1 + after.proficiencyBonus
+    assert "Martial weapons" in after.proficiencies
+    set_member_class_levels(member, [CharacterClassLevel(ClassType.WIZARD, 3)])
+    assert not sheet().attacks[0].proficient
+
+
+@pytest.mark.parametrize(
+    ("character_class", "weapon", "expected"),
+    [
+        (ClassType.FIGHTER, EquipmentId.GLAIVE, True),
+        (ClassType.ROGUE, EquipmentId.GLAIVE, False),
+        (ClassType.ROGUE, EquipmentId.HAND_CROSSBOW, True),
+        (ClassType.WIZARD, EquipmentId.DAGGER, True),
+        (ClassType.PALADIN, EquipmentId.GLAIVE, True),
+        (ClassType.RANGER, EquipmentId.GLAIVE, True),
+        (ClassType.BARD, EquipmentId.GLAIVE, False),
+        (ClassType.CLERIC, EquipmentId.DAGGER, True),
+        (ClassType.DRUID, EquipmentId.GLAIVE, False),
+        (ClassType.SORCERER, EquipmentId.DAGGER, True),
+        (ClassType.WARLOCK, EquipmentId.GLAIVE, False),
+        (ClassType.ARTIFICER, EquipmentId.DAGGER, True),
+        (ClassType.CREATURE, EquipmentId.GLAIVE, True),
+    ],
+)
+def test_catalog_weapon_proficiency_uses_class_training(character_class, weapon, expected) -> None:
+    definition = weapon.value
+    member = PartyMemberConfig(
+        id="attacker", name="Attacker", maxHp=20,
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(character_class, 1)],
+            equipment=[EquipmentItem(
+                id=enum_key(weapon), name=definition, definitionId=weapon,
+                itemType=EquipmentType.WEAPON, slot=EquipmentSlot.MAIN_HAND,
+            )],
+            attacks=[AttackAction(enum_key(weapon), definition, AbilityType.DEXTERITY, 1, DiceType.D6)],
+        ),
+    )
+    sheet = build_character_sheet(
+        token_id=member.id, kind=TokenKind.CHARACTER, name=member.name, owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(member.id, member.name, "player-1", None, member.abilityScores, member.maxHp, member.sheet),
+        current_hp=None, resource_overrides={},
+    )
+
+    assert sheet.attacks[0].proficient is expected
+
+
+def test_catalog_weapon_training_ignores_display_label_and_attack_default() -> None:
+    member = PartyMemberConfig(
+        id="wizard", name="Wizard", maxHp=12,
+        sheet=PartyMemberSheet(
+            classes=[CharacterClassLevel(ClassType.WIZARD, 1)],
+            proficiencies=["Martial Weapon"],
+            equipment=[EquipmentItem(
+                id="glaive", name="Glaive", definitionId=EquipmentId.GLAIVE,
+                itemType=EquipmentType.WEAPON, slot=EquipmentSlot.TWO_HANDS,
+            )],
+            attacks=[AttackAction("glaive", "Glaive", AbilityType.STRENGTH, 1, DiceType.D10)],
+        ),
+    )
+    sheet = build_character_sheet(
+        token_id=member.id, kind=TokenKind.CHARACTER, name=member.name, owner="player-1",
+        avatar_url=None,
+        party_member=PartyMember(member.id, member.name, "player-1", None, member.abilityScores, member.maxHp, member.sheet),
+        current_hp=None, resource_overrides={},
+    )
+
+    assert sheet.attacks[0].proficient is False
+    roll = build_attack_roll_payload(sheet, "player-1", sheet.attacks[0])
+    assert all(part.source != "Proficiency" for part in roll.modifierBreakdown)
+
+
+def test_every_declared_class_has_explicit_weapon_training() -> None:
+    assert set(CLASS_WEAPON_TRAINING) == set(ClassType)
+    assert set(MULTICLASS_WEAPON_TRAINING) == set(ClassType)
+
+
+def test_multiclass_weapon_training_uses_multiclass_grants() -> None:
+    wizard_rogue = effective_weapon_training(
+        [CharacterClassLevel(ClassType.WIZARD, 1), CharacterClassLevel(ClassType.ROGUE, 1)],
+        [],
+    )
+    wizard_fighter = effective_weapon_training(
+        [CharacterClassLevel(ClassType.WIZARD, 1), CharacterClassLevel(ClassType.FIGHTER, 1)],
+        [],
+    )
+
+    assert wizard_rogue.categories == (WeaponTrainingCategory.SIMPLE,)
+    assert not wizard_rogue.martialPropertiesAny
+    assert wizard_fighter.categories == (WeaponTrainingCategory.SIMPLE, WeaponTrainingCategory.MARTIAL)
 
 
 def test_hit_dice_are_explicit_for_supported_and_catalog_only_classes() -> None:
@@ -353,7 +559,6 @@ def test_feat_skill_choice_grants_and_reconciles(
         abilityScores=AbilityScores(10, 10, 10, 16, 14, 10),
         sheet=PartyMemberSheet(
             classes=[CharacterClassLevel(ClassType.WIZARD, 4)],
-            skills=dict(base_skills),
             baseSkills=dict(base_skills),
             progressionGrants=[feat_record],
         ),
@@ -1011,7 +1216,7 @@ def test_progression_service_reconciles_sourced_skills_without_removing_base_ski
         name="Rogue",
         sheet=PartyMemberSheet(
             classes=[CharacterClassLevel(name=ClassType.ROGUE, level=1)],
-            skills={"deception": ProficiencyLevel.PROFICIENT},
+            baseSkills={"deception": ProficiencyLevel.PROFICIENT},
         ),
     )
     apply_member_progression_rule(
@@ -1052,7 +1257,7 @@ def test_rogue_level_down_keeps_only_level_one_expertise_grants() -> None:
         name="Rogue",
         sheet=PartyMemberSheet(
             classes=[CharacterClassLevel(name=ClassType.ROGUE, level=6)],
-            skills={},
+            baseSkills={},
         ),
     )
     apply_member_progression_rule(

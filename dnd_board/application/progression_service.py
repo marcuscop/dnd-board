@@ -47,7 +47,6 @@ from dnd_board.rules.progression import (
     SubclassGrant,
     SkillSelectionIssue,
     TrainingChoiceDefinition,
-    apply_progression_grants,
     progression_feat_grants,
     apply_class_option_progression_grants,
     apply_fighting_style_progression_grants,
@@ -204,7 +203,6 @@ def apply_member_progression_rule(
         member.sheet = PartyMemberSheet(classes=classes)
     ensure_spell_grant_records(member)
     ensure_subclass_grant_records(member)
-    ensure_progression_base_skills(member)
     ensure_progression_base_ability_scores(member)
     ensure_progression_base_hit_points(member)
     skills = dict(member.sheet.skills or {})
@@ -282,7 +280,7 @@ def apply_member_progression_rule(
             ):
                 replaced_spell_scopes.update(spell_grant_scopes([record]))
     records = reconcile_progression_grant_records(
-        member.sheet.baseSkills,
+        member.sheet.baseSkills or {},
         records,
         classes,
     )
@@ -300,7 +298,6 @@ def apply_member_progression_rule(
         previous_records,
         records,
     )
-    member.sheet.skills = apply_progression_grants(member.sheet.baseSkills, records) or None
     apply_spell_progression_grants(
         member,
         records,
@@ -311,7 +308,6 @@ def apply_member_progression_rule(
 def reconcile_member_progression_grants(member: PartyMemberConfig) -> None:
     if member.sheet is None:
         return
-    ensure_progression_base_skills(member)
     ensure_progression_base_ability_scores(member)
     if not member.sheet.progressionGrants:
         return
@@ -344,17 +340,11 @@ def reconcile_member_progression_grants(member: PartyMemberConfig) -> None:
         previous_records,
         records,
     )
-    member.sheet.skills = apply_progression_grants(member.sheet.baseSkills or {}, records) or None
     apply_spell_progression_grants(
         member,
         records,
         replaced_scopes=replaced_spell_scopes,
     )
-
-
-def ensure_progression_base_skills(member: PartyMemberConfig) -> None:
-    if member.sheet is not None and member.sheet.baseSkills is None:
-        member.sheet.baseSkills = dict(member.sheet.skills or {})
 
 
 def ensure_progression_base_ability_scores(member: PartyMemberConfig) -> None:

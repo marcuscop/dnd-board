@@ -814,7 +814,7 @@ function ProgressionChoiceRow({
     setSelected(choice.selected);
   }, [choiceStateKey]);
 
-  if (choice.choiceType === "abilityScoreImprovement") {
+  if (choice.choiceType === "abilityScoreImprovement" || (choice.choiceType === "featAbilityScoreIncrease" && choice.maximum === 2)) {
     return <AbilityScoreImprovementChoice sheet={sheet} choice={choice} onUpdateProgressionChoice={onUpdateProgressionChoice} />;
   }
 
@@ -893,8 +893,10 @@ function AbilityScoreImprovementChoice({
   const [firstAbility, setFirstAbility] = useState<AbilityType>("strength");
   const [secondAbility, setSecondAbility] = useState<AbilityType | typeof SAME_ABILITY_VALUE>(SAME_ABILITY_VALUE);
   const [selectedFeat, setSelectedFeat] = useState("");
-  const values = mode === "feat" ? [`feat:${selectedFeat}`] : [firstAbility, secondAbility === SAME_ABILITY_VALUE ? firstAbility : secondAbility];
-  const canApply = mode === "scores" || selectedFeat.length > 0;
+  const canSelectFeat = choice.choiceType === "abilityScoreImprovement";
+  const effectiveMode = canSelectFeat ? mode : "scores";
+  const values = effectiveMode === "feat" ? [`feat:${selectedFeat}`] : [firstAbility, secondAbility === SAME_ABILITY_VALUE ? firstAbility : secondAbility];
+  const canApply = effectiveMode === "scores" || selectedFeat.length > 0;
 
   return (
     <article className="progression-choice">
@@ -903,15 +905,15 @@ function AbilityScoreImprovementChoice({
         <span>{choice.description}</span>
       </div>
       <div className="asi-choice-controls">
-        <div className="choice-mode-toggle" role="group" aria-label="Ability Score Improvement type">
+        {canSelectFeat && <div className="choice-mode-toggle" role="group" aria-label="Ability Score Improvement type">
           <button className={mode === "scores" ? "active" : ""} type="button" onClick={() => setMode("scores")}>
             Scores
           </button>
           <button className={mode === "feat" ? "active" : ""} type="button" onClick={() => setMode("feat")}>
             Feat
           </button>
-        </div>
-        {mode === "scores" ? (
+        </div>}
+        {effectiveMode === "scores" ? (
           <>
             <label>
               <span>First +1</span>

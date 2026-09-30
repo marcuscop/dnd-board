@@ -36,7 +36,7 @@ from dnd_board.character_sheet import (
     enum_label,
 )
 from dnd_board.rules.sources import RuleSource, is_legacy_source, rule_source_label
-from dnd_board.rules.equipment import CLASS_ARMOR_TRAINING, MULTICLASS_ARMOR_TRAINING, EquipmentId
+from dnd_board.rules.equipment import CLASS_ARMOR_TRAINING, CLASS_WEAPON_TRAINING, MULTICLASS_ARMOR_TRAINING, MULTICLASS_WEAPON_TRAINING, EquipmentId, WeaponTrainingCategory, WeaponTrainingProfile, catalog_attack_weapon_training
 from dnd_board.rules.species import SpeciesType
 from dnd_board.rules.shared.tool_types import MUSICAL_INSTRUMENT_OPTIONS, SELECTABLE_TOOL_TYPES, ToolType
 from dnd_board.rules.shared.effects import (
@@ -421,10 +421,6 @@ class FeatSpeciesSize(Enum):
     SMALL = "Small"
 
 
-class WeaponProficiencyType(Enum):
-    MARTIAL = "Martial Weapon"
-
-
 class GiantStrikeType(Enum):
     CLOUD_STRIKE = "Cloud Strike"
     FIRE_STRIKE = "Fire Strike"
@@ -447,7 +443,7 @@ class FeatPrerequisite:
     species: tuple[SpeciesType, ...] = ()
     speciesSizes: tuple[FeatSpeciesSize, ...] = ()
     armorCategories: tuple[ArmorCategory, ...] = ()
-    weaponProficiencies: tuple[WeaponProficiencyType, ...] = ()
+    weaponProficiencies: tuple[WeaponTrainingCategory, ...] = ()
     features: tuple[FeatCharacterFeatureType, ...] = ()
     feats: tuple[GeneralFeatType, ...] = ()
     giantStrikes: tuple[GiantStrikeType, ...] = ()
@@ -501,6 +497,7 @@ class FeatResourceDefinition:
 class FeatSkillChoice:
     candidates: tuple[SkillType, ...]
     promoteExistingProficiency: bool = True
+    requiresExistingProficiency: bool = False
 
 
 @dataclass(frozen=True)
@@ -534,7 +531,9 @@ class GeneralFeatDefinition:
     armorTraining: tuple[ArmorCategory, ...] = ()
     shieldTraining: bool = False
     skillChoice: FeatSkillChoice | None = None
+    expertiseChoice: FeatSkillChoice | None = None
     trainingChoice: FeatTrainingChoice | None = None
+    weaponTraining: tuple[WeaponTrainingCategory, ...] = ()
     actionDeclarations: tuple[FeatActionDeclaration, ...] = ()
     restGrants: tuple[RestResourceGrant, ...] = ()
 
@@ -554,7 +553,9 @@ def general_feat(
     armor_training: tuple[ArmorCategory, ...] = (),
     shield_training: bool = False,
     skill_choice: FeatSkillChoice | None = None,
+    expertise_choice: FeatSkillChoice | None = None,
     training_choice: FeatTrainingChoice | None = None,
+    weapon_training: tuple[WeaponTrainingCategory, ...] = (),
     action_declarations: tuple[FeatActionDeclaration, ...] = (),
     rest_grants: tuple[RestResourceGrant, ...] = (),
 ) -> GeneralFeatDefinition:
@@ -573,7 +574,9 @@ def general_feat(
         armorTraining=armor_training,
         shieldTraining=shield_training,
         skillChoice=skill_choice,
+        expertiseChoice=expertise_choice,
         trainingChoice=training_choice,
+        weaponTraining=weapon_training,
         actionDeclarations=action_declarations,
         restGrants=rest_grants,
     )
@@ -603,7 +606,7 @@ def armor_prerequisite(*armor_categories: ArmorCategory) -> FeatPrerequisite:
     return FeatPrerequisite(FeatPrerequisiteType.ARMOR_PROFICIENCY, armorCategories=armor_categories)
 
 
-def weapon_prerequisite(*weapon_proficiencies: WeaponProficiencyType) -> FeatPrerequisite:
+def weapon_prerequisite(*weapon_proficiencies: WeaponTrainingCategory) -> FeatPrerequisite:
     return FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=weapon_proficiencies)
 
 
@@ -623,7 +626,7 @@ def background_prerequisite(*backgrounds: BackgroundPrerequisiteType) -> FeatPre
     return FeatPrerequisite(FeatPrerequisiteType.BACKGROUND, backgrounds=backgrounds)
 
 
-def weapon_or_background_prerequisite(weapon_proficiency: WeaponProficiencyType, background: BackgroundPrerequisiteType) -> FeatPrerequisite:
+def weapon_or_background_prerequisite(weapon_proficiency: WeaponTrainingCategory, background: BackgroundPrerequisiteType) -> FeatPrerequisite:
     return FeatPrerequisite(FeatPrerequisiteType.WEAPON_PROFICIENCY, weaponProficiencies=(weapon_proficiency,), backgrounds=(background,))
 
 
@@ -1371,7 +1374,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.FADE_AWAY: general_feat(GeneralFeatType.FADE_AWAY, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Dexterity or Intelligence; turn invisible after taking damage.", (species_prerequisite(SpeciesType.GNOME),)),
     GeneralFeatType.FEY_TELEPORTATION: general_feat(GeneralFeatType.FEY_TELEPORTATION, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Intelligence or Charisma; gain Sylvan and misty step.", (species_prerequisite(SpeciesType.ELF),)),
     GeneralFeatType.FEY_TOUCHED: general_feat(GeneralFeatType.FEY_TOUCHED, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; learn misty step and another spell."),
-    GeneralFeatType.FIGHTING_INITIATE: general_feat(GeneralFeatType.FIGHTING_INITIATE, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn one Fighting Style option from the fighter class.", (weapon_prerequisite(WeaponProficiencyType.MARTIAL),)),
+    GeneralFeatType.FIGHTING_INITIATE: general_feat(GeneralFeatType.FIGHTING_INITIATE, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn one Fighting Style option from the fighter class.", (weapon_prerequisite(WeaponTrainingCategory.MARTIAL),)),
     GeneralFeatType.FLAMES_OF_PHLEGETHOS: general_feat(GeneralFeatType.FLAMES_OF_PHLEGETHOS, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Intelligence or Charisma; improve fire spells and fiery retaliation.", (species_prerequisite(SpeciesType.TIEFLING),)),
     GeneralFeatType.FURY_OF_THE_FROST_GIANT: general_feat(GeneralFeatType.FURY_OF_THE_FROST_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; cold resistance and frost retaliation.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.FROST_STRIKE))),
     GeneralFeatType.GIFT_OF_THE_CHROMATIC_DRAGON: general_feat(GeneralFeatType.GIFT_OF_THE_CHROMATIC_DRAGON, RuleSource.FIZBANS_TREASURY_OF_DRAGONS, "Add elemental weapon damage and gain reactive elemental resistance."),
@@ -1561,7 +1564,15 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.DEXTERITY,)),
     ),
     GeneralFeatType.SHIELD_MASTER: general_feat(GeneralFeatType.SHIELD_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Add shield tactics to attacks and Dexterity saves."),
-    GeneralFeatType.SKILL_EXPERT: general_feat(GeneralFeatType.SKILL_EXPERT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 in one ability; gain one skill proficiency and one expertise."),
+    GeneralFeatType.SKILL_EXPERT: general_feat(
+        GeneralFeatType.SKILL_EXPERT,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 to one ability score. Gain one skill proficiency and Expertise in one proficient skill.",
+        (level_prerequisite(4),),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice(tuple(AbilityType)),
+        skill_choice=FeatSkillChoice(tuple(SkillType), promoteExistingProficiency=False),
+        expertise_choice=FeatSkillChoice(tuple(SkillType), requiresExistingProficiency=True),
+    ),
     GeneralFeatType.SKILLED: general_feat(
         GeneralFeatType.SKILLED,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1592,7 +1603,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         )),
     ),
     GeneralFeatType.SQUAT_NIMBLENESS: general_feat(GeneralFeatType.SQUAT_NIMBLENESS, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength or Dexterity; improve speed and escape checks.", (species_or_size_prerequisite(SpeciesType.DWARF, sizes=(FeatSpeciesSize.SMALL,)),)),
-    GeneralFeatType.STRIKE_OF_THE_GIANTS: general_feat(GeneralFeatType.STRIKE_OF_THE_GIANTS, RuleSource.GLORY_OF_THE_GIANTS, "Choose a giant strike option for extra weapon damage and riders.", (weapon_or_background_prerequisite(WeaponProficiencyType.MARTIAL, BackgroundPrerequisiteType.GIANT_FOUNDLING),)),
+    GeneralFeatType.STRIKE_OF_THE_GIANTS: general_feat(GeneralFeatType.STRIKE_OF_THE_GIANTS, RuleSource.GLORY_OF_THE_GIANTS, "Choose a giant strike option for extra weapon damage and riders.", (weapon_or_background_prerequisite(WeaponTrainingCategory.MARTIAL, BackgroundPrerequisiteType.GIANT_FOUNDLING),)),
     GeneralFeatType.TAVERN_BRAWLER: general_feat(GeneralFeatType.TAVERN_BRAWLER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Constitution; improve improvised weapons, unarmed strikes, and grapples."),
     GeneralFeatType.TELEKINETIC: general_feat(GeneralFeatType.TELEKINETIC, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; improve mage hand and shove telekinetically."),
     GeneralFeatType.TELEPATHIC: general_feat(GeneralFeatType.TELEPATHIC, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; speak telepathically and cast detect thoughts."),
@@ -1643,8 +1654,24 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     GeneralFeatType.TIRELESS_REVELER: general_feat(GeneralFeatType.TIRELESS_REVELER, RuleSource.DND_BEYOND_DROPS_2026, 'Tireless Reveler 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
     GeneralFeatType.VAMPIRE_HUNTER: general_feat(GeneralFeatType.VAMPIRE_HUNTER, RuleSource.DND_BEYOND_DROPS_2026, 'Vampire Hunter 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
     GeneralFeatType.VAMPIRE_S_PLAYTHING: general_feat(GeneralFeatType.VAMPIRE_S_PLAYTHING, RuleSource.DND_BEYOND_DROPS_2026, "Vampire's Plaything 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.", category=FeatCategory.ORIGIN),
-    GeneralFeatType.ABILITY_SCORE_IMPROVEMENT: general_feat(GeneralFeatType.ABILITY_SCORE_IMPROVEMENT, RuleSource.PLAYERS_HANDBOOK_2024, 'Ability Score Improvement 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
-    GeneralFeatType.MARTIAL_WEAPON_TRAINING: general_feat(GeneralFeatType.MARTIAL_WEAPON_TRAINING, RuleSource.PLAYERS_HANDBOOK_2024, 'Martial Weapon Training 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.ABILITY_SCORE_IMPROVEMENT: general_feat(
+        GeneralFeatType.ABILITY_SCORE_IMPROVEMENT,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "Increase one ability score by 2 or two ability scores by 1, to a maximum of 20.",
+        (level_prerequisite(4),),
+        category=FeatCategory.GENERAL,
+        repeatable=True,
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice(tuple(AbilityType), points=2),
+    ),
+    GeneralFeatType.MARTIAL_WEAPON_TRAINING: general_feat(
+        GeneralFeatType.MARTIAL_WEAPON_TRAINING,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength or Dexterity and proficiency with Martial weapons.",
+        (level_prerequisite(4),),
+        category=FeatCategory.GENERAL,
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
+        weapon_training=(WeaponTrainingCategory.MARTIAL,),
+    ),
     GeneralFeatType.SHIFTING_COMBATANT: general_feat(GeneralFeatType.SHIFTING_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, 'Shifting Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.SPEEDY: general_feat(
         GeneralFeatType.SPEEDY,
@@ -2087,7 +2114,7 @@ def feat_prerequisite_label(prerequisite: FeatPrerequisite) -> str:
     if prerequisite.prerequisiteType == FeatPrerequisiteType.ARMOR_PROFICIENCY:
         return "Proficiency with " + " or ".join(f"{enum_label(category)} armor" for category in prerequisite.armorCategories)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.WEAPON_PROFICIENCY:
-        parts = [enum_label(proficiency) for proficiency in prerequisite.weaponProficiencies]
+        parts = [f"{enum_label(proficiency)} Weapon" for proficiency in prerequisite.weaponProficiencies]
         parts.extend(enum_label(background) for background in prerequisite.backgrounds)
         return " or ".join(parts)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.CHARACTER_FEATURE:
@@ -2203,12 +2230,34 @@ def effective_equipment_proficiencies(
     derived = [f"{enum_label(category)} armor" for category in ArmorCategory if category in armor]
     if shields:
         derived.append("Shields")
+    weapon_training = effective_weapon_training(classes, feats)
+    derived.extend(f"{category.value} weapons" for category in weapon_training.categories)
+    if weapon_training.martialPropertiesAny and WeaponTrainingCategory.MARTIAL not in weapon_training.categories:
+        properties = " or ".join(enum_label(prop) for prop in weapon_training.martialPropertiesAny)
+        derived.append(f"Martial weapons with {properties}")
     return list(dict.fromkeys([*proficiencies, *derived]))
 
 
-def has_weapon_proficiency(sheet, proficiency: WeaponProficiencyType) -> bool:
-    label = enum_label(proficiency).lower()
-    return any(label in sheet_proficiency.lower() for sheet_proficiency in sheet_proficiencies(sheet))
+def effective_weapon_training(classes: list[CharacterClassLevel], feats) -> WeaponTrainingProfile:
+    categories: list[WeaponTrainingCategory] = []
+    properties: list[WeaponProperty] = []
+    for index, class_level in enumerate(classes):
+        profile = (CLASS_WEAPON_TRAINING if index == 0 else MULTICLASS_WEAPON_TRAINING)[class_level.name]
+        categories.extend(profile.categories)
+        properties.extend(profile.martialPropertiesAny)
+    for feat_type in selected_general_feat_types(feats):
+        categories.extend(GENERAL_FEATS[feat_type].weaponTraining)
+    return WeaponTrainingProfile(tuple(dict.fromkeys(categories)), tuple(dict.fromkeys(properties)))
+
+
+def catalog_weapon_proficiency(sheet, attack) -> bool | None:
+    return catalog_attack_weapon_training(
+        sheet.equipment, attack.id, effective_weapon_training(sheet.classes, sheet.features)
+    )
+
+
+def has_weapon_proficiency(sheet, proficiency: WeaponTrainingCategory) -> bool:
+    return effective_weapon_training(sheet.classes, sheet.features).permits_category(proficiency)
 
 
 def has_character_feature(sheet, feature: FeatCharacterFeatureType) -> bool:

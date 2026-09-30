@@ -27,6 +27,7 @@ class ProgressionChoiceId(Enum):
     BACKGROUND_FEAT = "backgroundFeat"
     FEAT_ABILITY_SCORE_INCREASE = "featAbilityScoreIncrease"
     FEAT_SKILL_TRAINING = "featSkillTraining"
+    FEAT_EXPERTISE = "featExpertise"
     FEAT_TRAINING = "featTraining"
     FIGHTER_ABILITY_SCORE_IMPROVEMENT = "fighterAbilityScoreImprovement"
     ROGUE_ABILITY_SCORE_IMPROVEMENT = "rogueAbilityScoreImprovement"

@@ -126,6 +126,7 @@ def configured_progression_choice_ids() -> tuple[ProgressionChoiceId, ...]:
     configured: list[ProgressionChoiceId] = [
         ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE,
         ProgressionChoiceId.FEAT_SKILL_TRAINING,
+        ProgressionChoiceId.FEAT_EXPERTISE,
         ProgressionChoiceId.FEAT_TRAINING,
     ]
     for choices in (
@@ -622,7 +623,11 @@ def progression_rule(
             ProgressionChoicePresentation(
                 ProgressionChoiceType.FEAT_ABILITY_SCORE_INCREASE,
                 f"{enum_label(feat_grant.feat)} Ability Score Increase",
-                f"Increase one eligible ability score by {adjustment.points}, to a maximum of {adjustment.maximum}.",
+                (
+                    f"Allocate {adjustment.points} ability-score points, to a maximum of {adjustment.maximum}."
+                    if adjustment.points > 1 else
+                    f"Increase one eligible ability score by 1, to a maximum of {adjustment.maximum}."
+                ),
             ),
             (ClassLevelRequirement(
                 feat_grant.characterClass,
@@ -637,7 +642,8 @@ def progression_rule(
             sourceFeat=feat_grant.feat,
             sourceFeatLevel=feat_grant.minimumClassLevel,
         )
-    if choice_id == ProgressionChoiceId.FEAT_SKILL_TRAINING:
+    if choice_id in {ProgressionChoiceId.FEAT_SKILL_TRAINING, ProgressionChoiceId.FEAT_EXPERTISE}:
+        expertise_choice = choice_id == ProgressionChoiceId.FEAT_EXPERTISE
         records = progression_grants or []
         completed = {
             (
@@ -655,7 +661,10 @@ def progression_rule(
                 for record in records
                 for grant in record.grants
                 if isinstance(grant, FeatGrant)
-                and GENERAL_FEATS[grant.feat].skillChoice is not None
+                and (
+                    GENERAL_FEATS[grant.feat].expertiseChoice if expertise_choice
+                    else GENERAL_FEATS[grant.feat].skillChoice
+                ) is not None
                 and (
                     grant_source is None
                     or (
@@ -674,15 +683,35 @@ def progression_rule(
         if feat_entry is None:
             return None
         feat_record, feat_grant = feat_entry
-        skill_choice = GENERAL_FEATS[feat_grant.feat].skillChoice
+        skill_choice = (
+            GENERAL_FEATS[feat_grant.feat].expertiseChoice if expertise_choice
+            else GENERAL_FEATS[feat_grant.feat].skillChoice
+        )
         if skill_choice is None:
             return None
+        candidates = skill_choice.candidates
+        if skill_choice.requiresExistingProficiency:
+            candidates = tuple(
+                skill for skill in candidates
+                if skills.get(enum_key(skill)) == ProficiencyLevel.PROFICIENT
+            )
+        elif not skill_choice.promoteExistingProficiency:
+            candidates = tuple(
+                skill for skill in candidates
+                if skills.get(enum_key(skill), ProficiencyLevel.NONE) == ProficiencyLevel.NONE
+            )
         return ProgressionRule(
             choice_id,
             ProgressionChoicePresentation(
                 ProgressionChoiceType.SKILL_PROFICIENCIES,
-                f"{enum_label(feat_grant.feat)} Skill",
-                "Choose one skill; gain proficiency, or Expertise if already proficient.",
+                f"{enum_label(feat_grant.feat)} {'Expertise' if expertise_choice else 'Skill'}",
+                (
+                    "Choose one proficient skill in which you lack Expertise."
+                    if expertise_choice else
+                    "Choose one skill; gain proficiency, or Expertise if already proficient."
+                    if skill_choice.promoteExistingProficiency else
+                    "Choose one skill in which you lack proficiency."
+                ),
             ),
             (ClassLevelRequirement(
                 feat_grant.characterClass,
@@ -690,9 +719,10 @@ def progression_rule(
                 feat_record.source.requiredSubclass,
             ),),
             (SkillChoiceDefinition(
-                skill_choice.candidates,
+                candidates,
                 1,
-                ProficiencyLevel.PROFICIENT,
+                ProficiencyLevel.EXPERTISE if expertise_choice else ProficiencyLevel.PROFICIENT,
+                requiresExistingProficiency=skill_choice.requiresExistingProficiency,
                 grantMinimumLevels=(feat_grant.minimumClassLevel,),
                 promoteExistingProficiency=skill_choice.promoteExistingProficiency,
             ),),

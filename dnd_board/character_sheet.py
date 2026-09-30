@@ -1504,7 +1504,6 @@ class PartyMemberSheet:
     armorClass: int | None = None
     speed: int | None = None
     proficiencyBonus: int | None = None
-    skills: dict[str, ProficiencyLevel] | None = None
     baseSkills: dict[str, ProficiencyLevel] | None = None
     progressionGrants: list[ProgressionGrantRecord] | None = None
     savingThrowProficiencies: list[AbilityType] | None = None
@@ -1523,6 +1522,12 @@ class PartyMemberSheet:
     attacks: list[AttackAction] | None = None
     equipment: list[EquipmentItem] | None = None
     purse: Purse | None = None
+
+    @property
+    def skills(self) -> dict[str, ProficiencyLevel]:
+        from dnd_board.rules.progression import apply_progression_grants
+
+        return apply_progression_grants(self.baseSkills or {}, self.progressionGrants or [])
 
 
 @dataclass
@@ -1782,7 +1787,7 @@ def build_character_sheet(
     primary_class = classes[0]
     proficiency_bonus = sheet_config.proficiencyBonus if sheet_config and sheet_config.proficiencyBonus is not None else proficiency_bonus_for_level(total_level)
     ability_modifiers = ability_modifier_map(ability_scores)
-    skill_proficiencies = sheet_config.skills if sheet_config and sheet_config.skills else {}
+    skill_proficiencies = sheet_config.skills if sheet_config else {}
     save_proficiencies = set(sheet_config.savingThrowProficiencies if sheet_config and sheet_config.savingThrowProficiencies else default_save_proficiencies(classes))
     from dnd_board.rules.progression import saving_throw_proficiencies_from_grants, spell_damage_traits_from_grants, tool_proficiencies_from_grants
 
@@ -1888,7 +1893,13 @@ def build_character_sheet(
     from dnd_board.rules.shared.effects import CalculationType
 
     attack_count = character_allocation_value(sheet, CalculationType.ATTACKS_PER_ACTION)
-    sheet.attacks = [replace(attack, activationInstances=attack_count) for attack in sheet.attacks]
+    from dnd_board.rules.feats import catalog_weapon_proficiency
+
+    sheet.attacks = [replace(
+        attack,
+        activationInstances=attack_count,
+        proficient=(training if (training := catalog_weapon_proficiency(sheet, attack)) is not None else attack.proficient),
+    ) for attack in sheet.attacks]
     return sheet
 
 
@@ -2105,8 +2116,11 @@ def effective_attack_action(
     weapon_option: str | None = None,
 ) -> AttackAction:
     from dnd_board.rules.shared.weapon_effects import ongoing_weapon_attack
+    from dnd_board.rules.feats import catalog_weapon_proficiency
 
-    return ongoing_weapon_attack(sheet, action, weapon_option)
+    result = ongoing_weapon_attack(sheet, action, weapon_option)
+    training = catalog_weapon_proficiency(sheet, result)
+    return replace(result, proficient=training) if training is not None else result
 
 
 def weapon_attack_is_wielded(sheet: CharacterSheet, action: AttackAction) -> bool:
