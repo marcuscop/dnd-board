@@ -189,6 +189,7 @@ def feat_grants(
 
 
 def write_party_campaign(tmp_path, campaign_id: str, *members: PartyMemberConfig) -> None:
+    campaign_id = server.sanitize_room_id(campaign_id)
     campaign = tmp_path / campaign_id
     party = campaign / "party"
     party.mkdir(parents=True)
@@ -197,6 +198,24 @@ def write_party_campaign(tmp_path, campaign_id: str, *members: PartyMemberConfig
         json.dumps(typed_json_from_value(PartyManifest(members=list(members)))),
         encoding="utf-8",
     )
+
+
+@pytest.mark.parametrize(
+    "campaign_id",
+    (
+        "greatWeaponMaster-damage-test",
+        "hew-secondWind-15-test",
+        "dualWielder-follow-up-test",
+        "polearmMaster-follow-up-test",
+    ),
+)
+def test_party_campaign_fixture_uses_canonical_directory_name(tmp_path, campaign_id) -> None:
+    write_party_campaign(tmp_path, campaign_id)
+    canonical_id = server.sanitize_room_id(campaign_id)
+    # Path.exists() alone hides casing mistakes on case-insensitive filesystems.
+    assert [path.name for path in tmp_path.iterdir()] == [canonical_id]
+    config = json.loads((tmp_path / canonical_id / "campaign.json").read_text(encoding="utf-8"))
+    assert config["id"] == canonical_id
 
 
 def resolve_rogue_level_choices(client: TestClient, room_id: str) -> dict:
@@ -3030,9 +3049,11 @@ def test_martial_feat_interactions_add_damage_on_the_owner_turn(
         )
         assert refreshed_charger["currentUses"] == 1
     else:
-        attack = client.post(
+        attack_response = client.post(
             f"/api/rooms/{room_id}/sheet/player-1/rolls/attack?playerKey=player-1&attackId=heavy-blade&turnId={encounter['turnId']}"
-        ).json()["roll"]
+        )
+        assert attack_response.status_code == 200, attack_response.text
+        attack = attack_response.json()["roll"]
         prompt = client.post(
             f"/api/rooms/{room_id}/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
         ).json()["prompt"]
@@ -3101,10 +3122,12 @@ def test_great_weapon_master_hew_grants_bound_bonus_attack_until_next_action(
             {"participantId": "player-2", "initiative": 10},
         ],
     ).json()["encounter"]
-    attack = client.post(
+    attack_response = client.post(
         f"/api/rooms/{room_id}/sheet/player-1/rolls/attack"
         f"?playerKey=player-1&attackId=heavy-blade&turnId={encounter['turnId']}"
-    ).json()["roll"]
+    )
+    assert attack_response.status_code == 200, attack_response.text
+    attack = attack_response.json()["roll"]
     prompt = client.post(
         f"/api/rooms/{room_id}/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
     ).json()["prompt"]
@@ -3259,10 +3282,12 @@ def test_weapon_feats_grant_bound_bonus_attacks(
         ],
     ).json()["encounter"]
 
-    attack = client.post(
+    attack_response = client.post(
         f"/api/rooms/{room_id}/sheet/player-1/rolls/attack"
         f"?playerKey=player-1&attackId={primary.id}&turnId={encounter['turnId']}"
-    ).json()["roll"]
+    )
+    assert attack_response.status_code == 200, attack_response.text
+    attack = attack_response.json()["roll"]
     response = client.post(
         f"/api/rooms/{room_id}/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
     )
