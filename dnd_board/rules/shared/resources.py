@@ -50,6 +50,8 @@ class ResourceId(Enum):
     PIERCER_PUNCTURE = "Piercer: Puncture"
     SLASHER_HAMSTRING = "Slasher: Hamstring"
     CHARGER = "Charger"
+    TAVERN_BRAWLER_PUSH = "Tavern Brawler: Push"
+    SHIELD_MASTER_BASH = "Shield Master: Bash"
     BOON_OF_COMBAT_PROWESS = "Boon of Combat Prowess"
     BOON_OF_DIMENSIONAL_TRAVEL = "Boon of Dimensional Travel"
     BOON_OF_FATE = "Boon of Fate"
@@ -292,6 +294,16 @@ RESOURCE_DEFINITIONS: Mapping[ResourceId, ResourceDefinition] = {
     ResourceId.CHARGER: ResourceDefinition(
         ResourceKey(ResourceId.CHARGER, ResourceKind.FEATURE_USE),
         ResourceId.CHARGER.value,
+        (full_recovery(ResourceRecoveryTrigger.TURN_STARTED),),
+    ),
+    ResourceId.TAVERN_BRAWLER_PUSH: ResourceDefinition(
+        ResourceKey(ResourceId.TAVERN_BRAWLER_PUSH, ResourceKind.FEATURE_USE),
+        ResourceId.TAVERN_BRAWLER_PUSH.value,
+        (full_recovery(ResourceRecoveryTrigger.TURN_STARTED),),
+    ),
+    ResourceId.SHIELD_MASTER_BASH: ResourceDefinition(
+        ResourceKey(ResourceId.SHIELD_MASTER_BASH, ResourceKind.FEATURE_USE),
+        ResourceId.SHIELD_MASTER_BASH.value,
         (full_recovery(ResourceRecoveryTrigger.TURN_STARTED),),
     ),
     ResourceId.ARROWS: ResourceDefinition(ResourceKey(ResourceId.ARROWS, ResourceKind.AMMUNITION), ResourceId.ARROWS.value),

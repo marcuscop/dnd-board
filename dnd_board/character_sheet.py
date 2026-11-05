@@ -37,6 +37,7 @@ class RollLogEntryType(Enum):
 
 
 class ResolutionInterceptorType(Enum):
+    EFFECT_CHOICE = auto()
     CANCEL_ACTION = auto()
     REROLL_SAVING_THROW = auto()
     REPLACE_ROLL_OUTCOME = auto()
@@ -50,6 +51,7 @@ class ResolutionInterceptorType(Enum):
 
 
 class ResolutionInterceptorTrigger(Enum):
+    BEFORE_EFFECT_CHOICE = auto()
     BEFORE_SPELL_RESOLVES = auto()
     BEFORE_ATTACK_RESOLVES = auto()
     BEFORE_FAILED_SAVE_FINALIZES = auto()
@@ -1154,6 +1156,7 @@ class FightingStyleType(Enum):
     TUNNEL_FIGHTER = auto()
     TWO_WEAPON_FIGHTING = auto()
     UNARMED_FIGHTING = auto()
+    ARCANE_WARRIOR = auto()
 
 
 class BattleMasterManeuverType(Enum):
@@ -1685,6 +1688,12 @@ class RollResolution:
     sheetUpdates: list[CharacterStateUpdate] | None = None
 
 
+@dataclass(frozen=True)
+class EffectChoicePromptOption:
+    id: str
+    label: str
+
+
 @dataclass
 class ResolutionInterceptorPrompt:
     id: str
@@ -1704,11 +1713,12 @@ class ResolutionInterceptorPrompt:
     useLabel: str
     declineLabel: str
     createdAt: int
-    interaction: Interaction
+    interaction: Interaction | None
     ignoredInterceptors: list[str] = field(default_factory=list)
     responseRolls: list[RollPayload] | None = None
     effectExecutionId: int | None = None
     continuation: ResolutionPromptContinuation = ResolutionPromptContinuation.RESOLVE_AGAINST_TARGET
+    choiceOptions: list[EffectChoicePromptOption] | None = None
 
 
 @dataclass
@@ -1844,7 +1854,7 @@ def build_character_sheet(
     armor_class += default_armor_class_bonus(classes, equipment)
     armor_class += default_feat_armor_class_bonus(configured_feats, equipment, ability_scores)
     attacks = sheet_config.attacks if sheet_config and sheet_config.attacks else default_attacks(kind)
-    attacks = default_feat_attacks(classes, equipment, attacks)
+    attacks = default_feat_attacks(classes, equipment, attacks, configured_feats)
     attacks = [attack_action_with_default_mechanics(attack) for attack in attacks]
     abilities.extend(default_feat_abilities(classes, configured_feats))
     speed = (sheet_config.speed if sheet_config and sheet_config.speed is not None else 30) + default_feat_speed_bonus(configured_feats)
@@ -3995,11 +4005,11 @@ def default_armor_class_bonus(classes: list[CharacterClassLevel], equipment: lis
     return armor_class_bonus(classes, equipment)
 
 
-def default_feat_attacks(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], attacks: list[AttackAction]) -> list[AttackAction]:
+def default_feat_attacks(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], attacks: list[AttackAction], feats=None) -> list[AttackAction]:
     from dnd_board.rules.classes.rogue.archetypes import rogue_subclass_attacks
     from dnd_board.rules.feats import feat_attacks
 
-    return rogue_subclass_attacks(classes, feat_attacks(classes, equipment, attacks))
+    return rogue_subclass_attacks(classes, feat_attacks(classes, equipment, attacks, feats))
 
 
 def attack_roll_modifier_breakdown(classes: list[CharacterClassLevel], action: AttackAction) -> list[RollModifierBreakdown]:
@@ -4202,6 +4212,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
         type_.__name__: type_
         for type_ in [
             AbilityScores,
+            ActivationTiming,
             AbilityRollType,
             D20TestType,
             D20DisadvantageSource,
@@ -4260,6 +4271,7 @@ def typed_json_registry() -> dict[str, type[Any]]:
             RollResolutionMode,
             RollSource,
             ResolutionInterceptorPrompt,
+            EffectChoicePromptOption,
             ResolutionInterceptorTrigger,
             ResolutionInterceptorType,
             ResourceTracker,

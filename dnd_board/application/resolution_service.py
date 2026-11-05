@@ -48,7 +48,9 @@ from dnd_board.character_sheet import (
     RollResolutionMode,
     SheetSectionType,
     ResolutionInterceptorPrompt,
+    ResolutionInterceptorTrigger,
     ResolutionInterceptorType,
+    EffectChoicePromptOption,
     ResolutionPromptContinuation,
     RollModifierEffectTarget,
     SpellSaveOutcome,
@@ -85,6 +87,7 @@ from dnd_board.rules.shared.effects import (
     AttackRollEffect,
     AttackRollType,
     BoundEffect,
+    ChoiceEffect,
     CalculatedAmount,
     CombinedAmount,
     DiceAmount,
@@ -232,7 +235,10 @@ async def respond_to_prompt(
     target: CharacterSheet,
     use: bool,
     operations: ResolutionOperations,
+    choice: str | None = None,
 ) -> dict[str, Any]:
+    if prompt.choiceOptions is not None:
+        return await _respond_to_effect_choice(room, prompt, target, choice, operations)
     if prompt.effectExecutionId is not None:
         resolution_or_prompt = await _respond_to_effect_prompt(
             room,
@@ -276,6 +282,43 @@ async def respond_to_prompt(
         outcome_prefixes,
     )
     return await _publish_prompt_result(room, prompt, resolution_or_prompt, operations)
+
+
+async def _respond_to_effect_choice(
+    room: Room,
+    prompt: ResolutionInterceptorPrompt,
+    target: CharacterSheet,
+    choice: str | None,
+    operations: ResolutionOperations,
+) -> dict[str, Any]:
+    if room.pending_resolution_prompts.get(prompt.id) is not prompt:
+        raise ResolutionServiceError(409, "Effect choice has already been answered")
+    pending = room.pending_effect_executions.get(prompt.effectExecutionId)
+    if pending is None:
+        raise ResolutionServiceError(409, "Effect execution is no longer active")
+    if pending_execution_conflicts(pending, operations.all_sheets(room)):
+        room.pending_effect_executions.pop(prompt.effectExecutionId, None)
+        room.pending_resolution_prompts.pop(prompt.id, None)
+        raise ResolutionServiceError(409, "Effect execution canceled because participant state changed. Roll again.")
+    event = pending.active.execution.waitingFor
+    effect = event.pendingEffect if event is not None else None
+    if event is None or event.eventType != ResolutionEventType.CHOICE_PENDING or not isinstance(effect, ChoiceEffect):
+        raise ResolutionServiceError(409, "Effect is no longer waiting for a choice")
+    if not effect.minimum <= 1 <= effect.maximum:
+        raise ResolutionServiceError(400, "This effect cannot be answered with a single choice")
+    selected = next((option.option for option in effect.choices if enum_key(option.option) == choice), None)
+    if selected is None:
+        raise ResolutionServiceError(400, "Choose an available effect option")
+    room.pending_resolution_prompts.pop(prompt.id)
+    pending.outcomePrefixes.append(f"{prompt.ownerName} chooses {enum_label(selected)}")
+    result = continue_effect_resolution(
+        room,
+        pending,
+        target,
+        operations,
+        ResolutionEventResponse(selectedChoices=(selected,)),
+    )
+    return await _publish_prompt_result(room, prompt, result, operations)
 
 
 async def _respond_to_d20_test_prompt(
@@ -345,6 +388,40 @@ def continue_effect_resolution(
             if scheduled_state_changed:
                 operations.save(room)
             return attach_resolution_context(resolution, pending.outcomePrefixes, pending.responseRolls)
+
+        if advanced.eventType == ResolutionEventType.CHOICE_PENDING:
+            effect = advanced.pendingEffect
+            if not isinstance(effect, ChoiceEffect):
+                raise ResolutionServiceError(500, "Choice event does not contain choices")
+            owner_id = advanced.bindings.ownerSheetId if advanced.bindings is not None else pending.roll.sheetId
+            owner = pending.active.context.sheets.get(owner_id)
+            if owner is None:
+                raise ResolutionServiceError(409, "Effect choice owner is unavailable")
+            current_target = pending.active.context.current_target()
+            prompt = ResolutionInterceptorPrompt(
+                id=f"effect-choice-{time_ns()}",
+                interceptorType=ResolutionInterceptorType.EFFECT_CHOICE,
+                trigger=ResolutionInterceptorTrigger.BEFORE_EFFECT_CHOICE,
+                sourceRoll=pending.roll,
+                pendingRoll=pending.roll,
+                targetSheetId=current_target.id,
+                targetTokenId=current_target.tokenId,
+                targetName=current_target.name,
+                ownerSheetId=owner.id,
+                ownerTokenId=owner.tokenId,
+                ownerName=owner.name,
+                ownerPlayerKey=owner.owner,
+                label=effect.label or "Choose Effect",
+                description="",
+                useLabel="",
+                declineLabel="",
+                createdAt=time_ns(),
+                interaction=None,
+                effectExecutionId=pending.active.execution.resolutionId.value,
+                choiceOptions=[EffectChoicePromptOption(enum_key(option.option), enum_label(option.option)) for option in effect.choices],
+            )
+            room.pending_effect_executions[pending.active.execution.resolutionId.value] = pending
+            return prompt
 
         current_target = pending.active.context.current_target()
         current_source = pending.active.context.source or current_target

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
 from dnd_board.character_sheet import (
@@ -48,6 +48,11 @@ from dnd_board.rules.shared.effects import (
     ApplyEffect,
     ApplyEffectOperation,
     ActivatedEffect,
+    ChoiceEffect,
+    EffectChoice,
+    EffectChoiceOption,
+    ConditionChangeEffect,
+    ConditionOperation,
     AttackRoll,
     AttackRollEffect,
     AttackRollType,
@@ -56,6 +61,8 @@ from dnd_board.rules.shared.effects import (
     CombinedAmount,
     DamageEffect,
     DiceAmount,
+    DifficultyClass,
+    DifficultyClassType,
     FeatureMechanics,
     HitDieAction,
     EffectDuration,
@@ -74,6 +81,8 @@ from dnd_board.rules.shared.effects import (
     Modifier,
     ModifierOperation,
     ModifierScope,
+    MovementEffect,
+    MovementType,
     ModifyPendingDamage,
     ModifyRoll,
     OwnerWearsArmorPredicate,
@@ -86,6 +95,7 @@ from dnd_board.rules.shared.effects import (
     OwnerWieldsWeaponOrShieldPredicate,
     PendingDamageModificationType,
     PendingDamageIsWeaponDicePredicate,
+    PendingDamageDieAtMostPredicate,
     PendingDamageTypePredicate,
     PendingDamageRerollSelection,
     Predicate,
@@ -98,10 +108,14 @@ from dnd_board.rules.shared.effects import (
     RollModificationType,
     SequenceEffect,
     SavingThrowAbilityPredicate,
+    SavingThrow,
+    SavingThrowEffect,
+    SuccessfulSaveForHalfDamagePredicate,
     SelectionId,
     SelectWeaponEffect,
     SpellDamageTraitChoice,
     SourceAttackKindPredicate,
+    SourceAttackTypePredicate,
     SourceAttackCriticalPredicate,
     SourceAttackRangePredicate,
     SourceDamageAbilityModifierPredicate,
@@ -175,6 +189,7 @@ class FeatAbilityId(Enum):
     BOON_OF_DIMENSIONAL_TRAVEL = "boonOfDimensionalTravel"
     BOON_OF_FATE = "boonOfFate"
     BOON_OF_RECOVERY = "boonOfRecovery"
+    BOON_OF_SPEED_ESCAPE = "boonOfSpeedEscape"
 
 
 class FeatOptionId(Enum):
@@ -281,6 +296,16 @@ class GeneralFeatType(Enum):
     WAR_CASTER = auto()
     WEAPON_MASTER = auto()
     WOOD_ELF_MAGIC = auto()
+    ARCANE_ARTIST = "Arcane Artist"
+    ARCANE_ELOQUENCE = "Arcane Eloquence"
+    ARCANE_INFILTRATOR = "Arcane Infiltrator"
+    ARCANE_OMENS = "Arcane Omens"
+    ARCANE_OVERLOAD = "Arcane Overload"
+    ARCANE_SAFEGUARD = "Arcane Safeguard"
+    ARCANE_UNDERTAKER = "Arcane Undertaker"
+    FAMILIAR_FRIEND = "Familiar Friend"
+    PORTAL_JUMPER = "Portal Jumper"
+    TRANSMUTED_ANATOMY = "Transmuted Anatomy"
     SHARP_EYE = "Sharp Eye"
     SURVIVOR = "Survivor"
     CULT_OF_THE_DRAGON_INITIATE = "Cult of the Dragon Initiate"
@@ -336,6 +361,24 @@ class GeneralFeatType(Enum):
     BOON_OF_SPELL_RECALL = "Boon of Spell Recall"
     BOON_OF_THE_NIGHT_SPIRIT = "Boon of the Night Spirit"
     BOON_OF_TRUESIGHT = "Boon of Truesight"
+    BOON_OF_ERUPTING_SPELLPOWER = "Boon of Erupting Spellpower"
+    BOON_OF_MAGIC_SCHOOL_MASTERY = "Boon of Magic School Mastery"
+    BOON_OF_THE_IRON_MIND = "Boon of the Iron Mind"
+    ABJURATION_ADEPT = "Abjuration Adept"
+    CONJURATION_ADEPT = "Conjuration Adept"
+    DIVINATION_ADEPT = "Divination Adept"
+    ELEMENTAL_FAMILIAR = "Elemental Familiar"
+    ENCHANTMENT_ADEPT = "Enchantment Adept"
+    EVOCATION_ADEPT = "Evocation Adept"
+    ILLUSION_ADEPT = "Illusion Adept"
+    MAGIC_CONNOISSEUR = "Magic Connoisseur"
+    NECROMANCY_ADEPT = "Necromancy Adept"
+    OTHERWORLDLY_FAMILIAR = "Otherworldly Familiar"
+    SOOTHING_FAMILIAR = "Soothing Familiar"
+    SPELL_RESISTANT = "Spell Resistant"
+    SPELL_SUBTERFUGE = "Spell Subterfuge"
+    TRANSMUTATION_ADEPT = "Transmutation Adept"
+    WARLIKE_FAMILIAR = "Warlike Familiar"
     BOON_OF_SIBERYS = "Boon of Siberys"
     BOON_OF_BLOODSHED = "Boon of Bloodshed"
     BOON_OF_BOUNTIFUL_HEALTH = "Boon of Bountiful Health"
@@ -406,6 +449,7 @@ class FeatPrerequisiteType(Enum):
     FEAT = auto()
     SPECIES = auto()
     SPECIES_SIZE = auto()
+    SHIELD_TRAINING = auto()
     SPELLCASTING = auto()
     WEAPON_PROFICIENCY = auto()
 
@@ -460,29 +504,14 @@ class FeatDefinition:
     source: RuleSource = RuleSource.PLAYERS_HANDBOOK_2024
 
 
-FIGHTING_STYLE_SOURCES: dict[FightingStyleType, RuleSource] = {
-    FightingStyleType.ARCHERY: RuleSource.PLAYERS_HANDBOOK_2024,
-    FightingStyleType.BLIND_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
-    FightingStyleType.DEFENSE: RuleSource.PLAYERS_HANDBOOK_2024,
-    FightingStyleType.DUELING: RuleSource.PLAYERS_HANDBOOK_2024,
-    FightingStyleType.GREAT_WEAPON_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
-    FightingStyleType.INTERCEPTION: RuleSource.PLAYERS_HANDBOOK_2024,
-    FightingStyleType.PACK_FIGHTING: RuleSource.DND_BEYOND_DROPS_2026,
-    FightingStyleType.PRONE_FIGHTING: RuleSource.DND_BEYOND_DROPS_2026,
-    FightingStyleType.PROTECTION: RuleSource.PLAYERS_HANDBOOK_2024,
-    FightingStyleType.THROWN_WEAPON_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
-    FightingStyleType.TWO_WEAPON_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
-    FightingStyleType.UNARMED_FIGHTING: RuleSource.PLAYERS_HANDBOOK_2024,
-}
-
-
 def fighting_style_label(style: FightingStyleType) -> str:
     label = enum_label(style)
     return f"{label} (Legacy)" if is_legacy_source(fighting_style_source(style)) else label
 
 
 def fighting_style_source(style: FightingStyleType) -> RuleSource:
-    return FIGHTING_STYLE_SOURCES.get(style, RuleSource.LEGACY)
+    definition = FIGHTING_STYLE_FEATS.get(style)
+    return definition.source if definition is not None else RuleSource.LEGACY
 
 
 @dataclass(frozen=True)
@@ -532,10 +561,12 @@ class GeneralFeatDefinition:
     shieldTraining: bool = False
     skillChoice: FeatSkillChoice | None = None
     expertiseChoice: FeatSkillChoice | None = None
+    grantedSkills: tuple[SkillType, ...] = ()
     trainingChoice: FeatTrainingChoice | None = None
     weaponTraining: tuple[WeaponTrainingCategory, ...] = ()
     actionDeclarations: tuple[FeatActionDeclaration, ...] = ()
     restGrants: tuple[RestResourceGrant, ...] = ()
+    attackGrants: tuple[AttackAction, ...] = ()
 
 
 def general_feat(
@@ -554,10 +585,12 @@ def general_feat(
     shield_training: bool = False,
     skill_choice: FeatSkillChoice | None = None,
     expertise_choice: FeatSkillChoice | None = None,
+    granted_skills: tuple[SkillType, ...] = (),
     training_choice: FeatTrainingChoice | None = None,
     weapon_training: tuple[WeaponTrainingCategory, ...] = (),
     action_declarations: tuple[FeatActionDeclaration, ...] = (),
     rest_grants: tuple[RestResourceGrant, ...] = (),
+    attack_grants: tuple[AttackAction, ...] = (),
 ) -> GeneralFeatDefinition:
     return GeneralFeatDefinition(
         featType=feat_type,
@@ -575,10 +608,12 @@ def general_feat(
         shieldTraining=shield_training,
         skillChoice=skill_choice,
         expertiseChoice=expertise_choice,
+        grantedSkills=granted_skills,
         trainingChoice=training_choice,
         weaponTraining=weapon_training,
         actionDeclarations=action_declarations,
         restGrants=rest_grants,
+        attackGrants=attack_grants,
     )
 
 
@@ -604,6 +639,10 @@ def species_or_size_prerequisite(*species: SpeciesType, sizes: tuple[FeatSpecies
 
 def armor_prerequisite(*armor_categories: ArmorCategory) -> FeatPrerequisite:
     return FeatPrerequisite(FeatPrerequisiteType.ARMOR_PROFICIENCY, armorCategories=armor_categories)
+
+
+def shield_prerequisite() -> FeatPrerequisite:
+    return FeatPrerequisite(FeatPrerequisiteType.SHIELD_TRAINING)
 
 
 def weapon_prerequisite(*weapon_proficiencies: WeaponTrainingCategory) -> FeatPrerequisite:
@@ -923,6 +962,90 @@ def defensive_duelist_mechanics() -> FeatureMechanics:
         ],
         activation=TimeEconomy.REACTION,
     )])
+
+
+def shield_master_mechanics() -> FeatureMechanics:
+    bash = SavingThrowEffect(
+        SavingThrow(
+            AbilityType.STRENGTH,
+            DifficultyClass(DifficultyClassType.SOURCE_ABILITY, ability=AbilityType.STRENGTH),
+        ),
+        onFailure=ChoiceEffect(
+            choices=[
+                EffectChoice(
+                    EffectChoiceOption.PUSH,
+                    ApplyEffect(MovementEffect(MovementType.FORCED, 5)),
+                ),
+                EffectChoice(
+                    EffectChoiceOption.PRONE,
+                    ApplyEffect(ConditionChangeEffect(ConditionType.PRONE, ConditionOperation.ADD)),
+                ),
+            ],
+            label="Shield Bash",
+        ),
+    )
+    return FeatureMechanics(interactions=[
+        Interaction(
+            trigger=ResolutionEventType.DAMAGE_PENDING,
+            timing=InteractionTiming.BEFORE_EVENT,
+            decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+            predicates=[
+                TargetIsOwnerPredicate(),
+                OwnerWieldsShieldPredicate(),
+                SuccessfulSaveForHalfDamagePredicate(),
+            ],
+            operations=[ModifyPendingDamage(PendingDamageModificationType.PREVENT)],
+            activation=TimeEconomy.REACTION,
+        ),
+        Interaction(
+            trigger=ResolutionEventType.DAMAGE_PENDING,
+            timing=InteractionTiming.BEFORE_EVENT,
+            decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+            predicates=[
+                SourceIsOwnerPredicate(),
+                SourceAttackRangePredicate(AttackRangeType.MELEE),
+                SourceAttackTypePredicate(AttackActionType.STANDARD),
+                SourceUsesTimeEconomyPredicate(TimeEconomy.ACTION),
+                PendingDamageIsWeaponDicePredicate(),
+                OwnerWieldsShieldPredicate(),
+                WithinDistancePredicate(5),
+            ],
+            operations=[ApplyEffectOperation(bash)],
+            activation=TimeEconomy.SPECIAL,
+            activationTiming=ActivationTiming.OWN_TURN,
+            usageScope=UsageScope.ONCE_ON_OWN_TURN,
+            usageResource=ResourceId.SHIELD_MASTER_BASH,
+        ),
+    ])
+
+
+def tavern_brawler_mechanics() -> FeatureMechanics:
+    unarmed_damage = [
+        SourceIsOwnerPredicate(),
+        SourceAttackTypePredicate(AttackActionType.UNARMED_STRIKE),
+        PendingDamageIsWeaponDicePredicate(),
+    ]
+    return FeatureMechanics(interactions=[
+        Interaction(
+            trigger=ResolutionEventType.DAMAGE_PENDING,
+            timing=InteractionTiming.BEFORE_EVENT,
+            decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+            predicates=[*unarmed_damage, PendingDamageDieAtMostPredicate(1)],
+            operations=[RerollPendingDamage(PendingDamageRerollSelection.NEW, count=1)],
+            activation=TimeEconomy.SPECIAL,
+        ),
+        Interaction(
+            trigger=ResolutionEventType.DAMAGE_PENDING,
+            timing=InteractionTiming.BEFORE_EVENT,
+            decision=InteractionDecision(InteractionDecisionType.PROMPT, PromptResponder.OWNER_OR_DM),
+            predicates=[*unarmed_damage, SourceUsesTimeEconomyPredicate(TimeEconomy.ACTION)],
+            operations=[ApplyEffectOperation(ApplyEffect(MovementEffect(MovementType.FORCED, 5)))],
+            activation=TimeEconomy.SPECIAL,
+            activationTiming=ActivationTiming.OWN_TURN,
+            usageScope=UsageScope.ONCE_ON_OWN_TURN,
+            usageResource=ResourceId.TAVERN_BRAWLER_PUSH,
+        ),
+    ])
 
 
 def war_caster_mechanics() -> FeatureMechanics:
@@ -1266,6 +1389,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         GeneralFeatType.ALERT,
         RuleSource.PLAYERS_HANDBOOK_2024,
         "Add your Proficiency Bonus to Initiative. Immediately after rolling Initiative, you can swap it with one willing, non-Incapacitated ally in the same combat.",
+        category=FeatCategory.ORIGIN,
         mechanics=FeatureMechanics(passiveModifiers=[Modifier(
             CalculationType.INITIATIVE,
             ModifierOperation.ADD,
@@ -1299,7 +1423,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         mechanics=crossbow_expert_mechanics(),
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.DEXTERITY,)),
     ),
-    GeneralFeatType.CRAFTER: general_feat(GeneralFeatType.CRAFTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Artisan's Tools and craft mundane items faster."),
+    GeneralFeatType.CRAFTER: general_feat(GeneralFeatType.CRAFTER, RuleSource.PLAYERS_HANDBOOK_2024, "Gain proficiency with three Artisan's Tools and craft mundane items faster.", category=FeatCategory.ORIGIN),
     GeneralFeatType.CRUSHER: general_feat(
         GeneralFeatType.CRUSHER,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1327,7 +1451,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         mechanics=dual_wielder_mechanics(),
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
     ),
-    GeneralFeatType.DUNGEON_DELVER: general_feat(GeneralFeatType.DUNGEON_DELVER, RuleSource.PLAYERS_HANDBOOK_2024, "Improve trap detection, trap saves, and dungeon exploration."),
+    GeneralFeatType.DUNGEON_DELVER: general_feat(GeneralFeatType.DUNGEON_DELVER, RuleSource.PLAYERS_HANDBOOK_2014, "Improve trap detection, trap saves, and dungeon exploration."),
     GeneralFeatType.DURABLE: general_feat(
         GeneralFeatType.DURABLE,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1391,7 +1515,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     ),
     GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT: general_feat(GeneralFeatType.GUILE_OF_THE_CLOUD_GIANT, RuleSource.GLORY_OF_THE_GIANTS, "+1 Strength, Constitution, or Wisdom; reduce damage and teleport.", (level_prerequisite(4), feat_prerequisite(GeneralFeatType.STRIKE_OF_THE_GIANTS, GiantStrikeType.CLOUD_STRIKE))),
     GeneralFeatType.GUNNER: general_feat(GeneralFeatType.GUNNER, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Dexterity; firearm proficiency and improved firearm attacks."),
-    GeneralFeatType.HEALER: general_feat(GeneralFeatType.HEALER, RuleSource.PLAYERS_HANDBOOK_2024, "Use a healer's kit to stabilize or restore hit points."),
+    GeneralFeatType.HEALER: general_feat(GeneralFeatType.HEALER, RuleSource.PLAYERS_HANDBOOK_2024, "Use a healer's kit to stabilize or restore hit points.", category=FeatCategory.ORIGIN),
     GeneralFeatType.HEAVILY_ARMORED: general_feat(
         GeneralFeatType.HEAVILY_ARMORED,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1434,11 +1558,12 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         armor_training=(ArmorCategory.LIGHT,),
         shield_training=True,
     ),
-    GeneralFeatType.LINGUIST: general_feat(GeneralFeatType.LINGUIST, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Intelligence; learn languages and make ciphers."),
+    GeneralFeatType.LINGUIST: general_feat(GeneralFeatType.LINGUIST, RuleSource.PLAYERS_HANDBOOK_2014, "+1 Intelligence; learn languages and make ciphers."),
     GeneralFeatType.LUCKY: general_feat(
         GeneralFeatType.LUCKY,
         RuleSource.PLAYERS_HANDBOOK_2024,
         "Gain Luck Points equal to your Proficiency Bonus. Spend 1 to gain Advantage on your D20 Test or impose Disadvantage on an attack roll against you; regain all Luck Points on a Long Rest.",
+        category=FeatCategory.ORIGIN,
         mechanics=lucky_mechanics(),
         resources=(FeatResourceDefinition(
             ResourceId.LUCK_POINTS,
@@ -1459,8 +1584,8 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
             "Turn a failed Intelligence, Wisdom, or Charisma saving throw into a success.",
         ),),
     ),
-    GeneralFeatType.MAGIC_INITIATE: general_feat(GeneralFeatType.MAGIC_INITIATE, RuleSource.PLAYERS_HANDBOOK_2024, "Learn two cantrips and one 1st-level spell from a class list."),
-    GeneralFeatType.MARTIAL_ADEPT: general_feat(GeneralFeatType.MARTIAL_ADEPT, RuleSource.PLAYERS_HANDBOOK_2024, "Learn Battle Master maneuvers and gain a superiority die."),
+    GeneralFeatType.MAGIC_INITIATE: general_feat(GeneralFeatType.MAGIC_INITIATE, RuleSource.PLAYERS_HANDBOOK_2024, "Learn two cantrips and one 1st-level spell from a class list.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.MARTIAL_ADEPT: general_feat(GeneralFeatType.MARTIAL_ADEPT, RuleSource.PLAYERS_HANDBOOK_2014, "Learn Battle Master maneuvers and gain a superiority die."),
     GeneralFeatType.MEDIUM_ARMOR_MASTER: general_feat(
         GeneralFeatType.MEDIUM_ARMOR_MASTER,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1470,7 +1595,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
     ),
     GeneralFeatType.METAMAGIC_ADEPT: general_feat(GeneralFeatType.METAMAGIC_ADEPT, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "Learn metamagic and gain sorcery points.", (spellcasting_prerequisite(),)),
-    GeneralFeatType.MOBILE: general_feat(GeneralFeatType.MOBILE, RuleSource.PLAYERS_HANDBOOK_2024, "Increase speed and improve difficult-terrain dashes and skirmishing."),
+    GeneralFeatType.MOBILE: general_feat(GeneralFeatType.MOBILE, RuleSource.PLAYERS_HANDBOOK_2014, "Increase speed and improve difficult-terrain dashes and skirmishing."),
     GeneralFeatType.MODERATELY_ARMORED: general_feat(
         GeneralFeatType.MODERATELY_ARMORED,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1484,6 +1609,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         GeneralFeatType.MUSICIAN,
         RuleSource.PLAYERS_HANDBOOK_2024,
         "Gain proficiency with three Musical Instruments and grant Heroic Inspiration to up to your Proficiency Bonus in allies after a Short or Long Rest.",
+        category=FeatCategory.ORIGIN,
         training_choice=FeatTrainingChoice(tools=MUSICAL_INSTRUMENT_OPTIONS),
         rest_grants=(RestResourceGrant(
             ResourceId.HEROIC_INSPIRATION,
@@ -1543,6 +1669,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         GeneralFeatType.SAVAGE_ATTACKER,
         RuleSource.PLAYERS_HANDBOOK_2024,
         "Once per turn when you hit with a weapon, roll the weapon's damage dice twice and use either roll.",
+        category=FeatCategory.ORIGIN,
         mechanics=savage_attacker_mechanics(),
     ),
     GeneralFeatType.SECOND_CHANCE: general_feat(GeneralFeatType.SECOND_CHANCE, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Dexterity, Constitution, or Charisma; force an attacker to reroll.", (species_prerequisite(SpeciesType.HALFLING),)),
@@ -1563,7 +1690,14 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         mechanics=sharpshooter_mechanics(),
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.DEXTERITY,)),
     ),
-    GeneralFeatType.SHIELD_MASTER: general_feat(GeneralFeatType.SHIELD_MASTER, RuleSource.PLAYERS_HANDBOOK_2024, "Add shield tactics to attacks and Dexterity saves."),
+    GeneralFeatType.SHIELD_MASTER: general_feat(
+        GeneralFeatType.SHIELD_MASTER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 Strength. With an equipped Shield, bash after a Melee weapon hit during the Attack action, or take a Reaction to negate damage on a successful Dexterity save for half damage.",
+        (level_prerequisite(4), shield_prerequisite()),
+        mechanics=shield_master_mechanics(),
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH,)),
+    ),
     GeneralFeatType.SKILL_EXPERT: general_feat(
         GeneralFeatType.SKILL_EXPERT,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1577,6 +1711,7 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         GeneralFeatType.SKILLED,
         RuleSource.PLAYERS_HANDBOOK_2024,
         "Gain proficiency in any combination of three skills or tools.",
+        category=FeatCategory.ORIGIN,
         repeatable=True,
         training_choice=FeatTrainingChoice(skills=tuple(SkillType), tools=SELECTABLE_TOOL_TYPES),
     ),
@@ -1604,13 +1739,31 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     ),
     GeneralFeatType.SQUAT_NIMBLENESS: general_feat(GeneralFeatType.SQUAT_NIMBLENESS, RuleSource.XANATHARS_GUIDE_TO_EVERYTHING, "+1 Strength or Dexterity; improve speed and escape checks.", (species_or_size_prerequisite(SpeciesType.DWARF, sizes=(FeatSpeciesSize.SMALL,)),)),
     GeneralFeatType.STRIKE_OF_THE_GIANTS: general_feat(GeneralFeatType.STRIKE_OF_THE_GIANTS, RuleSource.GLORY_OF_THE_GIANTS, "Choose a giant strike option for extra weapon damage and riders.", (weapon_or_background_prerequisite(WeaponTrainingCategory.MARTIAL, BackgroundPrerequisiteType.GIANT_FOUNDLING),)),
-    GeneralFeatType.TAVERN_BRAWLER: general_feat(GeneralFeatType.TAVERN_BRAWLER, RuleSource.PLAYERS_HANDBOOK_2024, "+1 Strength or Constitution; improve improvised weapons, unarmed strikes, and grapples."),
+    GeneralFeatType.TAVERN_BRAWLER: general_feat(
+        GeneralFeatType.TAVERN_BRAWLER,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "Unarmed Strike can deal 1d4 + Strength Bludgeoning damage. Reroll an Unarmed Strike damage die that shows 1 and use the new roll. Gain improvised weapon proficiency, and once per turn push a creature 5 feet after hitting it with an Unarmed Strike during your Attack action.",
+        category=FeatCategory.ORIGIN,
+        mechanics=tavern_brawler_mechanics(),
+        weapon_training=(WeaponTrainingCategory.IMPROVISED,),
+        attack_grants=(AttackAction(
+            id=enum_key(AttackActionType.UNARMED_STRIKE),
+            name=enum_label(AttackActionType.UNARMED_STRIKE),
+            ability=AbilityType.STRENGTH,
+            damageDiceCount=1,
+            damageDiceType=DiceType.D4,
+            damageType=DamageType.BLUDGEONING,
+            attackType=AttackActionType.UNARMED_STRIKE,
+            properties=[],
+        ),),
+    ),
     GeneralFeatType.TELEKINETIC: general_feat(GeneralFeatType.TELEKINETIC, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; improve mage hand and shove telekinetically."),
     GeneralFeatType.TELEPATHIC: general_feat(GeneralFeatType.TELEPATHIC, RuleSource.TASHAS_CAULDRON_OF_EVERYTHING, "+1 Intelligence, Wisdom, or Charisma; speak telepathically and cast detect thoughts."),
     GeneralFeatType.TOUGH: general_feat(
         GeneralFeatType.TOUGH,
         RuleSource.PLAYERS_HANDBOOK_2024,
         "Increase hit point maximum by 2 per level.",
+        category=FeatCategory.ORIGIN,
         mechanics=FeatureMechanics(passiveModifiers=[Modifier(
             CalculationType.MAXIMUM_HIT_POINTS,
             ModifierOperation.ADD,
@@ -1639,8 +1792,8 @@ GENERAL_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
 }
 
 SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
-    GeneralFeatType.SHARP_EYE: general_feat(GeneralFeatType.SHARP_EYE, RuleSource.PLAYERS_HANDBOOK_2024, 'Sharp Eye 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
-    GeneralFeatType.SURVIVOR: general_feat(GeneralFeatType.SURVIVOR, RuleSource.PLAYERS_HANDBOOK_2024, 'Survivor 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.SHARP_EYE: general_feat(GeneralFeatType.SHARP_EYE, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Sharp Eye 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
+    GeneralFeatType.SURVIVOR: general_feat(GeneralFeatType.SURVIVOR, RuleSource.RAVENLOFT_THE_HORRORS_WITHIN_2024, 'Survivor 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
     GeneralFeatType.CULT_OF_THE_DRAGON_INITIATE: general_feat(GeneralFeatType.CULT_OF_THE_DRAGON_INITIATE, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Cult of the Dragon Initiate 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
     GeneralFeatType.EMERALD_ENCLAVE_FLEDGLING: general_feat(GeneralFeatType.EMERALD_ENCLAVE_FLEDGLING, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Emerald Enclave Fledgling 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
     GeneralFeatType.HARPER_AGENT: general_feat(GeneralFeatType.HARPER_AGENT, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Harper Agent 2024 Origin feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', category=FeatCategory.ORIGIN),
@@ -1672,7 +1825,7 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.STRENGTH, AbilityType.DEXTERITY)),
         weapon_training=(WeaponTrainingCategory.MARTIAL,),
     ),
-    GeneralFeatType.SHIFTING_COMBATANT: general_feat(GeneralFeatType.SHIFTING_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, 'Shifting Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.SHIFTING_COMBATANT: general_feat(GeneralFeatType.SHIFTING_COMBATANT, RuleSource.DND_BEYOND_DROPS_2026, 'Shifting Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.SPEEDY: general_feat(
         GeneralFeatType.SPEEDY,
         RuleSource.PLAYERS_HANDBOOK_2024,
@@ -1682,7 +1835,7 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
         mechanics=speedy_mechanics(),
         ability_score_adjustment_choice=AbilityScoreAdjustmentChoice((AbilityType.DEXTERITY, AbilityType.CONSTITUTION)),
     ),
-    GeneralFeatType.TACTICAL_COMBATANT: general_feat(GeneralFeatType.TACTICAL_COMBATANT, RuleSource.PLAYERS_HANDBOOK_2024, 'Tactical Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.TACTICAL_COMBATANT: general_feat(GeneralFeatType.TACTICAL_COMBATANT, RuleSource.DND_BEYOND_DROPS_2026, 'Tactical Combatant 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.COLD_CASTER: general_feat(GeneralFeatType.COLD_CASTER, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Cold Caster 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.DRAGONSCARRED: general_feat(GeneralFeatType.DRAGONSCARRED, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Dragonscarred 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
     GeneralFeatType.ENCLAVE_MAGIC: general_feat(GeneralFeatType.ENCLAVE_MAGIC, RuleSource.FORGOTTEN_REALMS_HEROES_OF_FAERUN_2024, 'Enclave Magic 2024 General feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(4),), category=FeatCategory.GENERAL),
@@ -1725,8 +1878,36 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
     ),
     GeneralFeatType.BOON_OF_IRRESISTIBLE_OFFENSE: general_feat(GeneralFeatType.BOON_OF_IRRESISTIBLE_OFFENSE, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Irresistible Offense 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
     GeneralFeatType.BOON_OF_RECOVERY: general_feat(GeneralFeatType.BOON_OF_RECOVERY, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Recovery 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON, resources=(FeatResourceDefinition(ResourceId.BOON_OF_RECOVERY, FixedAmount(1), TimeEconomy.BONUS_ACTION, "Regain hit points when reduced to 0 or by using a Bonus Action."),)),
-    GeneralFeatType.BOON_OF_SKILL: general_feat(GeneralFeatType.BOON_OF_SKILL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Skill 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
-    GeneralFeatType.BOON_OF_SPEED: general_feat(GeneralFeatType.BOON_OF_SPEED, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Speed 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_SKILL: general_feat(
+        GeneralFeatType.BOON_OF_SKILL,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 to one ability score, to a maximum of 30. Gain proficiency in every skill and Expertise in one skill of your choice.",
+        (level_prerequisite(19),),
+        category=FeatCategory.EPIC_BOON,
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice(tuple(AbilityType), maximum=30),
+        granted_skills=tuple(SkillType),
+        expertise_choice=FeatSkillChoice(tuple(SkillType), requiresExistingProficiency=True),
+    ),
+    GeneralFeatType.BOON_OF_SPEED: general_feat(
+        GeneralFeatType.BOON_OF_SPEED,
+        RuleSource.PLAYERS_HANDBOOK_2024,
+        "+1 to one ability score, to a maximum of 30. Speed increases by 30 feet. As a Bonus Action, Disengage and end Grappled on yourself.",
+        (level_prerequisite(19),),
+        category=FeatCategory.EPIC_BOON,
+        ability_score_adjustment_choice=AbilityScoreAdjustmentChoice(tuple(AbilityType), maximum=30),
+        mechanics=FeatureMechanics(passiveModifiers=[Modifier(
+            CalculationType.SPEED,
+            ModifierOperation.ADD,
+            amount=FixedAmount(30),
+            description="Increase Speed by 30 feet.",
+        )]),
+        action_declarations=(FeatActionDeclaration(
+            FeatAbilityId.BOON_OF_SPEED_ESCAPE,
+            "Escape Artist",
+            TimeEconomy.BONUS_ACTION,
+            "Take the Disengage action and end Grappled on yourself.",
+        ),),
+    ),
     GeneralFeatType.BOON_OF_SPELL_RECALL: general_feat(GeneralFeatType.BOON_OF_SPELL_RECALL, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Spell Recall 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
     GeneralFeatType.BOON_OF_THE_NIGHT_SPIRIT: general_feat(GeneralFeatType.BOON_OF_THE_NIGHT_SPIRIT, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of the Night Spirit 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
     GeneralFeatType.BOON_OF_TRUESIGHT: general_feat(GeneralFeatType.BOON_OF_TRUESIGHT, RuleSource.PLAYERS_HANDBOOK_2024, 'Boon of Truesight 2024 Epic Boon feat. Mechanical choices and special-case automation are pending; use the linked source text for table play details.', (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
@@ -1793,43 +1974,52 @@ SUPPLEMENTAL_2024_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
 
 GENERAL_FEATS.update(SUPPLEMENTAL_2024_FEATS)
 
-
-ORIGIN_FEAT_TYPES = {
-    GeneralFeatType.ALERT,
-    GeneralFeatType.CRAFTER,
-    GeneralFeatType.HEALER,
-    GeneralFeatType.LUCKY,
-    GeneralFeatType.MAGIC_INITIATE,
-    GeneralFeatType.MUSICIAN,
-    GeneralFeatType.SAVAGE_ATTACKER,
-    GeneralFeatType.SHARP_EYE,
-    GeneralFeatType.SKILLED,
-    GeneralFeatType.SURVIVOR,
-    GeneralFeatType.TAVERN_BRAWLER,
-    GeneralFeatType.TOUGH,
-    GeneralFeatType.CULT_OF_THE_DRAGON_INITIATE,
-    GeneralFeatType.EMERALD_ENCLAVE_FLEDGLING,
-    GeneralFeatType.HARPER_AGENT,
-    GeneralFeatType.LORDS_ALLIANCE_AGENT,
-    GeneralFeatType.PURPLE_DRAGON_ROOK,
-    GeneralFeatType.SPELLFIRE_SPARK,
-    GeneralFeatType.TYRO_OF_THE_GAUNTLET,
-    GeneralFeatType.ZHENTARIM_RUFFIAN,
-    GeneralFeatType.CHILD_OF_THE_SUN,
-    GeneralFeatType.SHADOWMOOR_HEXER,
-    GeneralFeatType.TIRELESS_REVELER,
-    GeneralFeatType.VAMPIRE_HUNTER,
-    GeneralFeatType.VAMPIRE_S_PLAYTHING,
+ARCANA_UNLEASHED_FEATS: dict[GeneralFeatType, GeneralFeatDefinition] = {
+    GeneralFeatType.ARCANE_ARTIST: general_feat(GeneralFeatType.ARCANE_ARTIST, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.ARCANE_ELOQUENCE: general_feat(GeneralFeatType.ARCANE_ELOQUENCE, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.ARCANE_INFILTRATOR: general_feat(GeneralFeatType.ARCANE_INFILTRATOR, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.ARCANE_OMENS: general_feat(GeneralFeatType.ARCANE_OMENS, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.ARCANE_OVERLOAD: general_feat(GeneralFeatType.ARCANE_OVERLOAD, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.ARCANE_SAFEGUARD: general_feat(GeneralFeatType.ARCANE_SAFEGUARD, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.ARCANE_UNDERTAKER: general_feat(GeneralFeatType.ARCANE_UNDERTAKER, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.FAMILIAR_FRIEND: general_feat(GeneralFeatType.FAMILIAR_FRIEND, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.PORTAL_JUMPER: general_feat(GeneralFeatType.PORTAL_JUMPER, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.TRANSMUTED_ANATOMY: general_feat(GeneralFeatType.TRANSMUTED_ANATOMY, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", category=FeatCategory.ORIGIN),
+    GeneralFeatType.ABJURATION_ADEPT: general_feat(GeneralFeatType.ABJURATION_ADEPT, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.CONJURATION_ADEPT: general_feat(GeneralFeatType.CONJURATION_ADEPT, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.DIVINATION_ADEPT: general_feat(GeneralFeatType.DIVINATION_ADEPT, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.ELEMENTAL_FAMILIAR: general_feat(GeneralFeatType.ELEMENTAL_FAMILIAR, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.ENCHANTMENT_ADEPT: general_feat(GeneralFeatType.ENCHANTMENT_ADEPT, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.EVOCATION_ADEPT: general_feat(GeneralFeatType.EVOCATION_ADEPT, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.ILLUSION_ADEPT: general_feat(GeneralFeatType.ILLUSION_ADEPT, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.MAGIC_CONNOISSEUR: general_feat(GeneralFeatType.MAGIC_CONNOISSEUR, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.NECROMANCY_ADEPT: general_feat(GeneralFeatType.NECROMANCY_ADEPT, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.OTHERWORLDLY_FAMILIAR: general_feat(GeneralFeatType.OTHERWORLDLY_FAMILIAR, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.SOOTHING_FAMILIAR: general_feat(GeneralFeatType.SOOTHING_FAMILIAR, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.SPELL_RESISTANT: general_feat(GeneralFeatType.SPELL_RESISTANT, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.SPELL_SUBTERFUGE: general_feat(GeneralFeatType.SPELL_SUBTERFUGE, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.TRANSMUTATION_ADEPT: general_feat(GeneralFeatType.TRANSMUTATION_ADEPT, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.WARLIKE_FAMILIAR: general_feat(GeneralFeatType.WARLIKE_FAMILIAR, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(4),), category=FeatCategory.GENERAL),
+    GeneralFeatType.BOON_OF_ERUPTING_SPELLPOWER: general_feat(GeneralFeatType.BOON_OF_ERUPTING_SPELLPOWER, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_MAGIC_SCHOOL_MASTERY: general_feat(GeneralFeatType.BOON_OF_MAGIC_SCHOOL_MASTERY, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
+    GeneralFeatType.BOON_OF_THE_IRON_MIND: general_feat(GeneralFeatType.BOON_OF_THE_IRON_MIND, RuleSource.ARCANA_UNLEASHED, "Mechanics pending; use the source text for table play.", (level_prerequisite(19),), category=FeatCategory.EPIC_BOON),
 }
+
+GENERAL_FEATS.update(ARCANA_UNLEASHED_FEATS)
 
 
 def general_feat_category(feat_type: GeneralFeatType) -> FeatCategory:
-    if feat_type in ORIGIN_FEAT_TYPES:
-        return FeatCategory.ORIGIN
     return GENERAL_FEATS[feat_type].category
 
 
 FIGHTING_STYLE_FEATS: dict[FightingStyleType, FeatDefinition] = {
+    FightingStyleType.ARCANE_WARRIOR: FeatDefinition(
+        featType=FightingStyleType.ARCANE_WARRIOR,
+        category=FeatCategory.FIGHTING_STYLE,
+        repeatable=False,
+        description="Mechanics pending; use the Arcana Unleashed source text for table play.",
+        source=RuleSource.ARCANA_UNLEASHED,
+    ),
     FightingStyleType.ARCHERY: FeatDefinition(
         featType=FightingStyleType.ARCHERY,
         category=FeatCategory.FIGHTING_STYLE,
@@ -2113,6 +2303,8 @@ def feat_prerequisite_label(prerequisite: FeatPrerequisite) -> str:
         return " or ".join(enum_label(size) for size in prerequisite.speciesSizes)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.ARMOR_PROFICIENCY:
         return "Proficiency with " + " or ".join(f"{enum_label(category)} armor" for category in prerequisite.armorCategories)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.SHIELD_TRAINING:
+        return "Shield Training"
     if prerequisite.prerequisiteType == FeatPrerequisiteType.WEAPON_PROFICIENCY:
         parts = [f"{enum_label(proficiency)} Weapon" for proficiency in prerequisite.weaponProficiencies]
         parts.extend(enum_label(background) for background in prerequisite.backgrounds)
@@ -2145,6 +2337,8 @@ def feat_prerequisite_met(prerequisite: FeatPrerequisite, sheet) -> bool:
         return character_size(sheet) in prerequisite.speciesSizes
     if prerequisite.prerequisiteType == FeatPrerequisiteType.ARMOR_PROFICIENCY:
         return any(has_armor_proficiency(sheet, category) for category in prerequisite.armorCategories)
+    if prerequisite.prerequisiteType == FeatPrerequisiteType.SHIELD_TRAINING:
+        return has_shield_training(sheet)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.WEAPON_PROFICIENCY:
         return any(has_weapon_proficiency(sheet, proficiency) for proficiency in prerequisite.weaponProficiencies) or any(enum_label(background) == sheet_background(sheet) for background in prerequisite.backgrounds)
     if prerequisite.prerequisiteType == FeatPrerequisiteType.CHARACTER_FEATURE:
@@ -2510,8 +2704,6 @@ def feat_speed_bonus(feats) -> int:
     )
     if GeneralFeatType.MOBILE in selected_feats:
         bonus += 10
-    if GeneralFeatType.BOON_OF_SPEED in selected_feats:
-        bonus += 30
     return bonus
 
 
@@ -2669,7 +2861,7 @@ def fighting_style_modifier_applies(
     return True
 
 
-def feat_attacks(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], attacks: list[AttackAction]) -> list[AttackAction]:
+def feat_attacks(classes: list[CharacterClassLevel], equipment: list[EquipmentItem], attacks: list[AttackAction], feats=None) -> list[AttackAction]:
     styles = selected_fighting_styles(classes)
     next_attacks = list(attacks)
     attack_types = {attack.attackType for attack in next_attacks}
@@ -2703,6 +2895,11 @@ def feat_attacks(classes: list[CharacterClassLevel], equipment: list[EquipmentIt
                 properties=[WeaponProperty.THROWN],
             )
         )
+    for feat_type in selected_general_feat_types(feats):
+        for grant in GENERAL_FEATS[feat_type].attackGrants:
+            if any(attack.attackType == grant.attackType for attack in next_attacks):
+                continue
+            next_attacks.append(replace(grant))
     return next_attacks
 
 

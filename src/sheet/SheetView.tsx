@@ -187,7 +187,7 @@ export type SheetViewProps = {
   onUpdateSheetLevel: (sheet: CharacterSheet, delta: 1 | -1) => void;
   onUpdateResource: (sheet: CharacterSheet, resourceId: string, currentUses: number) => void;
   onPrepareProactiveResource: (sheet: CharacterSheet, resource: ResourceId, prepared: boolean) => void;
-  onRespondToResolutionPrompt: (prompt: ResolutionInterceptorPrompt, use: boolean) => void;
+  onRespondToResolutionPrompt: (prompt: ResolutionInterceptorPrompt, use: boolean, choice?: string) => void;
   onRespondToRestGrantPrompt: (prompt: RestGrantPrompt, targetSheetIds: string[]) => void;
   playerKey: string;
   roomId: string;

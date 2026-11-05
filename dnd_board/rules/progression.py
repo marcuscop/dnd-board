@@ -1380,7 +1380,7 @@ def evaluate_feat_progression_choice(
     clean_values = list(dict.fromkeys(value.strip() for value in values if value.strip()))
     if len(clean_values) != choice.count:
         raise ProgressionRuleViolation(SkillSelectionIssue.WRONG_COUNT)
-    grants: list[FeatGrant | FightingStyleGrant] = []
+    grants: list[CharacterGrant] = []
     for value in clean_values:
         general_feat = enum_value(GeneralFeatType, value)
         fighting_style = enum_value(FightingStyleType, value)
@@ -1439,6 +1439,12 @@ def evaluate_feat_progression_choice(
             ))
             continue
         raise ProgressionRuleViolation(SkillSelectionIssue.INVALID_FEAT)
+    for grant in tuple(grants):
+        if isinstance(grant, FeatGrant):
+            grants.extend(
+                SkillProficiencyGrant(skill, ProficiencyLevel.PROFICIENT, grant.minimumClassLevel)
+                for skill in GENERAL_FEATS[grant.feat].grantedSkills
+            )
     return ProgressionEvaluation(
         source=progression_grant_source(rule),
         grants=tuple(grants),
@@ -1773,12 +1779,11 @@ def hit_point_grant_total(records: list[ProgressionGrantRecord]) -> int:
 def apply_ability_score_progression_grants(
     base_scores: AbilityScores,
     records: list[ProgressionGrantRecord],
-    score_cap: int = 20,
 ) -> AbilityScores:
     return ability_scores_after_adjustments(
         base_scores,
         (
-            replace(grant.adjustment, maximum=min(score_cap, grant.adjustment.maximum))
+            grant.adjustment
             for record in records
             for grant in record.grants
             if isinstance(grant, AbilityScoreGrant)

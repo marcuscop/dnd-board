@@ -1101,7 +1101,7 @@ async def resolve_roll(room_id: str, roll_id: str, playerKey: str, targetSheetId
 
 
 @app.post("/api/rooms/{room_id}/resolution-prompts/{prompt_id}/respond")
-async def respond_to_resolution_prompt(room_id: str, prompt_id: str, playerKey: str, use: bool) -> dict[str, Any]:
+async def respond_to_resolution_prompt(room_id: str, prompt_id: str, playerKey: str, use: bool | None = None, choice: str | None = None) -> dict[str, Any]:
     sanitized_room_id = sanitize_room_id(room_id)
     room = get_or_create_room(sanitized_room_id)
     player = Player(id="http-resolution-prompt", name="Prompt", player_key=normalize_player_key(playerKey, room.id), websocket=None, room_id=room.id)
@@ -1110,13 +1110,15 @@ async def respond_to_resolution_prompt(room_id: str, prompt_id: str, playerKey: 
         raise HTTPException(status_code=404, detail="Resolution prompt not found")
     if not is_dm(player) and prompt.ownerPlayerKey != player.player_key:
         raise HTTPException(status_code=403, detail="Cannot answer another player's prompt")
+    if prompt.choiceOptions is None and use is None:
+        raise HTTPException(status_code=400, detail="Specify whether to use the interaction")
 
     target = get_visible_sheet(room, Player(id="prompt-dm", name="DM", player_key="dm", websocket=None, room_id=room.id), prompt.targetSheetId)
     if target is None:
         raise HTTPException(status_code=404, detail="Target sheet not found")
 
     try:
-        result = await respond_to_prompt(room, prompt, player, target, use, resolution_operations())
+        result = await respond_to_prompt(room, prompt, player, target, bool(use), resolution_operations(), choice=choice)
         if room.encounter is not None and room.encounter.status == EncounterStatus.TRANSITIONING:
             await resume_turn_transition(
                 room,

@@ -91,6 +91,7 @@ from dnd_board.character_sheet import (
     ArcaneShotType,
     ArmorCategory,
     AttackAction,
+    AttackActionType,
     AttackKind,
     AttackRangeType,
     BattleMasterManeuverType,
@@ -8778,6 +8779,165 @@ def test_saved_state_and_asset_parsing_fallbacks(tmp_path, monkeypatch) -> None:
             server.Token("asset-7", server.TokenKind.ASSET, "Seven", "dm", server.DEFAULT_TOKEN_COLOR, 0, 0, 70, False),
         ]
     ) == 8
+
+
+def test_shield_bash_resolves_post_save_choice(tmp_path, monkeypatch) -> None:
+    shield_master = general_feat_feature(enum_key(GeneralFeatType.SHIELD_MASTER))
+    assert shield_master is not None
+    write_party_campaign(
+        tmp_path,
+        "shield-bash-choice-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Defender",
+            maxHp=30,
+            abilityScores=AbilityScores(16, 12, 14, 10, 10, 10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(ClassType.FIGHTER, 5)],
+                feats=[shield_master],
+                equipment=[EquipmentItem(
+                    id="shield",
+                    name="Shield",
+                    itemType=EquipmentType.SHIELD,
+                    slot=EquipmentSlot.OFF_HAND,
+                    armorClassBonus=2,
+                )],
+            ),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(10, 10, 14, 10, 10, 10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(ClassType.FIGHTER, 1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d20_rolls = iter([15, 1])
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: next(d20_rolls) if maximum == 20 else 4)
+    client = TestClient(server.app)
+    encounter = client.post(
+        "/api/rooms/shield-bash-choice-test/encounter?playerKey=dm",
+        json=[
+            {"participantId": "player-1", "initiative": 20},
+            {"participantId": "player-2", "initiative": 10},
+        ],
+    ).json()["encounter"]
+    attack = client.post(
+        f"/api/rooms/shield-bash-choice-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId=main-hand&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    bash = client.post(
+        f"/api/rooms/shield-bash-choice-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    assert bash["label"] == "Shield Master"
+    choice = client.post(
+        f"/api/rooms/shield-bash-choice-test/resolution-prompts/{bash['id']}/respond?playerKey=player-1&use=true"
+    ).json()["prompt"]
+    assert [option["id"] for option in choice["choiceOptions"]] == ["push", "prone"]
+    invalid = client.post(
+        f"/api/rooms/shield-bash-choice-test/resolution-prompts/{choice['id']}/respond?playerKey=player-1&choice=invalid"
+    )
+    assert invalid.status_code == 400
+    resolved = client.post(
+        f"/api/rooms/shield-bash-choice-test/resolution-prompts/{choice['id']}/respond?playerKey=player-1&choice=prone"
+    ).json()["resolution"]
+    assert "prone" in resolved["targetConditions"]
+
+
+def test_tavern_brawler_unarmed_reroll_then_push(tmp_path, monkeypatch) -> None:
+    tavern_brawler = general_feat_feature(enum_key(GeneralFeatType.TAVERN_BRAWLER))
+    assert tavern_brawler is not None
+    write_party_campaign(
+        tmp_path,
+        "tavern-brawler-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Brawler",
+            maxHp=30,
+            abilityScores=AbilityScores(16, 12, 14, 10, 10, 10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(ClassType.FIGHTER, 5)], feats=[tavern_brawler]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Target",
+            maxHp=30,
+            abilityScores=AbilityScores(10, 10, 14, 10, 10, 10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(ClassType.FIGHTER, 1)]),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    d4_rolls = iter([1, 3])
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: 15 if maximum == 20 else next(d4_rolls) if maximum == 4 else 4)
+    client = TestClient(server.app)
+    encounter = client.post(
+        "/api/rooms/tavern-brawler-test/encounter?playerKey=dm",
+        json=[
+            {"participantId": "player-1", "initiative": 20},
+            {"participantId": "player-2", "initiative": 10},
+        ],
+    ).json()["encounter"]
+    attack_id = enum_key(AttackActionType.UNARMED_STRIKE)
+    attack = client.post(
+        f"/api/rooms/tavern-brawler-test/sheet/player-1/rolls/attack?playerKey=player-1&attackId={attack_id}&turnId={encounter['turnId']}"
+    ).json()["roll"]
+    reroll = client.post(
+        f"/api/rooms/tavern-brawler-test/rolls/{attack['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    assert reroll["label"] == "Tavern Brawler"
+    push = client.post(
+        f"/api/rooms/tavern-brawler-test/resolution-prompts/{reroll['id']}/respond?playerKey=player-1&use=true"
+    ).json()["prompt"]
+    assert push["label"] == "Tavern Brawler"
+    resolved = client.post(
+        f"/api/rooms/tavern-brawler-test/resolution-prompts/{push['id']}/respond?playerKey=player-1&use=true"
+    ).json()["resolution"]
+    assert resolved["roll"]["damageComponents"][0]["dice"] == [3]
+    assert "5 feet" in resolved["outcome"]
+
+
+def test_shield_master_interposes_after_successful_dex_save_for_half_damage(tmp_path, monkeypatch) -> None:
+    burning_hands = wizard_spell_entry(SpellId.BURNING_HANDS)
+    shield_master = general_feat_feature(enum_key(GeneralFeatType.SHIELD_MASTER))
+    assert burning_hands is not None and shield_master is not None
+    write_party_campaign(
+        tmp_path,
+        "shield-master-interpose-test",
+        PartyMemberConfig(
+            id="player-1",
+            name="Caster",
+            maxHp=20,
+            abilityScores=AbilityScores(8, 12, 12, 16, 10, 10),
+            sheet=PartyMemberSheet(classes=[CharacterClassLevel(ClassType.WIZARD, 4)], spells=[burning_hands]),
+        ),
+        PartyMemberConfig(
+            id="player-2",
+            name="Shield Bearer",
+            maxHp=30,
+            abilityScores=AbilityScores(16, 14, 14, 10, 10, 10),
+            sheet=PartyMemberSheet(
+                classes=[CharacterClassLevel(ClassType.FIGHTER, 4)],
+                feats=[shield_master],
+                equipment=[EquipmentItem(
+                    id="shield", name="Shield", itemType=EquipmentType.SHIELD,
+                    slot=EquipmentSlot.OFF_HAND, armorClassBonus=2,
+                )],
+            ),
+        ),
+    )
+    monkeypatch.setattr(server, "CAMPAIGN_DIR", tmp_path)
+    monkeypatch.setattr(random, "randint", lambda _minimum, maximum: 20 if maximum == 20 else 4)
+    client = TestClient(server.app)
+    cast = client.post(
+        "/api/rooms/shield-master-interpose-test/sheet/player-1/spells/burningHands/rolls/damage?playerKey=player-1"
+    ).json()["roll"]
+    prompt = client.post(
+        f"/api/rooms/shield-master-interpose-test/rolls/{cast['id']}/resolve?playerKey=dm&targetSheetId=player-2"
+    ).json()["prompt"]
+    assert prompt["label"] == "Shield Master"
+    resolved = client.post(
+        f"/api/rooms/shield-master-interpose-test/resolution-prompts/{prompt['id']}/respond?playerKey=player-2&use=true"
+    ).json()["resolution"]
+    assert resolved["targetHp"]["current"] == 30
 
 
 def make_image(image_format: str) -> bytes:

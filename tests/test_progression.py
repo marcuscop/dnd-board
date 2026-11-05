@@ -864,6 +864,52 @@ def test_epic_boon_grant_is_removed_and_reoffered_after_level_down() -> None:
     ) is not None
 
 
+def test_boon_of_skill_grants_all_skills_and_one_expertise() -> None:
+    member = PartyMemberConfig(
+        id="wizard", name="Wizard",
+        abilityScores=AbilityScores(10, 14, 14, 29, 12, 10),
+        sheet=PartyMemberSheet(classes=[CharacterClassLevel(ClassType.WIZARD, 19)]),
+    )
+
+    apply_member_progression_rule(member, ProgressionChoiceId.WIZARD_EPIC_BOON, ["boonOfSkill"])
+    assert all(member.sheet.skills[enum_key(skill)] == ProficiencyLevel.PROFICIENT for skill in SkillType)
+
+    expertise = progression_rule(
+        ProgressionChoiceId.FEAT_EXPERTISE,
+        member.sheet.classes,
+        member.sheet.skills,
+        member.sheet.progressionGrants,
+    )
+    assert expertise is not None
+    assert SkillType.ARCANA in expertise.choices[0].candidates
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_EXPERTISE, [enum_key(SkillType.ARCANA)])
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE, ["intelligence"])
+    assert member.sheet.skills[enum_key(SkillType.ARCANA)] == ProficiencyLevel.EXPERTISE
+    assert member.abilityScores.intelligence == 30
+
+    set_member_class_levels(member, [CharacterClassLevel(ClassType.WIZARD, 18)])
+    assert not member.sheet.skills
+    assert member.abilityScores.intelligence == 29
+
+
+def test_boon_of_speed_uses_modifier_and_ability_choice() -> None:
+    member = PartyMemberConfig(
+        id="fighter", name="Fighter",
+        abilityScores=AbilityScores(29, 12, 14, 10, 10, 10),
+        sheet=PartyMemberSheet(classes=[CharacterClassLevel(ClassType.FIGHTER, 19)]),
+    )
+
+    apply_member_progression_rule(member, ProgressionChoiceId.FIGHTER_EPIC_BOON, ["boonOfSpeed"])
+    apply_member_progression_rule(member, ProgressionChoiceId.FEAT_ABILITY_SCORE_INCREASE, ["strength"])
+    assert member.abilityScores.strength == 30
+    assert feat_speed_bonus(member.sheet.feats) == 30
+    assert GENERAL_FEATS[GeneralFeatType.BOON_OF_SPEED].actionDeclarations[0].activation == TimeEconomy.BONUS_ACTION
+
+    set_member_class_levels(member, [CharacterClassLevel(ClassType.FIGHTER, 18)])
+    assert member.abilityScores.strength == 29
+    assert feat_speed_bonus(member.sheet.feats) == 0
+
+
 def test_bonus_fighting_style_is_reconciled_by_acquisition_level() -> None:
     member = PartyMemberConfig(
         id="champion",

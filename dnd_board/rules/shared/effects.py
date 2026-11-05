@@ -9,6 +9,7 @@ from dnd_board.character_sheet import (
     ActivationTiming,
     AbilityType,
     ArmorCategory,
+    AttackActionType,
     AttackDamageAbilityModifierMode,
     AttackKind,
     AttackRangeType,
@@ -453,6 +454,11 @@ class SavingThrowAbilityPredicate:
 
 
 @dataclass(frozen=True)
+class SuccessfulSaveForHalfDamagePredicate:
+    pass
+
+
+@dataclass(frozen=True)
 class CalculationAbilityPredicate:
     abilities: list[AbilityType]
 
@@ -480,6 +486,11 @@ class OwnerWieldsWeaponWithPropertyPredicate:
 @dataclass(frozen=True)
 class PendingDamageIsWeaponDicePredicate:
     pass
+
+
+@dataclass(frozen=True)
+class PendingDamageDieAtMostPredicate:
+    maximum: int
 
 
 @dataclass(frozen=True)
@@ -511,6 +522,11 @@ class SourceWeaponCategoryPredicate:
 @dataclass(frozen=True)
 class SourceAttackKindPredicate:
     attackKind: AttackKind
+
+
+@dataclass(frozen=True)
+class SourceAttackTypePredicate:
+    attackType: AttackActionType
 
 
 @dataclass(frozen=True)
@@ -614,18 +630,21 @@ Predicate: TypeAlias = (
     | TargetHasCreatureTypePredicate
     | TargetHasAnyCreatureTypePredicate
     | SavingThrowAbilityPredicate
+    | SuccessfulSaveForHalfDamagePredicate
     | CalculationAbilityPredicate
     | RollOutcomePredicate
     | WeaponHasPropertyPredicate
     | WeaponHasAnyPropertyPredicate
     | OwnerWieldsWeaponWithPropertyPredicate
     | PendingDamageIsWeaponDicePredicate
+    | PendingDamageDieAtMostPredicate
     | PendingDamageTypePredicate
     | OwnerAbilityScoreAtLeastPredicate
     | OwnerWearsArmorCategoryPredicate
     | SourceAttackRangePredicate
     | SourceWeaponCategoryPredicate
     | SourceAttackKindPredicate
+    | SourceAttackTypePredicate
     | SourceDamageAbilityModifierPredicate
     | SourceWeaponEquipmentPredicate
     | OwnerWieldsExactlyOneOneHandedWeaponPredicate
@@ -771,6 +790,7 @@ class ResolutionEventType(Enum):
     ATTACK_ROLLED = auto()
     SAVE_ROLLED = auto()
     CHECK_ROLLED = auto()
+    CHOICE_PENDING = auto()
     DAMAGE_PENDING = auto()
     DAMAGE_APPLIED = auto()
     CONDITION_PENDING = auto()
@@ -1412,9 +1432,14 @@ class InstallOngoingEffect:
     effect: OngoingEffect
 
 
+class EffectChoiceOption(Enum):
+    PUSH = "Push 5 feet"
+    PRONE = "Knock Prone"
+
+
 @dataclass(frozen=True)
 class EffectChoice:
-    option: DamageType | ConditionType | WeaponDamageChoice
+    option: DamageType | ConditionType | WeaponDamageChoice | EffectChoiceOption
     effect: EffectNode
 
 
@@ -1423,10 +1448,13 @@ class ChoiceEffect:
     choices: list[EffectChoice]
     minimum: int = 1
     maximum: int = 1
+    label: str = ""
 
     def __post_init__(self) -> None:
         if self.minimum < 0 or self.maximum < self.minimum or self.maximum > len(self.choices):
             raise ValueError("Choice bounds must fit the available choices")
+        if len({choice.option for choice in self.choices}) != len(self.choices):
+            raise ValueError("Effect choice options must be unique")
 
 
 EffectNode: TypeAlias = (
@@ -1530,6 +1558,7 @@ class EffectExecutionFrame:
 class ResolutionEventResponse:
     pendingEffect: EffectNode | None = None
     rollOutcome: RollOutcome | None = None
+    selectedChoices: tuple[Enum, ...] = ()
     additionalEffects: list[EffectNode] = field(default_factory=list)
     boundEffects: list[BoundEffect] = field(default_factory=list)
 
@@ -1635,6 +1664,23 @@ class EffectEngine:
                 ResolutionEventType.CHECK_ROLLED,
             }:
                 response = ResolutionEventResponse(rollOutcome=self.interactions.after_roll(advanced))
+            elif advanced.eventType == ResolutionEventType.CHOICE_PENDING:
+                choice = advanced.pendingEffect
+                if not isinstance(choice, ChoiceEffect):
+                    raise ValueError("Choice event does not contain choices")
+                selected_effects = context.choose_effects(choice)
+                remaining = list(enumerate(choice.choices))
+                selected_options: list[Enum] = []
+                for selected_effect in selected_effects:
+                    match = next(
+                        ((index, option) for index, option in remaining if option.effect == selected_effect),
+                        None,
+                    )
+                    if match is None:
+                        raise ValueError("Selected effect is not an available choice")
+                    selected_options.append(match[1].option)
+                    remaining.remove(match)
+                response = ResolutionEventResponse(selectedChoices=tuple(selected_options))
             elif advanced.eventType in {
                 ResolutionEventType.DAMAGE_APPLIED,
                 ResolutionEventType.CONDITION_APPLIED,
@@ -1808,6 +1854,21 @@ class EffectEngine:
                 raise ValueError("A roll event response requires an outcome")
             frame.rollOutcome = response.rollOutcome
             context.record_roll_outcome(frame.effectNodeId, frame.effect, response.rollOutcome)
+        elif event.eventType == ResolutionEventType.CHOICE_PENDING:
+            effect = frame.effect
+            if not isinstance(effect, ChoiceEffect):
+                raise ValueError("Choice event does not reference a choice effect")
+            selected = response.selectedChoices
+            available = {choice.option: (index, choice.effect) for index, choice in enumerate(effect.choices)}
+            if len(selected) != len(set(selected)) or not effect.minimum <= len(selected) <= effect.maximum:
+                raise ValueError("Invalid number of effect choices")
+            if any(option not in available for option in selected):
+                raise ValueError("Effect choice is not available")
+            self._set_children(
+                frame,
+                [available[option][1] for option in selected],
+                [available[option][0] for option in selected],
+            )
         elif frame.phase == EffectFramePhase.EXECUTE:
             if response.pendingEffect is None:
                 if len(execution.stack) == 1:
@@ -1907,7 +1968,15 @@ class EffectEngine:
             context.install_ongoing_effect(frame.effectNodeId, effect.effect)
             frame.phase = EffectFramePhase.COMMITTED
         elif isinstance(effect, ChoiceEffect):
-            self._set_children(frame, context.choose_effects(effect))
+            frame.phase = EffectFramePhase.SELECT_BRANCH
+            return ResolutionEvent(
+                execution.resolutionId,
+                ResolutionEventType.CHOICE_PENDING,
+                effect,
+                effectNodeId=frame.effectNodeId,
+                bindings=frame.bindings,
+                dispatchSource=frame.dispatchSource,
+            )
         elif isinstance(effect, SelectWeaponEffect):
             frame.bindings = context.select_weapon(
                 frame.effectNodeId,
@@ -2258,6 +2327,7 @@ def effect_model_types() -> list[type[object]]:
         DifficultyClass,
         DifficultyClassType,
         EffectChoice,
+        EffectChoiceOption,
         EffectDuration,
         EffectDurationType,
         EffectExecutionResult,
@@ -2317,8 +2387,10 @@ def effect_model_types() -> list[type[object]]:
         PendingEffectAddsConditionPredicate,
         PendingDamageModificationType,
         PendingDamageIsWeaponDicePredicate,
+        PendingDamageDieAtMostPredicate,
         PendingDamageTypePredicate,
         PendingDamageRerollSelection,
+        SuccessfulSaveForHalfDamagePredicate,
         PendingResolution,
         PendingResolutionStatus,
         PreventCondition,
@@ -2350,6 +2422,7 @@ def effect_model_types() -> list[type[object]]:
         SourceHasConditionPredicate,
         SourceAttackCriticalPredicate,
         SourceAttackKindPredicate,
+        SourceAttackTypePredicate,
         SourceAttackRangePredicate,
         SourceDamageAbilityModifierPredicate,
         SourceWeaponEquipmentPredicate,

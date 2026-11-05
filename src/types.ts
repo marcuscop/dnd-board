@@ -1080,6 +1080,7 @@ export type ResolutionInterceptorPrompt = {
   declineLabel: string;
   createdAt: number;
   interaction: unknown;
+  choiceOptions?: { id: string; label: string }[];
   ignoredInterceptors: string[];
   responseRolls?: RollPayload[];
   continuation?: "resolveAgainstTarget" | "storeRoll";

@@ -177,6 +177,7 @@ VARIABLE_COST = EquipmentCost(EquipmentCostType.VARIABLE)
 class WeaponTrainingCategory(Enum):
     SIMPLE = "Simple"
     MARTIAL = "Martial"
+    IMPROVISED = "Improvised"
 
 
 @dataclass(frozen=True)
@@ -192,7 +193,7 @@ class WeaponTrainingProfile:
         )
 
     def permits_category(self, category: WeaponTrainingCategory) -> bool:
-        return any(
+        return category in self.categories or any(
             definition.weaponTraining == category and self.permits(definition)
             for definition in EQUIPMENT_DEFINITIONS.values()
         )

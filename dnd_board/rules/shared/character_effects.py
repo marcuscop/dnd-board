@@ -124,6 +124,7 @@ from dnd_board.rules.shared.effects import (
     SourceHasComponentPredicate,
     SourceHasConditionPredicate,
     SourceAttackKindPredicate,
+    SourceAttackTypePredicate,
     SourceAttackCriticalPredicate,
     SourceAttackRangePredicate,
     SourceDamageAbilityModifierPredicate,
@@ -135,9 +136,11 @@ from dnd_board.rules.shared.effects import (
     SourceUsesTimeEconomyPredicate,
     SourceWeaponCategoryPredicate,
     SavingThrowAbilityPredicate,
+    SuccessfulSaveForHalfDamagePredicate,
     RollOutcomePredicate,
     RandomChancePredicate,
     PendingDamageIsWeaponDicePredicate,
+    PendingDamageDieAtMostPredicate,
     PendingDamageTypePredicate,
     WeaponHasPropertyPredicate,
     WeaponHasAnyPropertyPredicate,
@@ -777,6 +780,13 @@ class CharacterEffectExecutionContext:
                 ability = self.lastSavingThrow.ability if self.lastSavingThrow is not None else self.roll.damageSavingThrow
                 if ability not in predicate.abilities:
                     return False
+            elif isinstance(predicate, SuccessfulSaveForHalfDamagePredicate):
+                if not (
+                    self.roll.damageSavingThrow == AbilityType.DEXTERITY
+                    and self.roll.damageSaveSucceeded is True
+                    and self.roll.damageSaveOutcome == SpellSaveOutcome.HALF_DAMAGE
+                ):
+                    return False
             elif isinstance(predicate, CalculationAbilityPredicate):
                 ability = self.lastSavingThrow.ability if self.lastSavingThrow is not None else self.roll.damageSavingThrow
                 if ability not in predicate.abilities:
@@ -828,6 +838,10 @@ class CharacterEffectExecutionContext:
             elif isinstance(predicate, SourceAttackKindPredicate):
                 source_attack = self.source_attack()
                 if source_attack is None or source_attack.attackKind != predicate.attackKind:
+                    return False
+            elif isinstance(predicate, SourceAttackTypePredicate):
+                source_attack = self.source_attack()
+                if source_attack is None or source_attack.attackType != predicate.attackType:
                     return False
             elif isinstance(predicate, SourceDamageAbilityModifierPredicate):
                 source_attack = self.source_attack()
@@ -901,6 +915,14 @@ class CharacterEffectExecutionContext:
                 if not any(
                     component.kind == character_sheet.DamageComponentKind.WEAPON_DICE
                     for component in (self.roll.damageComponents or [])
+                ):
+                    return False
+            elif isinstance(predicate, PendingDamageDieAtMostPredicate):
+                if not any(
+                    die <= predicate.maximum
+                    for component in (self.roll.damageComponents or [])
+                    if component.kind == character_sheet.DamageComponentKind.WEAPON_DICE
+                    for die in component.dice
                 ):
                     return False
             elif isinstance(predicate, OwnerWieldsWeaponOrShieldPredicate):

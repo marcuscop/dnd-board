@@ -5,6 +5,8 @@ from enum import Enum, auto
 
 class RuleSource(Enum):
     PLAYERS_HANDBOOK_2024 = auto()
+    PLAYERS_HANDBOOK_2014 = auto()
+    ARCANA_UNLEASHED = auto()
     SYSTEM_REFERENCE_DOCUMENT = auto()
     FIZBANS_TREASURY_OF_DRAGONS = auto()
     GLORY_OF_THE_GIANTS = auto()
@@ -21,6 +23,8 @@ class RuleSource(Enum):
 def rule_source_label(source: RuleSource) -> str:
     labels = {
         RuleSource.PLAYERS_HANDBOOK_2024: "Player's Handbook (2024)",
+        RuleSource.PLAYERS_HANDBOOK_2014: "Player's Handbook (2014)",
+        RuleSource.ARCANA_UNLEASHED: "Arcana Unleashed",
         RuleSource.SYSTEM_REFERENCE_DOCUMENT: "System Reference Document",
         RuleSource.FIZBANS_TREASURY_OF_DRAGONS: "Fizban's Treasury of Dragons",
         RuleSource.GLORY_OF_THE_GIANTS: "Glory of the Giants",
@@ -37,4 +41,4 @@ def rule_source_label(source: RuleSource) -> str:
 
 
 def is_legacy_source(source: RuleSource) -> bool:
-    return source == RuleSource.LEGACY
+    return source in (RuleSource.LEGACY, RuleSource.PLAYERS_HANDBOOK_2014)

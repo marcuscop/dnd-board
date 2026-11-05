@@ -24,7 +24,7 @@ def prepare_rest(
     for source in sheets:
         if source.kind != TokenKind.CHARACTER or source.hp.current < 1:
             continue
-        for feat in sorted(selected_general_feat_types(source.features), key=lambda value: value.value):
+        for feat in sorted(selected_general_feat_types(source.features), key=enum_key):
             for grant in GENERAL_FEATS[feat].restGrants:
                 if trigger not in grant.triggers or not rest_grant_requirements_met(grant, source.proficiencies):
                     continue

@@ -3,7 +3,7 @@ import type { ResolutionInterceptorPrompt } from "../types";
 type ResolutionPromptPanelProps = {
   isDm: boolean;
   prompts: ResolutionInterceptorPrompt[];
-  onRespond: (prompt: ResolutionInterceptorPrompt, use: boolean) => void;
+  onRespond: (prompt: ResolutionInterceptorPrompt, use: boolean, choice?: string) => void;
 };
 
 export function ResolutionPromptPanel({ isDm, prompts, onRespond }: ResolutionPromptPanelProps) {
@@ -24,8 +24,14 @@ export function ResolutionPromptPanel({ isDm, prompts, onRespond }: ResolutionPr
               <p>{prompt.description}</p>
             </div>
             <div className="resolution-prompt-actions">
-              <button onClick={() => onRespond(prompt, true)}>{prompt.useLabel}</button>
-              <button onClick={() => onRespond(prompt, false)}>{prompt.declineLabel}</button>
+              {prompt.choiceOptions ? prompt.choiceOptions.map((option) => (
+                <button key={option.id} onClick={() => onRespond(prompt, true, option.id)}>{option.label}</button>
+              )) : (
+                <>
+                  <button onClick={() => onRespond(prompt, true)}>{prompt.useLabel}</button>
+                  <button onClick={() => onRespond(prompt, false)}>{prompt.declineLabel}</button>
+                </>
+              )}
             </div>
           </article>
         ))}

@@ -149,10 +149,10 @@ export function useSheetActions(options: SheetActionOptions) {
     catch (error) { fail(error); }
   }, [fail, playerKey, replaceSheet, sheetPath]);
 
-  const respondToResolutionPrompt = useCallback(async (prompt: ResolutionInterceptorPrompt, use: boolean) => {
+  const respondToResolutionPrompt = useCallback(async (prompt: ResolutionInterceptorPrompt, use: boolean, choice?: string) => {
     try {
       const body = await postJson<{ prompt?: ResolutionInterceptorPrompt; resolution?: RollLogEntry["resolution"]; logEntry?: RollLogEntry }>(
-        `/api/rooms/${encodeURIComponent(roomId)}/resolution-prompts/${encodeURIComponent(prompt.id)}/respond`, { playerKey, use }
+        `/api/rooms/${encodeURIComponent(roomId)}/resolution-prompts/${encodeURIComponent(prompt.id)}/respond`, { playerKey, use, ...(choice ? { choice } : {}) }
       );
       setResolutionPrompts((current) => current.filter((candidate) => candidate.id !== prompt.id));
       if (body.prompt) setResolutionPrompts((current) => upsertResolutionPrompt(current, body.prompt!));
